@@ -176,7 +176,7 @@ frappe.provide("resto.stock_usage");
         fields: [
           { fieldtype: 'Section Break', label: '' },
 
-          { fieldname: 'sales_order', label: 'Sales Order', fieldtype: 'Link', options: 'Sales Order', reqd: 1,
+          { fieldname: 'pos_closing_entry', label: 'POS Closing Entry', fieldtype: 'Link', options: 'POS Closing Entry', reqd: 1,
             get_query: () => ({ filters: { docstatus: 1 } })
           },
           { fieldtype: 'Column Break' },
@@ -189,7 +189,7 @@ frappe.provide("resto.stock_usage");
 
           { fieldname: 'source_warehouse', label: 'Source Warehouse', fieldtype: 'Link', options: 'Warehouse', reqd: 1 },
           { fieldtype: 'Column Break' },
-          { fieldname: 'btn_load', fieldtype: 'Button', label: 'Get Items', primary: 1, click: () => me.load_from_so() }
+          { fieldname: 'btn_load', fieldtype: 'Button', label: 'Get Items', primary: 1, click: () => me.load_from_pos() }
         ]
       });
       this.fg.make();
@@ -393,20 +393,20 @@ frappe.provide("resto.stock_usage");
     }
 
     // ===== LOAD =====
-    async load_from_so() {
-      const sales_order = this.fg.get_value('sales_order');
+    async load_from_pos() {
+      const pos_closing_entry = this.fg.get_value('pos_closing_entry');
       const company = this.fg.get_value('company');
       const wh = this.fg.get_value('source_warehouse');
-      if (!sales_order || !company || !wh) {
-        frappe.msgprint(__('Please fill Sales Order, Company, and Source Warehouse.'));
+      if (!pos_closing_entry || !company || !wh) {
+        frappe.msgprint(__('Please fill POS Closing Entry, Company, and Source Warehouse.'));
         return;
       }
 
       frappe.dom.freeze(__('Loading...'));
       try {
         const r = await frappe.call({
-          method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_so_breakdown',
-          args: { sales_order, company }
+          method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
+          args: { pos_closing_entry, company }
         });
         const items = (r.message?.items) || [];
 
@@ -635,15 +635,15 @@ frappe.provide("resto.stock_usage");
     // ===== RECALC =====
     async recalc_group(idx) {
       const g = this.groups[idx];
-      const so = this.fg.get_value('sales_order');
+      const pce = this.fg.get_value('pos_closing_entry');
       const company = this.fg.get_value('company');
-      if (!so || !company) return;
+      if (!pce || !company) return;
 
       const r = await frappe.call({
-        method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_so_breakdown',
-        args: { sales_order: so, company }
+        method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
+        args: { pos_closing_entry: pce, company }
       });
-      const found = (r.message.items || []).find(x => x.so_item_name === g.meta.so_item_name);
+      const found = (r.message.items || []).find(x => x.item_code === g.meta.item_code);
       if (!found) {
         // Still recalculate cost for current rows before updating summary
         // Recompute Cost from current Req Qty × Unit Cost
@@ -763,7 +763,6 @@ frappe.provide("resto.stock_usage");
             remarks: getCellTxt(dt, i, COL.remarks, ''),
             unit_cost: flt(getCellTxt(dt, i, COL.unit_cost, 0)),
             cost: flt(getCellTxt(dt, i, COL.cost, 0)),
-            so_item_name: g.meta.so_item_name,
             parent_item_code: g.meta.item_code
           });
         }
@@ -772,14 +771,14 @@ frappe.provide("resto.stock_usage");
     }
 
     async submit_se() {
-      const sales_order = this.fg.get_value('sales_order');
+      const pos_closing_entry = this.fg.get_value('pos_closing_entry');
       const company = this.fg.get_value('company');
       const posting_date = this.fg.get_value('posting_date');
       const source_warehouse = this.fg.get_value('source_warehouse');
       const stock_entry_type = 'Material Issue'; // default since field removed
       const remarks = '';
 
-      if (!sales_order || !company || !posting_date || !source_warehouse) {
+      if (!pos_closing_entry || !company || !posting_date || !source_warehouse) {
         frappe.msgprint(__('Please complete all required fields.'));
         return;
       }
@@ -790,13 +789,13 @@ frappe.provide("resto.stock_usage");
         return;
       }
 
-      frappe.confirm(__('Generate Stock Entry for {0}?', [frappe.utils.escape_html(sales_order)]), async () => {
+      frappe.confirm(__('Generate Stock Entry for {0}?', [frappe.utils.escape_html(pos_closing_entry)]), async () => {
         frappe.dom.freeze(__('Creating Stock Entry...'));
         try {
           const resp = await frappe.call({
-            method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_stock_entry_from_usage',
+            method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_stock_entry_from_pos_usage',
             args: {
-              sales_order, company, posting_date, stock_entry_type,
+              pos_closing_entry, company, posting_date, stock_entry_type,
               source_warehouse, remarks, items
             }
           });

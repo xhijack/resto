@@ -5,7 +5,94 @@ from erpnext.manufacturing.doctype.bom.bom import get_bom_items_as_dict
 
 # ---------- Helpers ----------
 
+
+# ---------- Resto Menu Mapping Helpers ----------
+
+def _get_item_name_uom(item_code: str) -> Tuple[str, str]:
+    """Get Item.item_name and stock_uom for convenience."""
+    if not item_code:
+        return ("", "")
+    row = frappe.db.get_value("Item", item_code, ["item_name", "stock_uom"], as_dict=True) or {}
+    return (row.get("item_name") or "", row.get("stock_uom") or "")
+
+
+def _get_menu_by_sell_item(sell_item_code: str) -> Optional[Dict]:
+    """Return Resto Menu doc (as dict) matched by sell_item. If field `active` exists, require active=1."""
+    if not sell_item_code:
+        return None
+    # Build filters dynamically based on schema
+    filters = {"sell_item": sell_item_code}
+    try:
+        meta = frappe.get_meta("Resto Menu")
+        if getattr(meta, "fields", None):
+            if any(df.fieldname == "active" for df in meta.fields):
+                filters["active"] = 1
+    except Exception:
+        pass
+
+    menu_name = frappe.db.get_value("Resto Menu", filters, "name")
+    if not menu_name:
+        return None
+    return frappe.db.get_value(
+        "Resto Menu",
+        menu_name,
+        [
+            "name",
+            "sell_item",
+            "recipe_item",
+            "default_bom",
+            "menu_category"
+        ],
+        as_dict=True,
+    )
+
+
+def _resolve_fg_and_bom_for_sale(sold_item_code: str, company: str) -> Tuple[str, str, str, Optional[str]]:
+    """
+    From a *sold* item (usually non-stock sell_item), resolve the *FG* item used for
+    consumption posting and its BOM.
+    Returns: (fg_item_code, fg_item_name, fg_uom, bom_no)
+    - Prefer Resto Menu mapping (recipe_item + default_bom)
+    - Fallback to using sold item itself and `_get_item_default_bom`.
+    """
+    menu = _get_menu_by_sell_item(sold_item_code)
+    if menu and menu.get("recipe_item"):
+        fg_code = menu["recipe_item"]
+        fg_name, fg_uom = _get_item_name_uom(fg_code)
+        bom_no = menu.get("default_bom") or _get_item_default_bom(fg_code, company)
+        return fg_code, (fg_name or menu.get("menu_name") or fg_code), fg_uom, bom_no
+
+    # Fallback: use sold item as FG
+    fg_code = sold_item_code
+    fg_name, fg_uom = _get_item_name_uom(fg_code)
+    bom_no = _get_item_default_bom(fg_code, company)
+    return fg_code, fg_name, fg_uom, bom_no
+
+
 def _get_item_default_bom(item_code: str, company: str) -> Optional[str]:
+    """
+    Resolve default BOM for an item with these priorities:
+    1) If there is an active Resto Menu where this item is the `recipe_item`, use its `default_bom`.
+    2) Item's default BOM for the given company (is_default=1 & is_active=1)
+    3) Latest active BOM for the item in the company
+    """
+    if not item_code:
+        return None
+
+    # 1) Resto Menu mapping (recipe_item -> default_bom)
+    rm_filters = {"recipe_item": item_code}
+    try:
+        meta = frappe.get_meta("Resto Menu")
+        if getattr(meta, "fields", None):
+            if any(df.fieldname == "active" for df in meta.fields):
+                rm_filters["active"] = 1
+    except Exception:
+        pass
+    rm_bom = frappe.db.get_value("Resto Menu", rm_filters, "default_bom")
+    if rm_bom:
+        return rm_bom
+
+    # 2) Item's default BOM
     bom = frappe.db.get_value(
         "BOM",
         {"item": item_code, "is_default": 1, "is_active": 1, "company": company},
@@ -44,6 +131,7 @@ def _get_item_selling_rate(item_code: str, price_list: Optional[str]) -> float:
         price = frappe.db.get_value("Item Price", {"item_code": item_code, "selling": 1}, "price_list_rate")
     return flt(price or 0)
 
+
 def _norm(v) -> str:
     """Normalize any scalar-ish input to clean string."""
     if v is None:
@@ -57,6 +145,57 @@ def _norm(v) -> str:
             if k in v and isinstance(v[k], (str, int, float)):
                 return frappe.as_unicode(v[k]).strip()
     return frappe.as_unicode(v).strip()
+
+# ---------- POS Closing Entry Helpers ----------
+
+def _extract_pos_invoices_from_pce(pce_doc) -> List[str]:
+    """
+    Try to extract Sales Invoice / POS Invoice names from a POS Closing Entry document.
+    Compatible with multiple ERPNext versions/child-table schemas.
+    Returns a list of invoice names.
+    """
+    invs: List[str] = []
+    if not pce_doc:
+        return invs
+
+    # 1) Look through child tables for likely link fields
+    try:
+        for tf in (pce_doc.meta.get_table_fields() or []):
+            for ch in (pce_doc.get(tf.fieldname) or []):
+                for key in ("sales_invoice", "invoice", "pos_invoice", "si_name", "name"):
+                    val = ch.get(key)
+                    if isinstance(val, str) and val:
+                        invs.append(val)
+    except Exception:
+        pass
+
+    invs = [x for x in invs if isinstance(x, str) and x]
+
+    # 2) Keep only those that exist as Sales Invoice or POS Invoice
+    filtered: List[str] = []
+    for x in invs:
+        if frappe.db.exists("Sales Invoice", x) or frappe.db.exists("POS Invoice", x):
+            filtered.append(x)
+
+    # 3) If nothing found, fallback by date range and flags
+    if not filtered:
+        try:
+            start = getattr(pce_doc, "period_start_date", None) or getattr(pce_doc, "start_date", None)
+            end   = getattr(pce_doc, "period_end_date", None) or getattr(pce_doc, "end_date", None)
+            pos_profile = getattr(pce_doc, "pos_profile", None)
+            filters = {"docstatus": 1, "is_pos": 1}
+            if start and end:
+                filters["posting_date"] = ["between", [getdate(start), getdate(end)]]
+            if pos_profile:
+                filters["pos_profile"] = pos_profile
+            if getattr(pce_doc, "company", None):
+                filters["company"] = pce_doc.company
+            # Sales Invoices covering POS
+            filtered = [r.name for r in frappe.get_all("Sales Invoice", filters=filters, pluck="name")]
+        except Exception:
+            pass
+
+    return list(dict.fromkeys(filtered))  # de-dup while keeping order
 
 # ---------- BOM Tree Builder ----------
 
@@ -103,7 +242,9 @@ def get_so_breakdown(sales_order: str, company: str) -> Dict[str, List[Dict]]:
     out_items: List[Dict] = []
 
     for it in so.items:
-        bom_no = it.get("bom_no") or it.get("bom") or _get_item_default_bom(it.item_code, company)
+        # Resolve FG & BOM using Resto Menu mapping if applicable
+        fg_code, fg_name, fg_uom, bom_no = _resolve_fg_and_bom_for_sale(it.item_code, company)
+
         selling_rate = flt(it.get("rate")) or _get_item_selling_rate(it.item_code, selling_price_list)
         selling_amount = selling_rate * flt(it.get("qty") or 0)
 
@@ -134,10 +275,10 @@ def get_so_breakdown(sales_order: str, company: str) -> Dict[str, List[Dict]]:
 
         out_items.append({
             "so_item_name": it.name,
-            "item_code": it.item_code,
-            "item_name": it.item_name,
+            "item_code": fg_code,
+            "item_name": fg_name or it.item_name,
             "qty": flt(it.qty),
-            "stock_uom": it.stock_uom,
+            "stock_uom": fg_uom or it.stock_uom,
             "bom_no": bom_no,
             "selling_rate": selling_rate,
             "selling_amount": selling_amount,
@@ -146,6 +287,173 @@ def get_so_breakdown(sales_order: str, company: str) -> Dict[str, List[Dict]]:
         })
 
     return {"items": out_items}
+
+
+# ---------- POS Closing Entry Public API ----------
+
+@frappe.whitelist()
+def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Dict]]:
+    """
+    Build aggregated FG list from all POS invoices within a POS Closing Entry, then derive
+    RM breakdown from the default/selected BOM per FG item.
+    Returns a shape compatible with the frontend: { items: [ { item_code, item_name, qty, stock_uom,
+      bom_no, selling_rate, selling_amount, rm_items: [...], rm_tree: [...] } ] }
+    """
+    if not pos_closing_entry:
+        frappe.throw("POS Closing Entry is required")
+
+    pce = frappe.get_doc("POS Closing Entry", pos_closing_entry)
+
+    # 1) Collect invoice names (Sales Invoice or POS Invoice)
+    inv_names = _extract_pos_invoices_from_pce(pce)
+    if not inv_names:
+        return {"items": []}
+
+    # 2) Aggregate by item_code across all invoices
+    agg: Dict[str, Dict] = {}
+
+    def _add_row(code: str, name: str, uom: str, qty: float, amount: float):
+        if not code:
+            return
+        row = agg.setdefault(code, {
+            "item_code": code,
+            "item_name": name,
+            "stock_uom": uom,
+            "qty": 0.0,
+            "selling_amount": 0.0,
+            "bom_no": None,
+        })
+        row["qty"] += flt(qty)
+        row["selling_amount"] += flt(amount)
+        if not row.get("item_name") and name:
+            row["item_name"] = name
+        if not row.get("stock_uom") and uom:
+            row["stock_uom"] = uom
+
+    # Prefer Sales Invoice (modern POS), fallback to POS Invoice
+    for inv in inv_names:
+        if frappe.db.exists("Sales Invoice", inv):
+            si = frappe.get_doc("Sales Invoice", inv)
+            for it in (si.items or []):
+                fg_code, fg_name, fg_uom, bom_no = _resolve_fg_and_bom_for_sale(it.item_code, pce.company or company)
+                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0))
+        elif frappe.db.exists("POS Invoice", inv):
+            pi = frappe.get_doc("POS Invoice", inv)
+            for it in (pi.items or []):
+                fg_code, fg_name, fg_uom, bom_no = _resolve_fg_and_bom_for_sale(it.item_code, pce.company or company)
+                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0))
+
+    out_items: List[Dict] = []
+    for code, base in agg.items():
+        qty = flt(base.get("qty") or 0)
+        if qty <= 0:
+            continue
+        amount = flt(base.get("selling_amount") or 0)
+        selling_rate = (amount / qty) if qty else 0
+
+        # Resolve BOM for the FG code (recipe_item) or fallback
+        bom_no = _get_item_default_bom(code, company)
+
+        # Flat list for grid
+        rm_list: List[Dict] = []
+        if bom_no and qty:
+            bom_items = get_bom_items_as_dict(bom=bom_no, company=company, qty=qty, fetch_exploded=1)
+            for bi in bom_items.values():
+                ic = bi.get("item_code")
+                if not ic:
+                    continue
+                uom = bi.get("stock_uom") or bi.get("uom")
+                req = flt(bi.get("qty") or 0)
+                unit_cost = _get_item_unit_cost(ic)
+                rm_list.append({
+                    "item_code": ic,
+                    "item_name": bi.get("item_name"),
+                    "stock_uom": uom,
+                    "required_qty": req,
+                    "unit_cost": unit_cost,
+                    "cost": unit_cost * req,
+                })
+
+        rm_tree: List[Dict] = _build_bom_tree(bom_no, qty) if (bom_no and qty) else []
+
+        out_items.append({
+            "item_code": code,
+            "item_name": base.get("item_name"),
+            "qty": qty,
+            "stock_uom": base.get("stock_uom"),
+            "bom_no": bom_no,
+            "selling_rate": selling_rate,
+            "selling_amount": amount,
+            "rm_items": rm_list,
+            "rm_tree": rm_tree,
+        })
+
+    return {"items": out_items}
+
+@frappe.whitelist()
+def create_stock_entry_from_pos_usage(
+    pos_closing_entry: str,
+    company: str,
+    posting_date: Optional[str] = None,
+    stock_entry_type: str = "Material Issue",
+    source_warehouse: Optional[str] = None,
+    target_warehouse: Optional[str] = None,
+    remarks: Optional[str] = None,
+    items: Union[List[Dict], str, None] = None,
+) -> str:
+    """
+    Create & submit Stock Entry from edited RM payload, linked to a POS Closing Entry context.
+    items: [{ item_code, qty, stock_uom, warehouse, remarks, ... }]
+    """
+    if isinstance(items, str):
+        try:
+            items = frappe.parse_json(items)
+        except Exception:
+            items = []
+
+    if not items:
+        frappe.throw("No items to create Stock Entry.")
+    if not source_warehouse:
+        frappe.throw("Source Warehouse is required.")
+
+    posting_date = posting_date or nowdate()
+
+    se = frappe.new_doc("Stock Entry")
+    se.company = company
+    se.stock_entry_type = stock_entry_type
+    se.posting_date = getdate(posting_date)
+    se.set_posting_time = 1
+    se.remarks = (remarks or "") + f"\nGenerated from Stock Usage Tool for POS Closing Entry {pos_closing_entry}"
+
+    for row in items:
+        qty = flt(row.get("qty"))
+        if qty <= 0:
+            continue
+
+        s_wh = row.get("warehouse") or source_warehouse
+        t_wh = None
+        if stock_entry_type in ("Material Transfer", "Material Receipt"):
+            t_wh = target_warehouse
+
+        se.append("items", {
+            "item_code": row.get("item_code"),
+            "qty": qty,
+            "uom": row.get("stock_uom"),
+            "stock_uom": row.get("stock_uom"),
+            "conversion_factor": 1,
+            "s_warehouse": s_wh if stock_entry_type in ("Material Issue", "Material Transfer") else None,
+            "t_warehouse": t_wh if stock_entry_type in ("Material Transfer", "Material Receipt") else None,
+            "allow_zero_valuation_rate": 1,
+            # No Sales Order link in POS variant
+            "description": row.get("remarks") or row.get("item_name") or "",
+        })
+
+    if not se.items:
+        frappe.throw("No valid items after validation.")
+
+    se.insert()
+    se.submit()
+    return se.name
 
 @frappe.whitelist()
 def get_available_qty(item_code: str, warehouse: str) -> float:
@@ -228,68 +536,3 @@ def get_unit_cost_bulk(item_codes: Union[List[str], str]) -> Dict[str, float]:
     for r in rows:
         out[r["name"]] = flt(r.get("valuation_rate") or r.get("last_purchase_rate") or r.get("standard_rate") or 0)
     return out
-
-@frappe.whitelist()
-def create_stock_entry_from_usage(
-    sales_order: str,
-    company: str,
-    posting_date: Optional[str] = None,
-    stock_entry_type: str = "Material Issue",
-    source_warehouse: Optional[str] = None,
-    target_warehouse: Optional[str] = None,
-    remarks: Optional[str] = None,
-    items: Union[List[Dict], str, None] = None,
-) -> str:
-    """
-    Buat & submit Stock Entry dari payload RM yang sudah diedit user.
-    items: [{ item_code, qty, stock_uom, warehouse, remarks, ... }]
-    """
-    if isinstance(items, str):
-        try:
-            items = frappe.parse_json(items)
-        except Exception:
-            items = []
-
-    if not items:
-        frappe.throw("No items to create Stock Entry.")
-    if not source_warehouse:
-        frappe.throw("Source Warehouse is required.")
-
-    posting_date = posting_date or nowdate()
-
-    se = frappe.new_doc("Stock Entry")
-    se.company = company
-    se.stock_entry_type = stock_entry_type
-    se.posting_date = getdate(posting_date)
-    se.set_posting_time = 1
-    se.remarks = (remarks or "") + f"\nGenerated from Stock Usage Tool for SO {sales_order}"
-
-    for row in items:
-        qty = flt(row.get("qty"))
-        if qty <= 0:
-            continue
-
-        s_wh = row.get("warehouse") or source_warehouse
-        t_wh = None
-        if stock_entry_type in ("Material Transfer", "Material Receipt"):
-            t_wh = target_warehouse
-
-        se.append("items", {
-            "item_code": row.get("item_code"),
-            "qty": qty,
-            "uom": row.get("stock_uom"),
-            "stock_uom": row.get("stock_uom"),
-            "conversion_factor": 1,
-            "s_warehouse": s_wh if stock_entry_type in ("Material Issue", "Material Transfer") else None,
-            "t_warehouse": t_wh if stock_entry_type in ("Material Transfer", "Material Receipt") else None,
-            "allow_zero_valuation_rate": 1,
-            "sales_order": sales_order,
-            "description": row.get("remarks") or row.get("item_name") or "",
-        })
-
-    if not se.items:
-        frappe.throw("No valid items after validation.")
-
-    se.insert()
-    se.submit()
-    return se.name
