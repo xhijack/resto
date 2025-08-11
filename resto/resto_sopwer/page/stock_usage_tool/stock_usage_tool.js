@@ -8,6 +8,8 @@ frappe.provide("resto.stock_usage");
     code: 'Item Code',
     name: 'Item Name',
     req_qty: 'Req Qty',
+    adj_qty: 'Adj Qty',
+    final_qty: 'Final Qty',
     uom: 'Stock UOM',
     avail: 'Available (WH)',
     wh: 'Warehouse',
@@ -15,12 +17,14 @@ frappe.provide("resto.stock_usage");
     unit_cost: 'Unit Cost',
     cost: 'Cost',
   };
-  // Map visible column indexes by conventional names for a datatable
+  // Map visible column indexes by conventional names for a datatable (matches dt.getCell indexes)
   function getColMap(dt){
     return {
       code: dtColIndexByName(dt, COL_N.code),
       name: dtColIndexByName(dt, COL_N.name),
       req_qty: dtColIndexByName(dt, COL_N.req_qty),
+      adj_qty: dtColIndexByName(dt, COL_N.adj_qty),
+      final_qty: dtColIndexByName(dt, COL_N.final_qty),
       uom: dtColIndexByName(dt, COL_N.uom),
       avail: dtColIndexByName(dt, COL_N.avail),
       wh: dtColIndexByName(dt, COL_N.wh),
@@ -28,6 +32,16 @@ frappe.provide("resto.stock_usage");
       unit_cost: dtColIndexByName(dt, COL_N.unit_cost),
       cost: dtColIndexByName(dt, COL_N.cost),
     };
+  }
+  // Find DATA column index by header name (exclude serial/checkbox columns)
+  function dtDataColIndexByName(dt, name){
+    const cols = dt && typeof dt.getColumns === 'function' ? dt.getColumns() : [];
+    // Filter out special columns (checkbox/rowIndex)
+    const dataCols = cols.filter(c => c && c.id !== '_checkbox' && c.id !== '_rowIndex');
+    for (let i = 0; i < dataCols.length; i++) {
+      if ((dataCols[i] && dataCols[i].name) === name) return i;
+    }
+    return -1;
   }
 
   // Safe getter for cell text value
@@ -73,13 +87,24 @@ frappe.provide("resto.stock_usage");
     return stripTags(String(v)).trim();
   }
 
-  // Safe accessor using datatable.getCell, normalized to text
+  // Safe getter for cell value: prefer getCell (visual index), fallback to data array
   function safeGetCell(dt, r, c, fallback = "") {
     try {
       if (!dt || r == null || c == null) return fallback;
-      const raw = dt.getCell?.(r, c);
-      const val = cellToText(raw);
-      return (val === undefined || val === null) ? fallback : val;
+      // Primary: use getCell which aligns with getColumns indexes (includes serial/checkbox offsets)
+      if (typeof dt.getCell === 'function') {
+        const raw = dt.getCell(r, c);
+        const val = cellToText(raw);
+        return (val === undefined || val === null) ? fallback : val;
+      }
+      // Fallback to datamanager row data (may be data-only without special columns)
+      const rowObj = dt.datamanager && typeof dt.datamanager.getRow === 'function' ? dt.datamanager.getRow(r) : null;
+      if (rowObj && Array.isArray(rowObj.data)) {
+        const raw = rowObj.data[c];
+        const val = cellToText(raw);
+        return (val === undefined || val === null) ? fallback : val;
+      }
+      return fallback;
     } catch (e) {
       return fallback;
     }
@@ -90,7 +115,8 @@ frappe.provide("resto.stock_usage");
     for (let i = 0; i < rows; i++) {
       const row = [];
       for (let j = 0; j < cols; j++) {
-        row.push(safeGetCell(dt, i, j, ""));
+        const raw = dt.getCell?.(i, j);
+        row.push(cellToText(raw));
       }
       out.push(row);
     }
@@ -127,8 +153,6 @@ frappe.provide("resto.stock_usage");
         .sut-item-head{grid-template-columns: 140px 1fr 90px 90px 110px 120px;}
       }
     </style>
-      // Remove any leftover background color for total row cells
-      // (No such line as "#sut-fg .sut-total-row .dt-cell{ background:#fff0a6 !important; }" remains)
   `;
 
   resto.stock_usage.Page = class {
@@ -158,7 +182,7 @@ frappe.provide("resto.stock_usage");
           <div class="sut-global-actions">
             <button class="btn btn-default btn-sm" id="recalc-all">Recalculate All</button>
             <button class="btn btn-default btn-sm" id="clear-all">Clear All</button>
-            <button class="btn btn-primary btn-sm" id="submit-se">Submit & Generate Stock Entry</button>
+            <button class="btn btn-primary btn-sm" id="save-pos-cons">Save POS Consumption</button>
           </div>
 
           <div id="sut-fg" class="mb-2"></div>
@@ -201,7 +225,7 @@ frappe.provide("resto.stock_usage");
     bind_global_actions() {
       this.$body.on('click', '#clear-all', () => this.clear_all());
       this.$body.on('click', '#recalc-all', () => this.recalc_all());
-      this.$body.on('click', '#submit-se', () => this.submit_se());
+      this.$body.on('click', '#save-pos-cons', () => this.save_pos_consumption());
     }
 
     // Compute FG cost/margin from DT if available; fallback to rm_items
@@ -382,10 +406,17 @@ frappe.provide("resto.stock_usage");
         // Not rendered yet: build rows from meta.rm_items and render
         const meta = me.groups[i]?.meta || me.groups[i];
         const wh = me.fg.get_value('source_warehouse');
-        const rowsRM = (meta.rm_items || []).map(x => [
-          cellToText(x.item_code), cellToText(x.item_name), flt(x.required_qty), cellToText(x.stock_uom),
-          0, cellToText(wh), '', flt(x.unit_cost), flt(x.unit_cost) * flt(x.required_qty)
-        ]);
+        const rowsRM = (meta.rm_items || []).map(x => {
+          const rq = flt(x.required_qty);
+          const adj = 0;
+          const finalq = rq + adj;
+          const uc = flt(x.unit_cost);
+          const wh2 = cellToText(wh);
+          return [
+            cellToText(x.item_code), cellToText(x.item_name), rq, adj, finalq,
+            cellToText(x.stock_uom), 0, wh2, '', uc, uc * finalq
+          ];
+        });
         me.render_item_block(meta, rowsRM, i);
         await me.bulk_update_availability_group(i);
         me.update_group_summary(i);
@@ -425,7 +456,8 @@ frappe.provide("resto.stock_usage");
         frappe.show_alert({ message: __('Loaded'), indicator: 'green' });
       } catch (e) {
         console.error(e);
-        frappe.msgprint({ title: 'Error', message: e.message || e, indicator: 'red' });
+        const msg = (e && (e.message || e._server_messages)) ? (e.message || e._server_messages) : e;
+        frappe.msgprint({ title: 'Error', message: String(msg), indicator: 'red' });
       } finally {
         frappe.dom.unfreeze();
       }
@@ -460,12 +492,14 @@ frappe.provide("resto.stock_usage");
       $block.show();
 
       // Datatable columns:
-      // 0 Item Code | 1 Item Name | 2 Req Qty | 3 Stock UOM | 4 Available | 5 Warehouse | 6 Remarks | 7 Unit Cost | 8 Cost
+      // 0 Item Code | 1 Item Name | 2 Req Qty | 3 Adj Qty | 4 Final Qty | 5 UOM | 6 Avail | 7 WH | 8 Remarks | 9 Unit Cost | 10 Cost
       const dt = new frappe.DataTable($block.find(`#sut-dt-${idx}`).get(0), {
         columns: [
           { name: COL_N.code, width: 160, editable: true },
           { name: COL_N.name, width: 220, editable: false },
           { name: COL_N.req_qty, width: 110, align: 'right', editable: true },
+          { name: COL_N.adj_qty, width: 110, align: 'right', editable: true },
+          { name: COL_N.final_qty, width: 110, align: 'right', editable: false },
           { name: COL_N.uom, width: 90, editable: false },
           { name: COL_N.avail, width: 120, align: 'right', editable: false },
           { name: COL_N.wh, width: 180, editable: true },
@@ -488,6 +522,20 @@ frappe.provide("resto.stock_usage");
             const COL = getColMap(dt);
             const get = (r, ci) => getCellTxt(dt, r, ci);
 
+            // Recalculation logic for Final Qty and Cost
+            const recalcLine = (rowIndex) => {
+              const rq = flt(get(rowIndex, COL.req_qty));
+              const adj = flt(get(rowIndex, COL.adj_qty));
+              const finalq = rq + adj;
+              dt.updateCell?.(rowIndex, COL.final_qty, finalq);
+              const uc = flt(get(rowIndex, COL.unit_cost));
+              dt.updateCell?.(rowIndex, COL.cost, finalq * uc);
+            };
+
+            if (col === COL_N.req_qty || col === COL_N.adj_qty) {
+              recalcLine(r);
+            }
+
             if (col === COL_N.code && val) {
                 console.log(`Item Code changed: ${val}`);
                 const code = cellToText(val);
@@ -502,9 +550,9 @@ frappe.provide("resto.stock_usage");
                 });
                 const unit_cost = flt(uc?.message);
                 dt.updateCell?.(r, COL.unit_cost, unit_cost);
-                // Auto compute cost on item selection using current Req Qty
-                const qty_now = flt(get(r, COL.req_qty));
-                dt.updateCell?.(r, COL.cost, qty_now * unit_cost);
+                // Auto compute cost on item selection using current Final Qty
+                const finalq_now = flt(get(r, COL.final_qty));
+                dt.updateCell?.(r, COL.cost, finalq_now * unit_cost);
             }
 
             if (col === COL_N.code || col === COL_N.wh) {
@@ -553,7 +601,7 @@ frappe.provide("resto.stock_usage");
         if (action === 'add') {
           const cur = dtToArray(dt);
           const wh = cellToText(this.fg.get_value('source_warehouse')) || '';
-          cur.push(['', '', 1, '', 0, wh, '', 0, 0]);
+          cur.push(['', '', 1, 0, 1, '', 0, wh, '', 0, 0]);
           dt.refresh(cur);
           try { dt.scrollToRow && dt.scrollToRow(cur.length - 1); } catch(e) {}
           updateRemoveState();
@@ -596,7 +644,7 @@ frappe.provide("resto.stock_usage");
       let total_qty = 0, total_cost = 0;
       const COL = getColMap(dt);
       for (let i = 0; i < n; i++) {
-        total_qty += flt(getCellTxt(dt, i, COL.req_qty, 0));
+        total_qty += flt(getCellTxt(dt, i, COL.final_qty, 0));
         total_cost += flt(getCellTxt(dt, i, COL.cost, 0));
       }
       this.$body.find(`#sut-lines-${idx}`).text(n);
@@ -646,12 +694,12 @@ frappe.provide("resto.stock_usage");
       const found = (r.message.items || []).find(x => x.item_code === g.meta.item_code);
       if (!found) {
         // Still recalculate cost for current rows before updating summary
-        // Recompute Cost from current Req Qty × Unit Cost
+        // Recompute Cost from current Final Qty × Unit Cost
         const dt = g.dt;
         const COL = getColMap(dt);
         const n = dtRowCount(dt);
         for (let i = 0; i < n; i++) {
-          const qty = flt(getCellTxt(dt, i, COL.req_qty, 0));
+          const qty = flt(getCellTxt(dt, i, COL.final_qty, 0));
           const uc  = flt(getCellTxt(dt, i, COL.unit_cost, 0));
           dt.updateCell?.(i, COL.cost, qty * uc);
         }
@@ -659,13 +707,13 @@ frappe.provide("resto.stock_usage");
         return;
       }
 
-      // Keep current DT rows intact; only recompute Cost based on edited Req Qty × Unit Cost
+      // Keep current DT rows intact; only recompute Cost based on edited Final Qty × Unit Cost
       const COL = getColMap(g.dt);
       const n = dtRowCount(g.dt);
       for (let i = 0; i < n; i++) {
-        const qty = flt(getCellTxt(g.dt, i, COL.req_qty, 0));
+        const qty = flt(getCellTxt(g.dt, i, COL.final_qty, 0));
         const uc  = flt(getCellTxt(g.dt, i, COL.unit_cost, 0));
-		console.log(`Recalculating Cost for row ${i}: Qty=${qty}, Unit Cost=${uc}`);
+        console.log(`Recalculating Cost for row ${i}: Qty=${qty}, Unit Cost=${uc}`);
         g.dt.updateCell?.(i, COL.cost, qty * uc);
       }
       await this.bulk_update_availability_group(idx);
@@ -744,75 +792,162 @@ frappe.provide("resto.stock_usage");
     }
 
     // ===== Submit =====
-    get_all_items_payload() {
-      const out = [];
+    get_payload() {
+      const rm_breakdown_map = new Map();
+      const menu_summaries = [];
       for (const g of this.groups) {
+        const meta = g.meta || {};
         const dt = g.dt;
-        const n = dtRowCount(dt);
-        const COL = getColMap(dt);
-        for (let i = 0; i < n; i++) {
-          const item_code = getCellTxt(dt, i, COL.code, '');
-          const qty = flt(getCellTxt(dt, i, COL.req_qty, 0));
-          if (!item_code || !qty) continue;
-          out.push({
-            item_code,
-            item_name: getCellTxt(dt, i, COL.name, ''),
-            qty,
-            stock_uom: getCellTxt(dt, i, COL.uom, ''),
-            warehouse: getCellTxt(dt, i, COL.wh, ''),
-            remarks: getCellTxt(dt, i, COL.remarks, ''),
-            unit_cost: flt(getCellTxt(dt, i, COL.unit_cost, 0)),
-            cost: flt(getCellTxt(dt, i, COL.cost, 0)),
-            parent_item_code: g.meta.item_code
-          });
+        let rm_value_total = 0;
+        if (dt) {
+          // Prefer data-only access from the rendered DataTable
+          const dataRows = dt.getData?.() || [];
+          const DCOL = {
+            code: dtDataColIndexByName(dt, COL_N.code),
+            name: dtDataColIndexByName(dt, COL_N.name),
+            req_qty: dtDataColIndexByName(dt, COL_N.req_qty),
+            adj_qty: dtDataColIndexByName(dt, COL_N.adj_qty),
+            final_qty: dtDataColIndexByName(dt, COL_N.final_qty),
+            uom: dtDataColIndexByName(dt, COL_N.uom),
+            unit_cost: dtDataColIndexByName(dt, COL_N.unit_cost),
+            cost: dtDataColIndexByName(dt, COL_N.cost),
+          };
+          for (let i = 0; i < dataRows.length; i++) {
+            const rowData = dataRows[i] || [];
+            const rm_item = cellToText(rowData[DCOL.code] ?? '');
+            if (!rm_item) continue;
+            const uom = cellToText(rowData[DCOL.uom] ?? '');
+            const planned = flt(cellToText(rowData[DCOL.req_qty] ?? 0));
+            const adj = flt(cellToText(rowData[DCOL.adj_qty] ?? 0));
+            const finalq = flt(cellToText(rowData[DCOL.final_qty] ?? (planned + adj)));
+            const uc = flt(cellToText(rowData[DCOL.unit_cost] ?? 0));
+            rm_value_total += (finalq * uc);
+            const key = `${rm_item}::${uom}`;
+            const ex = rm_breakdown_map.get(key) || { rm_item, uom, planned_qty: 0, adj_qty: 0, final_qty: 0, valuation_rate_snapshot: uc };
+            ex.planned_qty += planned;
+            ex.adj_qty += adj;
+            ex.final_qty += finalq;
+            if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
+            rm_breakdown_map.set(key, ex);
+          }
+        } else {
+          // Fallback: use server meta.rm_items if the user hasn't expanded/rendered the RM table yet
+          const rmItems = Array.isArray(meta.rm_items) ? meta.rm_items : [];
+          for (const x of rmItems) {
+            const rm_item = cellToText(x.item_code);
+            if (!rm_item) continue;
+            const uom = cellToText(x.stock_uom || x.uom || '');
+            const planned = flt(x.required_qty || 0);
+            const adj = 0;
+            const finalq = planned + adj;
+            const uc = flt(x.unit_cost || 0);
+            rm_value_total += (finalq * uc);
+            const key = `${rm_item}::${uom}`;
+            const ex = rm_breakdown_map.get(key) || { rm_item, uom, planned_qty: 0, adj_qty: 0, final_qty: 0, valuation_rate_snapshot: uc };
+            ex.planned_qty += planned;
+            ex.adj_qty += adj;
+            ex.final_qty += finalq;
+            if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
+            rm_breakdown_map.set(key, ex);
+          }
         }
+        menu_summaries.push({
+          menu: meta.menu || null,
+          sell_item: meta.sell_item || meta.item_code,
+          qty_sold: flt(meta.qty || 0),
+          sales_amount: flt(meta.selling_amount || 0),
+          rm_value_total,
+          margin_amount: flt(meta.selling_amount || 0) - rm_value_total,
+          category: meta.category || null,
+        });
       }
-      return out;
+      const rm_breakdown = Array.from(rm_breakdown_map.values());
+      return { menu_summaries, rm_breakdown };
     }
 
-    async submit_se() {
+    async save_pos_consumption() {
       const pos_closing_entry = this.fg.get_value('pos_closing_entry');
       const company = this.fg.get_value('company');
-      const posting_date = this.fg.get_value('posting_date');
-      const source_warehouse = this.fg.get_value('source_warehouse');
-      const stock_entry_type = 'Material Issue'; // default since field removed
-      const remarks = '';
-
-      if (!pos_closing_entry || !company || !posting_date || !source_warehouse) {
-        frappe.msgprint(__('Please complete all required fields.'));
+      const warehouse = this.fg.get_value('source_warehouse');
+      if (!pos_closing_entry || !company || !warehouse) {
+        frappe.msgprint(__('Please fill POS Closing Entry, Company, and Source Warehouse.'));
         return;
       }
-
-      const items = this.get_all_items_payload();
-      if (!items.length) {
-        frappe.msgprint(__('No raw materials to post.'));
+      if (!this.groups.length) {
+        frappe.msgprint(__('No data to save. Please load from POS Closing Entry first.'));
         return;
       }
-
-      frappe.confirm(__('Generate Stock Entry for {0}?', [frappe.utils.escape_html(pos_closing_entry)]), async () => {
-        frappe.dom.freeze(__('Creating Stock Entry...'));
+      const { menu_summaries, rm_breakdown } = this.get_payload();
+      // DEBUG: log unique RM items being validated
+      try {
+        const _all = (rm_breakdown || []).map(r => String(r.rm_item||'').trim()).filter(Boolean);
+        console.log('RM uniq items before validation:', Array.from(new Set(_all)));
+      } catch (e) {}
+      // Validate RM item codes against actual Item doctype (bulk) to avoid false positives
+      const rmItemsAll = (rm_breakdown || [])
+        .map(r => String(r.rm_item || '').trim())
+        .filter(Boolean);
+      const uniqItems = Array.from(new Set(rmItemsAll));
+      if (uniqItems.length) {
         try {
-          const resp = await frappe.call({
-            method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_stock_entry_from_pos_usage',
-            args: {
-              pos_closing_entry, company, posting_date, stock_entry_type,
-              source_warehouse, remarks, items
-            }
+          const chk = await frappe.call({
+            method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_unit_cost_bulk',
+            args: { item_codes: uniqItems }
           });
-          const se_name = resp.message;
-          frappe.msgprint({
-            title: __('Success'),
-            message: __('Stock Entry {0} has been submitted.', [`<a href="/app/stock-entry/${se_name}" target="_blank">${se_name}</a>`]),
-            indicator: 'green'
+          const known = chk?.message || {};
+          const bad = (rm_breakdown || []).filter(r => {
+            const code = String(r.rm_item || '').trim();
+            return code && !(code in known);
           });
-          frappe.set_route('Form', 'Stock Entry', se_name);
-        } catch (e) {
-          console.error(e);
-          frappe.msgprint({ title: 'Error', message: e.message || e, indicator: 'red' });
-        } finally {
-          frappe.dom.unfreeze();
+          if (bad.length) {
+            const html = ['<div style="max-height:260px;overflow:auto"><ol>']
+              .concat(bad.slice(0, 10).map(b => `<li><b>${frappe.utils.escape_html(String(b.rm_item))}</b> (UOM: ${frappe.utils.escape_html(String(b.uom||''))})</li>`))
+              .concat(['</ol>', bad.length > 10 ? `<div>...and ${bad.length-10} more</div>` : '', '</div>'])
+              .join('');
+            frappe.msgprint({
+              title: __('Some RM rows have invalid Item Code (not found). Please fix Item Code cells in RM table.'),
+              message: html,
+              indicator: 'red'
+            });
+            return;
+          }
+        } catch (err) {
+          // If validation fails for any reason, do not block saving; just log it
+          console.warn('RM item existence check failed:', err);
         }
-      });
+      }
+      if (!menu_summaries.length) {
+        frappe.msgprint(__('Nothing to save. Make sure items are loaded.'));
+        return;
+      }
+      if (!rm_breakdown.length) {
+        frappe.show_alert({ message: __('Warning: RM breakdown is empty. Saving menu summary only.'), indicator: 'orange' });
+      }
+      try {
+        // Log a sample of the RM and menu summaries payload
+        console.log('Sending to create_pos_consumption. RM sample:', (rm_breakdown||[]).slice(0,20));
+        console.log('Menu summaries sample:', (menu_summaries||[]).slice(0,5));
+      } catch (err) {}
+      frappe.dom.freeze(__('Saving POS Consumption...'));
+      try {
+        const resp = await frappe.call({
+          method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_pos_consumption',
+          args: { pos_closing_entry, company, warehouse, notes: '', menu_summaries, rm_breakdown }
+        });
+        const name = resp.message;
+        frappe.msgprint({
+          title: __('Saved'),
+          message: __('POS Consumption {0} has been created.', [`<a href="/app/pos-consumption/${name}" target="_blank">${name}</a>`]),
+          indicator: 'green'
+        });
+        frappe.set_route('Form', 'POS Consumption', name);
+      } catch (e) {
+        console.error(e);
+        const msg = (e && (e.message || e._server_messages)) ? (e.message || e._server_messages) : e;
+        frappe.msgprint({ title: 'Error', message: String(msg), indicator: 'red' });
+      } finally {
+        frappe.dom.unfreeze();
+      }
     }
   };
 

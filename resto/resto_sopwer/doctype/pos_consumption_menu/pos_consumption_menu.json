@@ -1,0 +1,94 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-08-10 12:21:13.577392",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "menu",
+  "sell_item",
+  "qty_sold",
+  "sales_amount",
+  "rm_value_total",
+  "margin_amount",
+  "category"
+ ],
+ "fields": [
+  {
+   "fieldname": "menu",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Menu",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sell_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sell Item",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "qty_sold",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Qty Sold",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "sales_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Sales Amount",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "rm_value_total",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Raw Material Value Total",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "margin_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Margin Amount",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Category",
+   "options": "Item Group",
+   "reqd": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-08-10 12:24:51.638443",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "POS Consumption Menu",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

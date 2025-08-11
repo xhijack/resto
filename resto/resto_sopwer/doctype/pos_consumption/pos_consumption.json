@@ -1,0 +1,131 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-08-10 12:15:16.120691",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_qep0",
+  "amended_from",
+  "pos_closing",
+  "company",
+  "warehouse",
+  "column_break_gsnj",
+  "closing_start",
+  "closing_end",
+  "notes",
+  "section_break_timr",
+  "menu_items",
+  "section_break_acyo",
+  "rm_breakdown"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_qep0",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "POS Consumption",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "pos_closing",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "POS Closing",
+   "options": "POS Closing Entry",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "pos_closing.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "pos_closing.company",
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Warehouse",
+   "options": "Warehouse",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "pos_closing.period_start_date",
+   "fieldname": "closing_start",
+   "fieldtype": "Datetime",
+   "label": "Closing Start"
+  },
+  {
+   "fetch_from": "pos_closing.period_end_date",
+   "fieldname": "closing_end",
+   "fieldtype": "Datetime",
+   "label": "Closing End"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "column_break_gsnj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_timr",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "menu_items",
+   "fieldtype": "Table",
+   "label": "Menu Items",
+   "options": "POS Consumption Menu"
+  },
+  {
+   "fieldname": "section_break_acyo",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "rm_breakdown",
+   "fieldtype": "Table",
+   "label": "RM Breakdown",
+   "options": "POS Consumption RM"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "modified": "2025-08-10 12:31:57.773253",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "POS Consumption",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

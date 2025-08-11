@@ -455,6 +455,106 @@ def create_stock_entry_from_pos_usage(
     se.submit()
     return se.name
 
+
+# ---------- POS Consumption API ----------
+
+@frappe.whitelist()
+def create_pos_consumption(
+    pos_closing_entry: str,
+    company: str,
+    warehouse: str,
+    notes: Optional[str] = None,
+    menu_summaries: Union[List[Dict], str, None] = None,
+    rm_breakdown: Union[List[Dict], str, None] = None,
+):
+    """
+    Create a POS Consumption document capturing menu-level HPP and consolidated RM usage
+    instead of immediately posting a Stock Entry.
+
+    Expected payloads:
+      menu_summaries: [
+        { "menu": <Resto Menu name or empty>, "sell_item": <Item>, "qty_sold": float,
+          "sales_amount": float, "rm_value_total": float, "margin_amount": float,
+          "category": <str or Link> }
+      ]
+      rm_breakdown: [
+        { "rm_item": <Item>, "uom": <UOM>, "planned_qty": float,
+          "adj_qty": float, "final_qty": float, "valuation_rate_snapshot": float }
+      ]
+    """
+    # Normalize json inputs
+    if isinstance(menu_summaries, str):
+        try:
+            menu_summaries = frappe.parse_json(menu_summaries)
+        except Exception:
+            menu_summaries = []
+    if isinstance(rm_breakdown, str):
+        try:
+            rm_breakdown = frappe.parse_json(rm_breakdown)
+        except Exception:
+            rm_breakdown = []
+
+    pce = frappe.get_doc("POS Closing Entry", pos_closing_entry)
+
+    # Auto fields from closing
+    closing_start = getattr(pce, "period_start_date", None) or getattr(pce, "start_date", None)
+    closing_end   = getattr(pce, "period_end_date", None) or getattr(pce, "end_date", None)
+    if not company:
+        company = getattr(pce, "company", None)
+
+    doc = frappe.new_doc("POS Consumption")
+    doc.pos_closing_voucher = pce.name
+    doc.company = company
+    doc.warehouse = warehouse
+    doc.closing_start = closing_start
+    doc.closing_end = closing_end
+    doc.status = "Draft"
+    if notes:
+        doc.notes = notes
+
+    # Resolve child table fieldnames dynamically by options
+    menu_ct = None
+    rm_ct = None
+    for tf in (doc.meta.get_table_fields() or []):
+        if tf.options == "POS Consumption Menu":
+            menu_ct = tf.fieldname
+        elif tf.options == "POS Consumption RM":
+            rm_ct = tf.fieldname
+    if not menu_ct or not rm_ct:
+        # Fallback to conventional names
+        menu_ct = menu_ct or "menu_summary"
+        rm_ct = rm_ct or "rm_breakdown"
+
+    # Append Menu Summary
+    for ms in (menu_summaries or []):
+        doc.append(menu_ct, {
+            "menu": ms.get("menu"),
+            "sell_item": ms.get("sell_item"),
+            "qty_sold": flt(ms.get("qty_sold")),
+            "sales_amount": flt(ms.get("sales_amount")),
+            "rm_value_total": flt(ms.get("rm_value_total")),
+            "margin_amount": flt(ms.get("margin_amount")),
+            "category": ms.get("category"),
+        })
+
+    # Append RM Breakdown
+    for rm in (rm_breakdown or []):
+        # take snapshot if not provided
+        val_rate = rm.get("valuation_rate_snapshot")
+        if val_rate in (None, "") and rm.get("rm_item"):
+            val_rate = _get_item_unit_cost(rm.get("rm_item"))
+        doc.append(rm_ct, {
+            "rm_item": rm.get("rm_item"),
+            "uom": rm.get("uom"),
+            "planned_qty": flt(rm.get("planned_qty")),
+            "adj_qty": flt(rm.get("adj_qty")),
+            "final_qty": flt(rm.get("final_qty")),
+            "valuation_rate_snapshot": flt(val_rate or 0),
+        })
+
+    doc.insert()
+    return doc.name
+
 @frappe.whitelist()
 def get_available_qty(item_code: str, warehouse: str) -> float:
     """Qty tersedia saat ini di gudang (read-only; tidak bikin Bin baru)."""
