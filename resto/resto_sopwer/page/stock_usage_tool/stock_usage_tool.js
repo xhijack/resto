@@ -2,41 +2,283 @@
 frappe.provide("resto.stock_usage");
 
 (function () {
+  // STYLES
+  const STYLES = `
+    <style id="sut-inline-style">
+      .sut-wrap {
+        padding: 16px;
+      }
+
+      .sut-item-block {
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        margin-bottom: 10px;
+        overflow: hidden;
+        background: var(--background-color);
+        padding: 10px;
+      }
+
+      .sut-item-head {
+        display: grid;
+        grid-template-columns: 160px 1fr 100px 100px 120px 140px;
+        gap: 0;
+        background: var(--secondary-background-color, #fafafa);
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .sut-item-head > div {
+        padding: 8px 10px;
+        border-right: 1px solid var(--border-color);
+        color: var(--text-color);
+      }
+
+      .sut-item-head > div:last-child {
+        border-right: none;
+      }
+
+      .sut-head-title {
+        font-weight: 600;
+        background: var(--secondary-background-color, #f0f0f0);
+        color: var(--text-color);
+      }
+
+      .sut-val {
+        background: var(--background-color);
+        color: var(--text-color);
+      }
+
+      .sut-rm-toolbar {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        padding: 6px 8px;
+        background: var(--background-color);
+        color: var(--text-color);
+      }
+
+      .sut-summary {
+        display: flex;
+        justify-content: space-between;
+        padding: 6px 8px;
+        font-size: 12px;
+        color: var(--text-muted);
+        border-top: 1px solid var(--border-color);
+        background: var(--background-color);
+      }
+
+      .sut-global-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        padding: 10px;
+        background: var(--background-color);
+        margin: 12px 0;
+        color: var(--text-color);
+      }
+
+      .sut-fg-summary {
+        margin-top: 6px;
+      }
+
+      #sut-fg,
+      #sut-rm-summary {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        justify-content: center;
+        padding: 10px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--background-color);
+        margin: 12px 0;
+      }
+
+      #sut-fg-summary .datatable {
+        font-size: 12px;
+      }
+
+      #sut-fg-summary .dt-cell {
+        font-weight: 600;
+        color: var(--text-color);
+      }
+
+      #sut-fg-summary .dt-header {
+        display: none;
+      }
+
+      #sut-fg .sut-total-cell,
+      #sut-fg .sut-total-label {
+        display: block;
+        width: 100%;
+        padding: 4px 6px;
+        font-weight: 600;
+        color: var(--text-color);
+      }
+
+      .sut-fg-summary {
+        display: none; /* hide old separate summary block */
+      }
+
+      /* compact filter card */
+      #filters.frappe-card {
+        padding: 12px !important;
+      }
+
+      .sut-compact .frappe-control {
+        margin-bottom: 6px;
+      }
+
+      .sut-compact .form-section .section-body {
+        padding-top: 4px;
+        padding-bottom: 4px;
+      }
+
+      @media (max-width: 980px) {
+        .sut-item-head {
+          grid-template-columns: 140px 1fr 90px 90px 110px 120px;
+        }
+      }
+
+      #filters .frappe-control {
+        display: inline-block;
+        vertical-align: top;
+        margin-right: 15px;
+        width: auto;
+      }
+
+      .sut-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--font-stack, "Helvetica Neue", Arial, sans-serif);
+        font-size: 13px;
+        color: var(--text-color);
+        background-color: var(--background-color);
+        border: 1px solid var(--border-color);
+        min-width: max-content;
+      }
+
+      .sut-table thead th {
+        color: var(--header-color, var(--text-color, #000));
+        font-weight: 600;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+        white-space: nowrap;
+      }
+
+      .sut-table tbody td {
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+        vertical-align: middle;
+        color: var(--text-color);
+      }
+
+      .sut-table tbody tr:hover td{
+        background-color: var(--hover-color, #f4f5f7);
+        color: var(--hover-text-color, #000);
+      }
+
+      .sut-table input[type="text"] {
+        border: none;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        font-size: inherit;
+        font-family: inherit;
+        width: 100%;
+        text-align: right;
+        color: var(--text-color);
+      }
+
+      .sut-table input[type="checkbox"] {
+        cursor: pointer;
+      }
+
+      .sut-fg-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: var(--font-stack, "Helvetica Neue", Arial, sans-serif);
+        font-size: 13px;
+        color: var(--text-color);
+        background-color: var(--background-color);
+        border: 1px solid var(--border-color);
+        min-width: max-content;
+      }
+
+      .sut-fg-table thead th {
+        color: var(--text-color);
+        font-weight: 600;
+        padding: 6px 8px;
+        border: 1px solid var(--border-color);
+        white-space: nowrap;
+      }
+
+      .sut-fg-table tbody td {
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border-color);
+        border-right: 1px solid var(--border-color);
+        vertical-align: middle;
+      }
+
+      .sut-fg-table tbody tr:hover td {
+        background-color: var(--hover-color, #f4f5f7);
+        color: var(--hover-text-color, #000);
+      }
+
+      .sut-fg-table .sut-total-row td {
+        font-weight: bold;
+      }
+
+      #sut-fg {
+        overflow-x: auto;
+      }
+
+      .td-input {
+        color: var(--text-color, #333);
+      }
+
+      tr:hover td:hover .td-input {
+        color: var(--hover-text-color, #000);
+      }
+    </style>
+
+  `;
+
   // ===== Helpers =====
-  // Column label mapping to avoid magic strings
   const COL_N = {
     code: 'Item Code',
     name: 'Item Name',
-    req_qty: 'Req Qty',
-    adj_qty: 'Adj Qty',
-    final_qty: 'Final Qty',
+    req_qty: 'Required Qty',
+    act_qty: 'Actual Qty',
+    diff_qty: 'Different Qty',
     uom: 'Stock UOM',
-    avail: 'Available (WH)',
+    actual_qty: 'Available (WH)',
     wh: 'Warehouse',
     remarks: 'Remarks',
     unit_cost: 'Unit Cost',
     cost: 'Cost',
   };
-  // Map visible column indexes by conventional names for a datatable (matches dt.getCell indexes)
+
   function getColMap(dt){
     return {
       code: dtColIndexByName(dt, COL_N.code),
       name: dtColIndexByName(dt, COL_N.name),
       req_qty: dtColIndexByName(dt, COL_N.req_qty),
-      adj_qty: dtColIndexByName(dt, COL_N.adj_qty),
-      final_qty: dtColIndexByName(dt, COL_N.final_qty),
+      act_qty: dtColIndexByName(dt, COL_N.act_qty),
+      diff_qty: dtColIndexByName(dt, COL_N.diff_qty),
       uom: dtColIndexByName(dt, COL_N.uom),
-      avail: dtColIndexByName(dt, COL_N.avail),
+      actual_qty: dtColIndexByName(dt, COL_N.actual_qty),
       wh: dtColIndexByName(dt, COL_N.wh),
       remarks: dtColIndexByName(dt, COL_N.remarks),
       unit_cost: dtColIndexByName(dt, COL_N.unit_cost),
       cost: dtColIndexByName(dt, COL_N.cost),
     };
   }
-  // Find DATA column index by header name (exclude serial/checkbox columns)
   function dtDataColIndexByName(dt, name){
     const cols = dt && typeof dt.getColumns === 'function' ? dt.getColumns() : [];
-    // Filter out special columns (checkbox/rowIndex)
     const dataCols = cols.filter(c => c && c.id !== '_checkbox' && c.id !== '_rowIndex');
     for (let i = 0; i < dataCols.length; i++) {
       if ((dataCols[i] && dataCols[i].name) === name) return i;
@@ -44,7 +286,6 @@ frappe.provide("resto.stock_usage");
     return -1;
   }
 
-  // Safe getter for cell text value
   const getCellTxt = (dt, r, ci, fb='') => cellToText(safeGetCell(dt, r, ci, fb));
   function flt(v){ if(v===undefined||v===null) return 0; const n=parseFloat(v); return isNaN(n)?0:n; }
   const DEFAULT_CUR=(frappe.boot?.sysdefaults?.currency)||"IDR";
@@ -58,11 +299,9 @@ frappe.provide("resto.stock_usage");
     return new Intl.NumberFormat(undefined,{style:"currency",currency:DEFAULT_CUR}).format(n);
   }
 
-  // --- Datatable utils ---
   function dtRowCount(dt){ return (dt&&dt.datamanager&&typeof dt.datamanager.getRowCount==='function')?dt.datamanager.getRowCount():0; }
   function dtColCount(dt){ return (dt&&typeof dt.getColumns==='function')?dt.getColumns().length:0; }
 
-  // Find visible column index by header name (works even with serial/checkbox columns enabled)
   function dtColIndexByName(dt, name){
     const cols = dt && typeof dt.getColumns === 'function' ? dt.getColumns() : [];
     for (let i = 0; i < cols.length; i++) {
@@ -71,13 +310,11 @@ frappe.provide("resto.stock_usage");
     return -1;
   }
 
-  // Strip tags quickly
   function stripTags(s){
     if (typeof s !== "string") return s;
     return s.replace(/<[^>]*>/g, "");
   }
 
-  // Convert various datatable cell shapes → plain text
   function cellToText(v){
     if (v == null) return "";
     if (typeof v === "object") {
@@ -87,17 +324,14 @@ frappe.provide("resto.stock_usage");
     return stripTags(String(v)).trim();
   }
 
-  // Safe getter for cell value: prefer getCell (visual index), fallback to data array
   function safeGetCell(dt, r, c, fallback = "") {
     try {
       if (!dt || r == null || c == null) return fallback;
-      // Primary: use getCell which aligns with getColumns indexes (includes serial/checkbox offsets)
       if (typeof dt.getCell === 'function') {
         const raw = dt.getCell(r, c);
         const val = cellToText(raw);
         return (val === undefined || val === null) ? fallback : val;
       }
-      // Fallback to datamanager row data (may be data-only without special columns)
       const rowObj = dt.datamanager && typeof dt.datamanager.getRow === 'function' ? dt.datamanager.getRow(r) : null;
       if (rowObj && Array.isArray(rowObj.data)) {
         const raw = rowObj.data[c];
@@ -123,42 +357,56 @@ frappe.provide("resto.stock_usage");
     return out;
   }
 
+  function aggregateRawMaterials(posBreakdown, defaultWarehouse = "-") {
+    const rmAgg = {};
+    (posBreakdown || []).forEach(fgItem => {
+      (fgItem.rm_items || []).forEach(rm => {
 
-  const STYLES = `
-    <style id="sut-inline-style">
-      .sut-wrap{padding:16px;}
-      .sut-item-block{border:1px solid var(--border-color); border-radius:6px; margin-bottom:10px; overflow:hidden; background:#fff;}
-      .sut-item-head{display:grid; grid-template-columns: 160px 1fr 100px 100px 120px 140px; gap:0; background:#fafafa; border-bottom:1px solid var(--border-color);}
-      .sut-item-head > div{padding:8px 10px; border-right:1px solid var(--border-color);}
-      .sut-item-head > div:last-child{border-right:none;}
-      .sut-head-title{font-weight:600; background:#f0f0f0;}
-      .sut-val{background:#fff;}
-      .sut-rm-toolbar{display:flex; gap:6px; align-items:center; justify-content:flex-end; padding:6px 8px; border-top:1px dashed var(--border-color); background:#fff;}
-      .sut-summary{display:flex; justify-content:space-between; padding:6px 8px; font-size:12px; color:#666; border-top:1px dashed var(--border-color);}
-      .sut-global-actions{display:flex; gap:8px; justify-content:flex-end; padding:10px; border:1px solid var(--border-color); border-radius:6px; background:#fff; margin:12px 0;}
+        const code = rm.item_code;
+        const whValue = rm.wh || defaultWarehouse;
 
-      .sut-fg-summary{margin-top:6px;}
-      #sut-fg-summary .datatable{font-size:12px;}
-      #sut-fg-summary .dt-cell{font-weight:600;}
-      #sut-fg-summary .dt-header{display:none;}
-      #sut-fg .sut-total-cell{ display:block; width:100%; padding:4px 6px; border-radius:0; font-weight:600; }
-      #sut-fg .sut-total-label{ display:block; width:100%; padding:4px 6px; font-weight:600; }
-      .sut-fg-summary{ display:none; } /* hide old separate summary block */
+        if (!code) return;
 
-      /* compact filter card */
-      #filters.frappe-card{padding:12px !important;}
-      .sut-compact .frappe-control{margin-bottom:6px;}
-      .sut-compact .form-section .section-body{padding-top:4px; padding-bottom:4px;}
-      @media (max-width: 980px){
-        .sut-item-head{grid-template-columns: 140px 1fr 90px 90px 110px 120px;}
-      }
-    </style>
-  `;
+        if (!rmAgg[code]) {
+          rmAgg[code] = {
+            item_code: code,
+            item_name: rm.item_name || "",
+            stock_uom: rm.stock_uom || "",
+            act_qty: rm.act_qty || 0,
+            actual_qty: rm.actual_qty || "",
+            wh: whValue || "-",
+            total_required_qty: 0,  
+            total_cost: 0,
+            unit_cost: rm.unit_cost || ""
+          };
+        } else {
+          const whValue = rm.wh || fgItem.source_warehouse || "";
+          rmAgg[code].wh = whValue;
+        }
+
+        console.log("FG Items", fgItem)
+
+        let reqQty = Number(rm.required_qty);
+        let cost = Number(rm.cost);
+
+        if (!isNaN(reqQty)) {
+          rmAgg[code].total_required_qty += reqQty;
+        }
+
+        if (!isNaN(cost)) {
+          rmAgg[code].total_cost += cost;
+        }
+
+      });
+    });
+
+    return Object.values(rmAgg);
+  }
 
   resto.stock_usage.Page = class {
     constructor(wrapper) {
       this.wrapper = $(wrapper);
-      this.groups = []; // [{meta, dt, $block}]
+      this.groups = [];
       this.make_page();
       this.make_filters();
       this.bind_global_actions();
@@ -184,9 +432,8 @@ frappe.provide("resto.stock_usage");
             <button class="btn btn-default btn-sm" id="clear-all">Clear All</button>
             <button class="btn btn-primary btn-sm" id="save-pos-cons">Save POS Consumption</button>
           </div>
-
+          <div id="sut-rm-summary" class="mb-2"></div>
           <div id="sut-fg" class="mb-2"></div>
-          <div id="sut-fg-summary" class="sut-fg-summary"></div>
           <div id="sut-groups"></div>
         </div>
       `);
@@ -195,14 +442,13 @@ frappe.provide("resto.stock_usage");
 
     make_filters() {
       const me = this;
+
       this.fg = new frappe.ui.FieldGroup({
         body: this.$body.find('#filters'),
         fields: [
           { fieldtype: 'Section Break', label: '' },
 
-          { fieldname: 'pos_closing_entry', label: 'POS Closing Entry', fieldtype: 'Link', options: 'POS Closing Entry', reqd: 1,
-            get_query: () => ({ filters: { docstatus: 1 } })
-          },
+          { fieldname: 'pos_closing_entry', label: 'POS Closing Entry', fieldtype: 'Link', options: 'POS Closing Entry', reqd: 1 },
           { fieldtype: 'Column Break' },
 
           { fieldname: 'company', label: 'Company', fieldtype: 'Link', options: 'Company', reqd: 1, default: frappe.defaults.get_default("Company") },
@@ -213,14 +459,25 @@ frappe.provide("resto.stock_usage");
 
           { fieldname: 'source_warehouse', label: 'Source Warehouse', fieldtype: 'Link', options: 'Warehouse', reqd: 1 },
           { fieldtype: 'Column Break' },
-          { fieldname: 'btn_load', fieldtype: 'Button', label: 'Get Items', primary: 1, click: () => me.load_from_pos() }
+          {
+            fieldname: 'btn_load',
+            fieldtype: 'HTML',
+            options: `<div style="margin-top:24px;">
+                        <button class="btn btn-primary" id="btn_load">Get Items</button>
+                      </div>`
+          }
         ]
       });
+
       this.fg.make();
+
+      // Pasang event click untuk button HTML
+      $('#btn_load').on('click', () => me.load_from_pos());
 
       const src = this.fg.fields_dict.source_warehouse;
       src && (src.df.onchange = async () => { await this.bulk_update_availability_all(); this.update_all_cost_summary(); });
     }
+
 
     bind_global_actions() {
       this.$body.on('click', '#clear-all', () => this.clear_all());
@@ -318,109 +575,318 @@ frappe.provide("resto.stock_usage");
 
     // ===== FG TABLE (single table with expand arrow) =====
     render_fg_table(items) {
-      // Build rows for Finished Goods
-      // Columns: ▶ | Item Code | Item Name | Qty | UOM | Selling Rate | Amount | Unit Cost | Cost | Margin | Margin %
-      const rows = (items || []).map((meta, i) => {
-        const c = this.get_fg_cost(i);
-        return [
-          `<span class="sut-exp" data-row="${i}" style="cursor:pointer;user-select:none;">&#9654;</span>`,
-          frappe.utils.escape_html(meta.item_code || ''),
-          frappe.utils.escape_html(meta.item_name || ''),
-          meta.qty || 0,
-          frappe.utils.escape_html(meta.stock_uom || ''),
-          fmtCurrency(meta.selling_rate),
-          fmtCurrency(meta.selling_amount),
-          fmtCurrency(c.unit_cost),
-          fmtCurrency(c.total_cost),
-          fmtCurrency(c.margin_val),
-          fmtFloat(c.margin_pct, 1) + '%',
-        ];
-      });
-
-      // Append TOTAL row with only summary columns colored
       const t = this.compute_fg_totals();
-      rows.push([
-        '',
-        `<div class="sut-total-label">Total</div>`,
-        ``,
-        `<div class="sut-total-cell">${fmtFloat(t.total_qty, 2)}</div>`,
-        ``,
-        `<div class="sut-total-cell">x̄ ${fmtCurrency(t.avg_sell_rate)}</div>`,
-        `<div class="sut-total-cell">Σ ${fmtCurrency(t.total_sell)}</div>`,
-        `<div class="sut-total-cell">x̄ ${fmtCurrency(t.unit_cost)}</div>`,
-        `<div class="sut-total-cell">Σ ${fmtCurrency(t.total_cost)}</div>`,
-        `<div class="sut-total-cell">x̄ ${fmtCurrency(t.avg_margin_unit)}</div>`,
-        `<div class="sut-total-cell">${fmtFloat(t.margin_pct, 1)}%</div>`,
-      ]);
 
-      // Render/replace datatable
-      if (this.fgDT && typeof this.fgDT.destroy === 'function') {
-        this.fgDT.destroy();
-      }
-      const $fg = this.$body.find('#sut-fg').empty();
+      // table header
+      let html = `
+        <div><b>Finished Goods Item</b></div>
+        <table class="sut-table sut-fg-table">
+          <thead>
+            <tr>
+              <th></th>
+              <th>Item Code</th>
+              <th>Item Name</th>
+              <th>Menu</th>
+              <th>Category</th>
+              <th style="text-align:right;">Qty</th>
+              <th>Stock UOM</th>
+              <th style="text-align:right;">Selling Rate</th>
+              <th style="text-align:right;">Amount</th>
+              <th style="text-align:right;">Unit Cost</th>
+              <th style="text-align:right;">Cost</th>
+              <th style="text-align:right;">Margin</th>
+              <th style="text-align:right;">Margin %</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
 
-      this.fgDT = new frappe.DataTable($fg.get(0), {
-        columns: [
-          { name: '', width: 34, editable: false },
-          { name: 'Item Code', width: 160, editable: false },
-          { name: 'Item Name', width: 240, editable: false },
-          { name: 'Qty', width: 90, align: 'right', editable: false },
-          { name: 'Stock UOM', width: 90, editable: false },
-          { name: 'Selling Rate', width: 120, align: 'right', editable: false },
-          { name: 'Amount', width: 120, align: 'right', editable: false },
-          { name: 'Unit Cost', width: 120, align: 'right', editable: false },
-          { name: 'Cost', width: 120, align: 'right', editable: false },
-          { name: 'Margin', width: 120, align: 'right', editable: false },
-          { name: 'Margin %', width: 90, align: 'right', editable: false },
-        ],
-        data: rows,
-        serialNoColumn: true,
-        checkboxColumn: false,
-        layout: 'fluid'
+      // table body rows
+      (items || []).forEach((meta, i) => {
+        const c = this.get_fg_cost(i);
+        html += `
+          <tr data-row="${i}">
+            <td style="text-align:center;">
+              <span class="sut-exp" data-row="${i}" style="cursor:pointer;user-select:none;">&#9654;</span>
+            </td>
+            <td>${frappe.utils.escape_html(meta.item_code || '')}</td>
+            <td>${frappe.utils.escape_html(meta.item_name || '')}</td>
+            <td>${frappe.utils.escape_html(meta.resto_menu || '')}</td>
+            <td>${frappe.utils.escape_html(meta.category || '')}</td>
+            <td style="text-align:right;">${meta.qty || 0}</td>
+            <td>${frappe.utils.escape_html(meta.stock_uom || '')}</td>
+            <td style="text-align:right;">${fmtCurrency(meta.selling_rate)}</td>
+            <td style="text-align:right;">${fmtCurrency(meta.selling_amount)}</td>
+            <td style="text-align:right;">${fmtCurrency(c.unit_cost)}</td>
+            <td style="text-align:right;">${fmtCurrency(c.total_cost)}</td>
+            <td style="text-align:right;">${fmtCurrency(c.margin_val)}</td>
+            <td style="text-align:right;">${fmtFloat(c.margin_pct, 1)}%</td>
+          </tr>
+        `;
       });
 
-      // No longer add highlight to TOTAL row
+      // total row
+      html += `
+        <tr class="sut-total-row">
+          <td></td>
+          <td><b>Total</b></td>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td style="text-align:right;"><b>${fmtFloat(t.total_qty, 2)}</b></td>
+          <td></td>
+          <td style="text-align:right;"><b>x̄ ${fmtCurrency(t.avg_sell_rate)}</b></td>
+          <td style="text-align:right;"><b>Σ ${fmtCurrency(t.total_sell)}</b></td>
+          <td style="text-align:right;"><b>x̄ ${fmtCurrency(t.unit_cost)}</b></td>
+          <td style="text-align:right;"><b>Σ ${fmtCurrency(t.total_cost)}</b></td>
+          <td style="text-align:right;"><b>x̄ ${fmtCurrency(t.avg_margin_unit)}</b></td>
+          <td style="text-align:right;"><b>${fmtFloat(t.margin_pct, 1)}%</b></td>
+        </tr>
+      `;
 
-      // Ensure TOTAL row is up to date
-      this.update_fg_total_row();
+      html += `</tbody></table>`;
 
-      // Click handler for expand arrow
+      // render to container
+      const $fg = this.$body.find('#sut-fg').empty().append(html);
+
+      // click handler for expand arrow
       const me = this;
-      $fg.off('click.sut-exp').on('click.sut-exp', '.sut-exp', async function (e) {
+      $fg.off('click.sut-exp').on('click.sut-exp', '.sut-exp', async function () {
         const i = parseInt($(this).attr('data-row'), 10);
         if (isNaN(i)) return;
 
-        // Toggle arrow ▶/▼
-        const isClosed = $(this).html() === '&#9654;';
-        $('.sut-exp').html('&#9654;'); // collapse all
-        if (isClosed) $(this).html('&#9660;');
+        // const isClosed = $(this).html() === '&#9654;';
+        // $('.sut-exp').html('&#9654;'); // collapse all
+        // if (isClosed) $(this).html('&#9660;');
 
-        // If block already rendered, just show it and hide others
         const g = me.groups[i];
-        if (g && g.$block) {
-          $('.sut-item-block').hide();
-          g.$block.show();
-          return;
-        }
+        if (!g) return;
 
-        // Not rendered yet: build rows from meta.rm_items and render
-        const meta = me.groups[i]?.meta || me.groups[i];
-        const wh = me.fg.get_value('source_warehouse');
-        const rowsRM = (meta.rm_items || []).map(x => {
-          const rq = flt(x.required_qty);
-          const adj = 0;
-          const finalq = rq + adj;
-          const uc = flt(x.unit_cost);
-          const wh2 = cellToText(wh);
-          return [
-            cellToText(x.item_code), cellToText(x.item_name), rq, adj, finalq,
-            cellToText(x.stock_uom), 0, wh2, '', uc, uc * finalq
-          ];
-        });
-        me.render_item_block(meta, rowsRM, i);
-        await me.bulk_update_availability_group(i);
-        me.update_group_summary(i);
+        const isVisible = g.$block && g.$block.is(':visible');
+
+        $('.sut-item-block').hide();
+        $('.sut-exp').html('&#9654;');
+
+        // if (g && g.$block) {
+        //   $('.sut-item-block').hide();
+        //   g.$block.show();
+        //   return;
+        // }
+
+        if (!isVisible) {
+          $(this).html('&#9660;');
+          const meta = g.meta || g;
+          const wh = me.fg.get_value('source_warehouse')
+          const rowsRM = (meta.rm_items || []).map(x => {
+            const rq = flt(x.required_qty);
+            const adj = 0;
+            const finalq = rq + adj;
+            const uc = flt(x.unit_cost);
+            const wh2 = cellToText(wh);
+
+            return {
+              code: cellToText(x.item_code),
+              name: cellToText(x.item_name),
+              req_qty: rq,
+              act_qty: 0,
+              diff_qty: 0,
+              uom: cellToText(x.stock_uom),
+              actual_qty: flt(x.actual_qty),
+              wh: wh2,
+              remarks: '',
+              unit_cost: uc,
+              cost: uc * finalq
+            };
+          });
+          g.$block = me.render_item_block(meta, rowsRM, i);
+          await me.bulk_update_availability_group(i);
+          me.update_group_summary(i);
+        } else {
+          g.$block = null
+        }    
       });
+    }
+
+    // ===== RM SUMMARY =====
+    render_rm_summary(rows, idx) {
+      const defaultWh = this.fg ? this.fg.get_value('source_warehouse') : "-";
+      const me = this;
+      const prev = this.groups[idx] || {};
+
+      const aggregatedRM = aggregateRawMaterials(rows, defaultWh);
+
+      if (prev.meta && Array.isArray(prev.meta.rm_items)) {
+        aggregatedRM.forEach(r => {
+          const match = prev.meta.rm_items.find(x => x.item_code === r.item_code);
+          r.act_qty = match ? parseFloat(match.act_qty || 0) : 0;
+          r.diff_qty = r.act_qty - (parseFloat(r.total_required_qty) || 0);
+          r.total_cost = r.act_qty * (parseFloat(r.unit_cost) || 0);
+        });
+      } else {
+        aggregatedRM.forEach(r => {
+          r.act_qty = r.act_qty || 0;
+          r.diff_qty = r.act_qty - (parseFloat(r.total_required_qty) || 0);
+          r.total_cost = r.act_qty * (parseFloat(r.unit_cost) || 0);
+        });
+      }
+
+      this.groups[idx] = {
+        ...prev,
+        original_rows: aggregatedRM,
+        rows: aggregatedRM,  
+        $block: null,
+        meta: {
+          ...(prev.meta || {}),
+          rm_items: aggregatedRM.map(r => ({
+            item_code: r.item_code,
+            item_name: r.item_name,
+            uom: r.stock_uom,
+            required_qty: r.total_required_qty,
+            unit_cost: r.unit_cost,
+            act_qty: r.act_qty || 0
+          }))
+        }
+      };
+
+
+      const summaryRemain = {};
+      aggregatedRM.forEach(r => {
+        summaryRemain[r.item_code] = parseFloat(r.act_qty || 0);
+      });
+      this.summaryRemain = summaryRemain;
+
+      const $block = $(`
+        <div data-idx="${idx}">
+          <div class="sut-rm-toolbar">
+            <div><b>Summary Raw Material Items</b></div>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
+              <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
+            </div>
+          </div>
+          <table class="sut-table" id="sut-dt-${idx}" border="1">
+            <thead>
+              <tr>
+                <th style="text-align:center;">Code</th>
+                <th style="text-align:center;">Name</th>
+                <th style="text-align:right;">Req Qty</th>
+                <th style="text-align:right;">Act Qty</th>
+                <th style="text-align:right;">Diff Qty</th>
+                <th style="text-align:center;">UOM</th>
+                <th style="text-align:right;">Avail</th>
+                <th style="text-align:center;">WH</th>
+                <th style="text-align:right;">Unit Cost</th>
+                <th style="text-align:right;">Cost</th>
+                <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="sut-summary">
+            <div>Lines: <b id="sut-lines-${idx}">0</b></div>
+            <div>
+              Total Required Qty: <b id="sut-total-qty-${idx}">0</b> &nbsp; | &nbsp;
+              Total RM Cost: <b id="sut-total-cost-${idx}">0</b>
+            </div>
+          </div>
+        </div>
+      `);
+
+      this.$body.find(".sut-item-block").hide();
+      this.$body.find("#sut-rm-summary").empty().append($block);
+      $block.show();
+
+      this.groups[idx].$block = $block;
+
+      console.log('this.groups[idx]', this.groups[idx])
+
+      const renderTable = () => {
+        const $tbody = $block.find("tbody");
+        $tbody.empty();
+        this.groups[idx].rows.forEach((row, r) => {
+          console.log("rows", row)
+          $tbody.append(`
+            <tr data-row="${r}">
+              <td style="text-align:center;">${row.item_code || ""}</td>
+              <td style="text-align:center;">${row.item_name || ""}</td>
+              <td style="text-align:right;">${row.total_required_qty || 0}</td>
+              <td class="td-input">
+                <input
+                  type="text"
+                  class="td-input"
+                  value="${row.act_qty || 0}"
+                  data-col="act_qty"
+                  oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
+                  style="
+                    width:100%;
+                    border:none;
+                    padding:0;
+                    margin:0;
+                    background:transparent;
+                    font-size:inherit;
+                    font-family:inherit;
+                    text-align:right;
+                  "
+                />
+              </td>
+
+              <td style="text-align:right;">${row.diff_qty || 0}</td>
+              <td style="text-align:center;">${row.stock_uom || ""}</td>
+              <td style="text-align:right;">${row.actual_qty || 0}</td>
+              <td style="text-align:center;">${defaultWh || ""}</td>
+              <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
+              <td style="text-align:right;">${fmtCurrency(row.total_cost || 0)}</td>
+              <td style="text-align:center;"><input type="checkbox" class="check-row"></td>
+            </tr>
+          `);
+        });
+
+        $block.find(`#sut-lines-${idx}`).text(this.groups[idx].rows.length);
+        const total = this.groups[idx]?.rows?.reduce((sum, row) => {
+          const qty = Number(row.total_required_qty) || 0;
+          return sum + qty;
+        }, 0) || 0;
+
+        const group = this.groups[idx];
+        const $grpBlock = group.$block;
+
+        $grpBlock.off("input blur", "input[data-col]"); 
+
+        $grpBlock.on("input blur", "input[data-col]", function () {
+          const $input = $(this);
+          const rowIndex = parseInt($input.closest("tr").data("row"));
+          const val = parseFloat($input.val()) || 0;
+
+          const group = me.groups[idx];
+
+          const aggRow = group.rows[rowIndex];
+          if (aggRow) {
+            aggRow.act_qty = val;
+            aggRow.diff_qty = val - (parseFloat(aggRow.total_required_qty) || 0);
+            aggRow.total_cost = val * (parseFloat(aggRow.unit_cost) || 0);
+          }
+
+          if (!group.meta) group.meta = {};
+          if (!group.meta.rm_items) group.meta.rm_items = [];
+          group.meta.rm_items[rowIndex] = {
+            ...group.meta.rm_items[rowIndex],
+            act_qty: val
+          };
+
+          me.summaryRemain[aggRow.item_code] = group.rows.map(r => ({
+            row_id: r.item_code,  
+            act_qty: parseFloat(r.act_qty) || 0
+          }));
+
+          $input.closest("tr").find("td:eq(4)").text(aggRow.diff_qty);
+          $input.closest("tr").find("td:eq(9)").text(fmtCurrency(aggRow.total_cost));
+        });
+
+        $block.find(`#sut-total-qty-${idx}`).text(total); 
+        $block.find(`#sut-total-cost-${idx}`).text( 'Rp ' + this.groups[idx].rows .reduce((a, b) => a + (parseFloat(b.total_cost) || 0), 0) .toLocaleString('id-ID') 
+      ); 
+    };
+      renderTable();
     }
 
     // ===== LOAD =====
@@ -437,7 +903,7 @@ frappe.provide("resto.stock_usage");
       try {
         const r = await frappe.call({
           method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
-          args: { pos_closing_entry, company }
+          args: { pos_closing_entry, company, warehouse: this.fg.get_value("source_warehouse") }
         });
         const items = (r.message?.items) || [];
 
@@ -452,6 +918,7 @@ frappe.provide("resto.stock_usage");
 
         // Render single FG table with expand arrows
         this.render_fg_table(items);
+        this.render_rm_summary(items)
 
         frappe.show_alert({ message: __('Loaded'), indicator: 'green' });
       } catch (e) {
@@ -465,177 +932,180 @@ frappe.provide("resto.stock_usage");
 
     // ===== RENDER 1 ITEM =====
     render_item_block(meta, rows, idx) {
-      // idx is the FG row index; show only one detail block at a time
+      const me = this; 
+      const defaultWh = this.fg ? this.fg.get_value('source_warehouse') : "-";
+
+      const allRM = this.groups
+        .filter(g => g && g.meta && Array.isArray(g.meta.rm_items))
+        .map(g => g.meta.rm_items)
+        .flat();
+
+      rows.forEach((r, idx) => {
+        const planned = parseFloat(r.req_qty || 0);
+        const arr = me.summaryRemain[r.code] || [];
+        const match = arr.find(x => x.row_id === r.code || x.idx === idx);
+        const totalAct = match ? match.act_qty : 0;
+        const totalPlanned = allRM
+          .filter(x => x.item_code === r.code)
+          .reduce((sum, x) => sum + (parseFloat(x.required_qty) || 0), 0);
+
+        r.act_qty = totalPlanned > 0 ? (planned / totalPlanned) * totalAct : 0;
+        r.diff_qty = r.act_qty - planned;
+        r.cost = r.act_qty * (parseFloat(r.unit_cost) || 0);
+      });
 
       const $block = $(`
         <div class="sut-item-block" data-idx="${idx}">
           <div class="sut-rm-toolbar">
-            <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
-            <button class="btn btn-default btn-sm" data-action="add">Add</button>
-            <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
+            <div>Raw Material <b>${meta.item_name}</b></div>
+            <div style="display:flex; align-items:center; gap:4px;">
+              <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
+              <button class="btn btn-default btn-sm" data-action="add">Add</button>
+              <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
+            </div>
           </div>
-          <div id="sut-dt-${idx}"></div>
+          <table class="sut-table" id="sut-dt-${idx}" border="1">
+            <thead>
+              <tr>
+                <th style="text-align:center;">Code</th>
+                <th style="text-align:center;">Name</th>
+                <th style="text-align:right;">Req Qty</th>
+                <th style="text-align:right;">Act Qty</th>
+                <th style="text-align:right;">Diff Qty</th>
+                <th style="text-align:center;">UOM</th>
+                <th style="text-align:right;">Avail</th>
+                <th style="text-align:center;">WH</th>
+                <th style="text-align:center;">Remarks</th>
+                <th style="text-align:right;">Unit Cost</th>
+                <th style="text-align:right;">Cost</th>
+                <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
           <div class="sut-summary">
-            <div>Lines: <b id="sut-lines-${idx}">0</b></div>
+            <div>Lines: <b id="sut-rm-lines-${idx}">0</b></div>
             <div>
-              Total Required Qty: <b id="sut-total-qty-${idx}">0</b> &nbsp; | &nbsp;
-              Total RM Cost: <b id="sut-total-cost-${idx}">0</b>
+              Total Required Qty: <b id="sut-total-rm-qty-${idx}">0</b> &nbsp; | &nbsp;
+              Total RM Cost: <b id="sut-total-rm-cost-${idx}">0</b>
             </div>
           </div>
         </div>
       `);
 
-      // Hide other blocks (single-detail behavior)
-      this.$body.find('.sut-item-block').hide();
-
-      this.$body.find('#sut-groups').append($block);
+      this.$body.find(".sut-item-block").hide();
+      this.$body.find("#sut-groups").append($block);
       $block.show();
 
-      // Datatable columns:
-      // 0 Item Code | 1 Item Name | 2 Req Qty | 3 Adj Qty | 4 Final Qty | 5 UOM | 6 Avail | 7 WH | 8 Remarks | 9 Unit Cost | 10 Cost
-      const dt = new frappe.DataTable($block.find(`#sut-dt-${idx}`).get(0), {
-        columns: [
-          { name: COL_N.code, width: 160, editable: true },
-          { name: COL_N.name, width: 220, editable: false },
-          { name: COL_N.req_qty, width: 110, align: 'right', editable: true },
-          { name: COL_N.adj_qty, width: 110, align: 'right', editable: true },
-          { name: COL_N.final_qty, width: 110, align: 'right', editable: false },
-          { name: COL_N.uom, width: 90, editable: false },
-          { name: COL_N.avail, width: 120, align: 'right', editable: false },
-          { name: COL_N.wh, width: 180, editable: true },
-          { name: COL_N.remarks, width: 200, editable: true },
-          { name: COL_N.unit_cost, width: 110, align: 'right', editable: false },
-          { name: COL_N.cost, width: 120, align: 'right', editable: false },
-        ],
-        data: rows || [],
-        serialNoColumn: true,
-        checkboxColumn: true,
-        layout: 'fluid',
-        events: {
-          onEdit: async (cell, r, c, val) => {
-            const columns = dt.getColumns?.() || [];
-            if (!columns.length || r == null || c == null) return;
-            const col = columns[c]?.name;
-            if (!col) return;
+      this.groups[idx] = { meta, rows: rows || [], $block };
+      const getMaxQty = (code) => me.summaryRemain[code] || 0;
+      
+      const renderTable = () => {
+        const $tbody = $block.find("tbody");
+        $tbody.empty();
 
-            // Use shared column map and getCellTxt helper
-            const COL = getColMap(dt);
-            const get = (r, ci) => getCellTxt(dt, r, ci);
+        me.groups[idx].rows.forEach((row, r) => {
+          const maxQty = getMaxQty(row.code);
+          console.log('ROW ITEM BLOCK', row)
 
-            // Recalculation logic for Final Qty and Cost
-            const recalcLine = (rowIndex) => {
-              const rq = flt(get(rowIndex, COL.req_qty));
-              const adj = flt(get(rowIndex, COL.adj_qty));
-              const finalq = rq + adj;
-              dt.updateCell?.(rowIndex, COL.final_qty, finalq);
-              const uc = flt(get(rowIndex, COL.unit_cost));
-              dt.updateCell?.(rowIndex, COL.cost, finalq * uc);
-            };
+          $tbody.append(`
+            <tr data-row="${r}">
+              <td style="text-align:center;">${row.code || ""}</td>
+              <td style="text-align:center;">${row.name || ""}</td>
+              <td style="text-align:right;">${row.req_qty || 0}</td>
+              <td style="text-align:right;">${row.act_qty.toFixed(2)}</td>
+              <td style="text-align:right;">${row.diff_qty.toFixed(2) || 0}</td>
+              <td style="text-align:center;">${row.uom || ""}</td>
+              <td style="text-align:right;">${row.actual_qty}</td>
+              <td style="text-align:center;">${row.wh || ""}</td>
+              <td style="text-align:center;">
+                <input
+                  type="text"
+                  class="td-input"
+                  value="${row.remarks || ""}"
+                  data-col="remarks"
+                  style ="
+                    width:100%;
+                    border:none;
+                    padding:0;
+                    margin:0;
+                    background:transparent;
+                    font-size:inherit;
+                    font-family:inherit;
+                    text-align:left;
+                  "
+                />
+              </td>
+              <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
+              <td style="text-align:right;">${fmtCurrency(row.cost || 0)}</td>
+              <td style="text-align:center;"><input type="checkbox" class="check-row"></td>
+            </tr>
+          `);
+        });
 
-            if (col === COL_N.req_qty || col === COL_N.adj_qty) {
-              recalcLine(r);
-            }
+        $block.find(`#sut-rm-lines-${idx}`).text(this.groups[idx].rows.length);
+        $block.find(`#sut-total-rm-qty-${idx}`).text(
+          this.groups[idx].rows.reduce((a, b) => a + (parseFloat(b.req_qty) || 0), 0)
+        );
 
-            if (col === COL_N.code && val) {
-                console.log(`Item Code changed: ${val}`);
-                const code = cellToText(val);
-                const res = await frappe.db.get_value('Item', code, ['item_name', 'stock_uom']);
-                if (res?.message) {
-                    dt.updateCell?.(r, COL.name, res.message.item_name || '');
-                    dt.updateCell?.(r, COL.uom, res.message.stock_uom || '');
-                }
-                const uc = await frappe.call({
-                    method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_unit_cost',
-                    args: { item_code: code }
-                });
-                const unit_cost = flt(uc?.message);
-                dt.updateCell?.(r, COL.unit_cost, unit_cost);
-                // Auto compute cost on item selection using current Final Qty
-                const finalq_now = flt(get(r, COL.final_qty));
-                dt.updateCell?.(r, COL.cost, finalq_now * unit_cost);
-            }
-
-            if (col === COL_N.code || col === COL_N.wh) {
-                console.log(`Checking availability for ${col}: ${val}`);
-                const item_code = get(r, COL.code);
-                const wh = get(r, COL.wh) || this.fg.get_value('source_warehouse');
-                if (item_code && wh) {
-                    const a = await frappe.call({
-                        method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_available_qty',
-                        args: { item_code, warehouse: wh }
-                    });
-                    dt.updateCell?.(r, COL.avail, a?.message ?? 0);
-                }
-            }
-
-            this.update_group_summary(idx);
-          }
-        }
-      });
-
-      // Remove button enable/disable logic (robust)
-      const $removeBtn = $block.find('[data-action="remove"]');
-      const updateRemoveState = () => {
-        let count = 0;
-        if (dt.rowmanager && typeof dt.rowmanager.getCheckedRows === 'function') {
-          const rows = dt.rowmanager.getCheckedRows();
-          count = (rows && rows.length) ? rows.length : 0;
-        } else {
-          // Fallback: count checked checkboxes in the datatable DOM
-          count = $block.find('.datatable .dt-cell--checkbox input[type="checkbox"]:checked').length;
-        }
-        $removeBtn.prop('disabled', count === 0);
+        $block.find(`#sut-total-rm-cost-${idx}`).text(
+          'Rp ' + this.groups[idx].rows
+            .reduce((a, b) => a + (parseFloat(b.cost) || 0), 0)
+            .toLocaleString('id-ID')
+        );
       };
-      updateRemoveState();
-      // Observe checkbox changes inside this block (broader selector, slight delay)
-      $block.on('change click', '.datatable input[type="checkbox"]', () => setTimeout(updateRemoveState, 0));
 
-      // simpan grup pada index eksplisit
-      this.groups[idx] = { meta, dt, $block };
-
-      this.update_group_summary(idx);
-
-      // toolbar events
-      $block.on('click', '[data-action]', async (e) => {
-        const action = $(e.currentTarget).data('action');
-        if (action === 'add') {
-          const cur = dtToArray(dt);
-          const wh = cellToText(this.fg.get_value('source_warehouse')) || '';
-          cur.push(['', '', 1, 0, 1, '', 0, wh, '', 0, 0]);
-          dt.refresh(cur);
-          try { dt.scrollToRow && dt.scrollToRow(cur.length - 1); } catch(e) {}
-          updateRemoveState();
-          // Optional immediate feedback: keep summary in sync
-          this.update_group_summary(idx);
-        } else if (action === 'remove') {
-          let checked = [];
-          if (dt.rowmanager && typeof dt.rowmanager.getCheckedRows === 'function') {
-            checked = dt.rowmanager.getCheckedRows();
-          }
-          if (!checked.length) {
-            frappe.prompt(
-              [{ fieldname: 'rows', fieldtype: 'Data', label: 'Row indexes (comma separated)', reqd: 1, description: 'Contoh: 2,3,5' }],
-              (v) => {
-                const cur = dt.getData?.() || [];
-                const idxs = String(v.rows).split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-                idxs.sort((a,b)=>b-a).forEach(n => { const i0 = n-1; if (i0>=0 && i0<cur.length) cur.splice(i0,1); });
-                dt.refresh(cur);
-                updateRemoveState();
-                this.update_group_summary(idx);
-              },
-              __('Remove Rows')
-            );
-            return;
-          }
-          const cur = dt.getData?.() || [];
-          checked.sort((a,b)=>b-a).forEach(i => { if (i>=0 && i<cur.length) cur.splice(i,1); });
-          dt.refresh(cur);
-          updateRemoveState();
-          this.update_group_summary(idx);
-        } else if (action === 'recalc') {
-          await this.recalc_group(idx);
+      // Toolbar events
+      $block.on("click", "[data-action]", (e) => {
+        const action = $(e.currentTarget).data("action");
+        if (action === "add") {
+          const wh = this.fg.get_value("source_warehouse") || "";
+          this.groups[idx].rows.push({
+            code: "", name: "", req_qty: 1, act_qty: 0, diff_qty: 1,
+            uom: "", actual_qty: 0, wh, remarks: "", unit_cost: 0, cost: 0
+          });
+          renderTable();
+        } else if (action === "remove") {
+          const $checked = $block.find(".check-row:checked");
+          const toRemove = $checked.closest("tr").map((_, el) => parseInt($(el).data("row"))).get();
+          this.groups[idx].rows = this.groups[idx].rows.filter((_, r) => !toRemove.includes(r));
+          renderTable();
+        } else if (action === "recalc") {
+          this.groups[idx].rows.forEach(r => {
+            r.diff_qty = (parseFloat(r.act_qty) || 0) - (parseFloat(r.req_qty) || 0);
+            r.cost = r.diff_qty * (parseFloat(r.unit_cost) || 0);
+          });
+          renderTable();
         }
       });
+
+      const group = this.groups[idx];
+      const $grpBlock = group.$block;
+
+      $grpBlock.off("input blur", "input[data-col]");
+      $grpBlock.on("blur", "input[data-col='remarks']", function () {
+        const $input = $(this);
+        const rowIndex = parseInt($input.closest("tr").data("row"));
+        const val = $input.val() || "";
+
+        const group = me.groups[idx];
+        if (!group) return;
+
+        const aggRow = group.rows[rowIndex];
+        if (aggRow) {
+          aggRow.remarks = val;
+        }
+
+        if (!group.meta) group.meta = {};
+        if (!group.meta.rm_items) group.meta.rm_items = [];
+        group.meta.rm_items[rowIndex] = {
+          ...group.meta.rm_items[rowIndex],
+          remarks: val
+        };
+
+        console.log("Updated remarks:", val, "for row:", rowIndex);
+      });
+      renderTable();
     }
 
     update_group_summary(idx) {
@@ -644,7 +1114,7 @@ frappe.provide("resto.stock_usage");
       let total_qty = 0, total_cost = 0;
       const COL = getColMap(dt);
       for (let i = 0; i < n; i++) {
-        total_qty += flt(getCellTxt(dt, i, COL.final_qty, 0));
+        total_qty += flt(getCellTxt(dt, i, COL.diff_qty, 0));
         total_cost += flt(getCellTxt(dt, i, COL.cost, 0));
       }
       this.$body.find(`#sut-lines-${idx}`).text(n);
@@ -689,7 +1159,7 @@ frappe.provide("resto.stock_usage");
 
       const r = await frappe.call({
         method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
-        args: { pos_closing_entry: pce, company }
+        args: { pos_closing_entry: pce, company, warehouse: this.fg.get_value("source_warehouse") }
       });
       const found = (r.message.items || []).find(x => x.item_code === g.meta.item_code);
       if (!found) {
@@ -699,7 +1169,7 @@ frappe.provide("resto.stock_usage");
         const COL = getColMap(dt);
         const n = dtRowCount(dt);
         for (let i = 0; i < n; i++) {
-          const qty = flt(getCellTxt(dt, i, COL.final_qty, 0));
+          const qty = flt(getCellTxt(dt, i, COL.diff_qty, 0));
           const uc  = flt(getCellTxt(dt, i, COL.unit_cost, 0));
           dt.updateCell?.(i, COL.cost, qty * uc);
         }
@@ -711,7 +1181,7 @@ frappe.provide("resto.stock_usage");
       const COL = getColMap(g.dt);
       const n = dtRowCount(g.dt);
       for (let i = 0; i < n; i++) {
-        const qty = flt(getCellTxt(g.dt, i, COL.final_qty, 0));
+        const qty = flt(getCellTxt(g.dt, i, COL.diff_qty, 0));
         const uc  = flt(getCellTxt(g.dt, i, COL.unit_cost, 0));
         console.log(`Recalculating Cost for row ${i}: Qty=${qty}, Unit Cost=${uc}`);
         g.dt.updateCell?.(i, COL.cost, qty * uc);
@@ -750,12 +1220,18 @@ frappe.provide("resto.stock_usage");
 
     async recalc_all() { 
       for (let i = 0; i < this.groups.length; i++) await this.recalc_group(i);
+
       // Refresh FG summary table after recalculation
-      const items = this.groups.map(g => g.meta);
+      const items = this.groups.map(g => g.meta || {}); // <- fallback ke objek kosong
       this.render_fg_table(items);
+      this.render_rm_summary(items);
       this.update_fg_total_row();
     }
-    clear_all() { this.groups = []; this.$body.find('#sut-groups').empty(); }
+
+    clear_all() { 
+      this.groups = []; 
+      this.$body.find('#sut-groups').empty(); 
+    }
 
     // ===== Availability =====
     async bulk_update_availability_group(idx) {
@@ -783,7 +1259,7 @@ frappe.provide("resto.stock_usage");
         const wh = getCellTxt(dt, i, COL.wh, '') || wh_fallback;
         const key = `${it}::${wh}`;
         const qty = (map[key] ?? 0);
-        dt.updateCell?.(i, COL.avail, qty);
+        dt.updateCell?.(i, COL.actual_qty, qty);
       }
     }
 
@@ -791,85 +1267,127 @@ frappe.provide("resto.stock_usage");
       for (let i = 0; i < this.groups.length; i++) await this.bulk_update_availability_group(i);
     }
 
+    syncInputsToGroups() {
+      this.groups.forEach((g, idx) => {
+        if (!g || !g.$block) return;
+        g.$block.find('tbody tr').each((rIdx, tr) => {
+          const val = parseFloat($(tr).find('input[data-col="act_qty"]').val()) || 0;
+          if (g.rows[rIdx]) {
+            g.rows[rIdx].act_qty = val;
+            g.rows[rIdx].diff_qty = val - (parseFloat(g.rows[rIdx].total_required_qty) || 0);
+            g.rows[rIdx].total_cost = val * (parseFloat(g.rows[rIdx].unit_cost) || 0);
+          }
+          if (g.meta && g.meta.rm_items && g.meta.rm_items[rIdx]) {
+            g.meta.rm_items[rIdx].act_qty = val;
+          }
+        });
+      });
+    }
+
     // ===== Submit =====
+    // ===== GET PAYLOAD =====
     get_payload() {
       const rm_breakdown_map = new Map();
       const menu_summaries = [];
+
+      this.groups.forEach(g => {
+        if (!g) return;
+        const rm_items = g.meta.rm_items || [];
+        rm_items.forEach((r, i) => {
+          const tableRow = g.rows[i];
+          if (tableRow) {
+            r.act_qty = tableRow.act_qty;
+            r.actual_qty = parseFloat(tableRow.actual_qty.toFixed(2) || 0); 
+            r.wh = tableRow.wh || ''; 
+          }
+        });
+      });
+
       for (const g of this.groups) {
+        if (!g) continue;
+
         const meta = g.meta || {};
-        const dt = g.dt;
+        const rm_items = Array.isArray(meta.rm_items) ? meta.rm_items : [];
+        const rows_detail = [];
         let rm_value_total = 0;
-        if (dt) {
-          // Prefer data-only access from the rendered DataTable
-          const dataRows = dt.getData?.() || [];
-          const DCOL = {
-            code: dtDataColIndexByName(dt, COL_N.code),
-            name: dtDataColIndexByName(dt, COL_N.name),
-            req_qty: dtDataColIndexByName(dt, COL_N.req_qty),
-            adj_qty: dtDataColIndexByName(dt, COL_N.adj_qty),
-            final_qty: dtDataColIndexByName(dt, COL_N.final_qty),
-            uom: dtDataColIndexByName(dt, COL_N.uom),
-            unit_cost: dtDataColIndexByName(dt, COL_N.unit_cost),
-            cost: dtDataColIndexByName(dt, COL_N.cost),
+
+        rm_items.forEach((r, i) => {
+          const rm_item = r.item_code;
+          console.log("ROW PAYLOAD ", r)
+          if (!rm_item) return;
+
+          const arr = this.summaryRemain[rm_item] || [];
+          const totalAct = arr[i]?.act_qty || 0;  
+          const act = parseFloat((parseFloat(r.act_qty || 0)).toFixed(2));  
+          const planned = parseFloat((parseFloat(r.required_qty || 0)).toFixed(2));
+          const diffq = parseFloat((act - planned).toFixed(2));
+          const uc = parseFloat(r.unit_cost || 0);
+          const uom = r.uom || r.stock_uom || '';
+          const cost = act * uc;
+          rm_value_total += cost;
+
+          const key = rm_item;
+          const ex = rm_breakdown_map.get(key) || {
+            rm_item,
+            planned_qty: 0,
+            uom,
+            actual_qty: totalAct,
+            diff_qty: 0,
+            valuation_rate_snapshot: uc
           };
-          for (let i = 0; i < dataRows.length; i++) {
-            const rowData = dataRows[i] || [];
-            const rm_item = cellToText(rowData[DCOL.code] ?? '');
-            if (!rm_item) continue;
-            const uom = cellToText(rowData[DCOL.uom] ?? '');
-            const planned = flt(cellToText(rowData[DCOL.req_qty] ?? 0));
-            const adj = flt(cellToText(rowData[DCOL.adj_qty] ?? 0));
-            const finalq = flt(cellToText(rowData[DCOL.final_qty] ?? (planned + adj)));
-            const uc = flt(cellToText(rowData[DCOL.unit_cost] ?? 0));
-            rm_value_total += (finalq * uc);
-            const key = `${rm_item}::${uom}`;
-            const ex = rm_breakdown_map.get(key) || { rm_item, uom, planned_qty: 0, adj_qty: 0, final_qty: 0, valuation_rate_snapshot: uc };
-            ex.planned_qty += planned;
-            ex.adj_qty += adj;
-            ex.final_qty += finalq;
-            if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
-            rm_breakdown_map.set(key, ex);
-          }
-        } else {
-          // Fallback: use server meta.rm_items if the user hasn't expanded/rendered the RM table yet
-          const rmItems = Array.isArray(meta.rm_items) ? meta.rm_items : [];
-          for (const x of rmItems) {
-            const rm_item = cellToText(x.item_code);
-            if (!rm_item) continue;
-            const uom = cellToText(x.stock_uom || x.uom || '');
-            const planned = flt(x.required_qty || 0);
-            const adj = 0;
-            const finalq = planned + adj;
-            const uc = flt(x.unit_cost || 0);
-            rm_value_total += (finalq * uc);
-            const key = `${rm_item}::${uom}`;
-            const ex = rm_breakdown_map.get(key) || { rm_item, uom, planned_qty: 0, adj_qty: 0, final_qty: 0, valuation_rate_snapshot: uc };
-            ex.planned_qty += planned;
-            ex.adj_qty += adj;
-            ex.final_qty += finalq;
-            if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
-            rm_breakdown_map.set(key, ex);
-          }
-        }
+          ex.planned_qty += planned;
+          ex.diff_qty += diffq;
+          if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
+          rm_breakdown_map.set(key, ex);
+
+          rows_detail.push({
+            rm_item,
+            name: r.item_name || '',
+            planned,
+            act,
+            diffq,
+            uom,
+            uc,
+            cost,
+            avail: r.actual_qty,
+            remarks: r.remarks,
+            wh: r.wh
+          });
+        });
+
+        // Summary menu
+        const menuName = meta.resto_menu || meta.item_name || meta.item_code;
+        const category = meta.category || "Uncategorized";
+        const sellItem = meta.sell_item || meta.item_name || meta.item_code;
+
         menu_summaries.push({
-          menu: meta.menu || null,
-          sell_item: meta.sell_item || meta.item_code,
-          qty_sold: flt(meta.qty || 0),
-          sales_amount: flt(meta.selling_amount || 0),
+          menu: menuName,
+          category,
+          sell_item: sellItem,
+          qty_sold: parseFloat(meta.qty || 0),
+          sales_amount: parseFloat(meta.selling_amount || 0),
           rm_value_total,
-          margin_amount: flt(meta.selling_amount || 0) - rm_value_total,
-          category: meta.category || null,
+          margin_amount: parseFloat(meta.selling_amount || 0) - rm_value_total,
+          raw_material_breakdown: rows_detail
         });
       }
+
       const rm_breakdown = Array.from(rm_breakdown_map.values());
+
+      console.log("Menu Summaries", menu_summaries);
+      console.log("RM Breakdown", rm_breakdown);
+
       return { menu_summaries, rm_breakdown };
     }
 
     async save_pos_consumption() {
       const pos_closing_entry = this.fg.get_value('pos_closing_entry');
-      const company = this.fg.get_value('company');
+
+      console.log("POS Closing Entry", pos_closing_entry)
       const warehouse = this.fg.get_value('source_warehouse');
-      if (!pos_closing_entry || !company || !warehouse) {
+      const company = this.fg.get_value('company');
+
+      if (!pos_closing_entry || !warehouse) {
         frappe.msgprint(__('Please fill POS Closing Entry, Company, and Source Warehouse.'));
         return;
       }
@@ -878,12 +1396,17 @@ frappe.provide("resto.stock_usage");
         return;
       }
       const { menu_summaries, rm_breakdown } = this.get_payload();
-      // DEBUG: log unique RM items being validated
+
+      console.log("=== FULL RM BREAKDOWN PAYLOAD ===");
+      console.log(JSON.stringify(rm_breakdown, null, 2));
+
+      console.log("=== FULL MENU SUMMARIES PAYLOAD ===");
+      console.log(JSON.stringify(menu_summaries, null, 2));
+
       try {
         const _all = (rm_breakdown || []).map(r => String(r.rm_item||'').trim()).filter(Boolean);
         console.log('RM uniq items before validation:', Array.from(new Set(_all)));
       } catch (e) {}
-      // Validate RM item codes against actual Item doctype (bulk) to avoid false positives
       const rmItemsAll = (rm_breakdown || [])
         .map(r => String(r.rm_item || '').trim())
         .filter(Boolean);
@@ -932,7 +1455,7 @@ frappe.provide("resto.stock_usage");
       try {
         const resp = await frappe.call({
           method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_pos_consumption',
-          args: { pos_closing_entry, company, warehouse, notes: '', menu_summaries, rm_breakdown }
+          args: { pos_closing: pos_closing_entry, company: company,warehouse: warehouse, notes: '', menu_summaries, rm_breakdown }
         });
         const name = resp.message;
         frappe.msgprint({
@@ -951,7 +1474,6 @@ frappe.provide("resto.stock_usage");
     }
   };
 
-  // Page hook (base code)
   frappe.pages['stock-usage-tool'].on_page_load = function (wrapper) {
     resto.stock_usage.page = new resto.stock_usage.Page(wrapper);
   };

@@ -12,7 +12,9 @@
   "sales_amount",
   "rm_value_total",
   "margin_amount",
-  "category"
+  "category",
+  "raw_material_breakdown",
+  "show_rm"
  ],
  "fields": [
   {
@@ -77,12 +79,24 @@
    "label": "Category",
    "options": "Item Group",
    "reqd": 1
+  },
+  {
+   "fieldname": "raw_material_breakdown",
+   "fieldtype": "JSON",
+   "in_list_view": 1,
+   "label": "Raw Material Breakdown"
+  },
+  {
+   "fieldname": "show_rm",
+   "fieldtype": "Data",
+   "label": "Show RM",
+   "read_only": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-08-10 12:24:51.638443",
+ "modified": "2025-08-28 08:47:48.473173",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "POS Consumption Menu",

@@ -2,7 +2,7 @@ from typing import List, Dict, Union, Optional, Tuple
 import frappe
 from frappe.utils import flt, getdate, nowdate
 from erpnext.manufacturing.doctype.bom.bom import get_bom_items_as_dict
-
+import json
 # ---------- Helpers ----------
 
 
@@ -292,12 +292,15 @@ def get_so_breakdown(sales_order: str, company: str) -> Dict[str, List[Dict]]:
 # ---------- POS Closing Entry Public API ----------
 
 @frappe.whitelist()
-def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Dict]]:
+def get_pos_breakdown(pos_closing_entry: str, company: str, warehouse: str = None) -> Dict[str, List[Dict]]:
     """
     Build aggregated FG list from all POS invoices within a POS Closing Entry, then derive
     RM breakdown from the default/selected BOM per FG item.
-    Returns a shape compatible with the frontend: { items: [ { item_code, item_name, qty, stock_uom,
-      bom_no, selling_rate, selling_amount, rm_items: [...], rm_tree: [...] } ] }
+    Returns a shape compatible with the frontend: 
+    { items: [ 
+        { item_code, item_name, qty, stock_uom, bom_no, selling_rate, selling_amount, 
+          rm_items: [...], rm_tree: [...], actual_qty } 
+      ] }
     """
     if not pos_closing_entry:
         frappe.throw("POS Closing Entry is required")
@@ -312,12 +315,14 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
     # 2) Aggregate by item_code across all invoices
     agg: Dict[str, Dict] = {}
 
-    def _add_row(code: str, name: str, uom: str, qty: float, amount: float):
+    def _add_row(code: str, name: str, uom: str, qty: float, amount: float, resto_menu: str, category: str):
         if not code:
             return
         row = agg.setdefault(code, {
             "item_code": code,
             "item_name": name,
+            "resto_menu": resto_menu,
+            "category": category,
             "stock_uom": uom,
             "qty": 0.0,
             "selling_amount": 0.0,
@@ -327,8 +332,12 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
         row["selling_amount"] += flt(amount)
         if not row.get("item_name") and name:
             row["item_name"] = name
+        if not row.get("resto_menu") and resto_menu:
+            row["resto_menu"] = resto_menu
         if not row.get("stock_uom") and uom:
             row["stock_uom"] = uom
+        if not row.get("category") and category:
+            row["category"] = category
 
     # Prefer Sales Invoice (modern POS), fallback to POS Invoice
     for inv in inv_names:
@@ -336,12 +345,18 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
             si = frappe.get_doc("Sales Invoice", inv)
             for it in (si.items or []):
                 fg_code, fg_name, fg_uom, bom_no = _resolve_fg_and_bom_for_sale(it.item_code, pce.company or company)
-                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0))
+                resto_menu = getattr(it, "resto_menu", None)
+                category = getattr(it, "category", None)
+
+                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0), resto_menu, category)
         elif frappe.db.exists("POS Invoice", inv):
             pi = frappe.get_doc("POS Invoice", inv)
             for it in (pi.items or []):
                 fg_code, fg_name, fg_uom, bom_no = _resolve_fg_and_bom_for_sale(it.item_code, pce.company or company)
-                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0))
+                resto_menu = getattr(it, "resto_menu", None)
+                category = getattr(it, "category", None)
+
+                _add_row(fg_code, fg_name, fg_uom, it.qty, flt(it.net_amount or it.amount or 0), resto_menu, category)
 
     out_items: List[Dict] = []
     for code, base in agg.items():
@@ -365,6 +380,16 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
                 uom = bi.get("stock_uom") or bi.get("uom")
                 req = flt(bi.get("qty") or 0)
                 unit_cost = _get_item_unit_cost(ic)
+
+                # === Ambil actual qty dari Bin ===
+                actual_qty = 0
+                if warehouse:
+                    actual_qty = frappe.db.get_value(
+                        "Bin",
+                        {"item_code": ic, "warehouse": warehouse},
+                        "actual_qty"
+                    ) or 0
+
                 rm_list.append({
                     "item_code": ic,
                     "item_name": bi.get("item_name"),
@@ -372,13 +397,45 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
                     "required_qty": req,
                     "unit_cost": unit_cost,
                     "cost": unit_cost * req,
+                    "actual_qty": actual_qty,
                 })
 
-        rm_tree: List[Dict] = _build_bom_tree(bom_no, qty) if (bom_no and qty) else []
+        # Build rm_tree + inject actual_qty
+        rm_tree: List[Dict] = []
+        if bom_no and qty:
+            rm_tree = _build_bom_tree(bom_no, qty)
+
+            def enrich_tree(tree_nodes):
+                for node in tree_nodes:
+                    ic = node.get("item_code")
+                    if ic and warehouse:
+                        node["actual_qty"] = frappe.db.get_value(
+                            "Bin",
+                            {"item_code": ic, "warehouse": warehouse},
+                            "actual_qty"
+                        ) or 0
+                    else:
+                        node["actual_qty"] = 0
+                    # recursive kalau ada children
+                    if node.get("children"):
+                        enrich_tree(node["children"])
+
+            enrich_tree(rm_tree)
+
+        # === Ambil actual qty untuk FG item juga ===
+        fg_actual_qty = 0
+        if warehouse:
+            fg_actual_qty = frappe.db.get_value(
+                "Bin",
+                {"item_code": code, "warehouse": warehouse},
+                "actual_qty"
+            ) or 0
 
         out_items.append({
             "item_code": code,
             "item_name": base.get("item_name"),
+            "resto_menu": base.get("resto_menu"),
+            "category": base.get("category"),
             "qty": qty,
             "stock_uom": base.get("stock_uom"),
             "bom_no": bom_no,
@@ -386,6 +443,7 @@ def get_pos_breakdown(pos_closing_entry: str, company: str) -> Dict[str, List[Di
             "selling_amount": amount,
             "rm_items": rm_list,
             "rm_tree": rm_tree,
+            "actual_qty": fg_actual_qty,   # stok per warehouse untuk FG
         })
 
     return {"items": out_items}
@@ -460,7 +518,7 @@ def create_stock_entry_from_pos_usage(
 
 @frappe.whitelist()
 def create_pos_consumption(
-    pos_closing_entry: str,
+    pos_closing: str,
     company: str,
     warehouse: str,
     notes: Optional[str] = None,
@@ -475,7 +533,7 @@ def create_pos_consumption(
       menu_summaries: [
         { "menu": <Resto Menu name or empty>, "sell_item": <Item>, "qty_sold": float,
           "sales_amount": float, "rm_value_total": float, "margin_amount": float,
-          "category": <str or Link> }
+          "category": <str or Link>, "raw_material_breakdown": list }
       ]
       rm_breakdown: [
         { "rm_item": <Item>, "uom": <UOM>, "planned_qty": float,
@@ -494,7 +552,7 @@ def create_pos_consumption(
         except Exception:
             rm_breakdown = []
 
-    pce = frappe.get_doc("POS Closing Entry", pos_closing_entry)
+    pce = frappe.get_doc("POS Closing Entry", pos_closing)
 
     # Auto fields from closing
     closing_start = getattr(pce, "period_start_date", None) or getattr(pce, "start_date", None)
@@ -503,7 +561,7 @@ def create_pos_consumption(
         company = getattr(pce, "company", None)
 
     doc = frappe.new_doc("POS Consumption")
-    doc.pos_closing_voucher = pce.name
+    doc.pos_closing = pce.name
     doc.company = company
     doc.warehouse = warehouse
     doc.closing_start = closing_start
@@ -535,6 +593,7 @@ def create_pos_consumption(
             "rm_value_total": flt(ms.get("rm_value_total")),
             "margin_amount": flt(ms.get("margin_amount")),
             "category": ms.get("category"),
+            "raw_material_breakdown": json.dumps(ms.get("raw_material_breakdown") or []),
         })
 
     # Append RM Breakdown
@@ -547,12 +606,19 @@ def create_pos_consumption(
             "rm_item": rm.get("rm_item"),
             "uom": rm.get("uom"),
             "planned_qty": flt(rm.get("planned_qty")),
-            "adj_qty": flt(rm.get("adj_qty")),
-            "final_qty": flt(rm.get("final_qty")),
+            "actual_qty": flt(rm.get("actual_qty")),
+            "diff_qty": flt(rm.get("diff_qty")),
             "valuation_rate_snapshot": flt(val_rate or 0),
         })
 
+    frappe.log_error(f"Company: {company}, Warehouse: {warehouse}", "POS Consumption Debug")
+    print(f"Company: {company}, Warehouse: {warehouse}")
+
+
     doc.insert()
+
+    doc.submit()
+
     return doc.name
 
 @frappe.whitelist()
