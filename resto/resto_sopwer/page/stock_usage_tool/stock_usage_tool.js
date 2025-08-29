@@ -176,11 +176,6 @@ frappe.provide("resto.stock_usage");
         color: var(--text-color);
       }
 
-      .sut-table tbody tr:hover td{
-        background-color: var(--hover-color, #f4f5f7);
-        color: var(--hover-text-color, #000);
-      }
-
       .sut-table input[type="text"] {
         border: none;
         padding: 0;
@@ -240,9 +235,6 @@ frappe.provide("resto.stock_usage");
         color: var(--text-color, #333);
       }
 
-      tr:hover td:hover .td-input {
-        color: var(--hover-text-color, #000);
-      }
     </style>
 
   `;
@@ -846,6 +838,7 @@ frappe.provide("resto.stock_usage");
           const qty = Number(row.total_required_qty) || 0;
           return sum + qty;
         }, 0) || 0;
+        const totalCost = this.groups[idx]?.rows?.reduce((sum, r) => sum + (parseFloat(r.total_cost) || 0), 0);
 
         const group = this.groups[idx];
         const $grpBlock = group.$block;
@@ -880,12 +873,14 @@ frappe.provide("resto.stock_usage");
 
           $input.closest("tr").find("td:eq(4)").text(aggRow.diff_qty);
           $input.closest("tr").find("td:eq(9)").text(fmtCurrency(aggRow.total_cost));
+
+          const updatedTotalCost = group.rows.reduce((sum, r) => sum + (parseFloat(r.total_cost) || 0), 0);
+          $block.find(`#sut-total-cost-${idx}`).text('Rp ' + updatedTotalCost.toLocaleString('id-ID'));
         });
 
         $block.find(`#sut-total-qty-${idx}`).text(total); 
-        $block.find(`#sut-total-cost-${idx}`).text( 'Rp ' + this.groups[idx].rows .reduce((a, b) => a + (parseFloat(b.total_cost) || 0), 0) .toLocaleString('id-ID') 
-      ); 
-    };
+        $block.find(`#sut-total-cost-${idx}`).text(totalCost);
+      };
       renderTable();
     }
 
@@ -935,19 +930,20 @@ frappe.provide("resto.stock_usage");
       const me = this; 
       const defaultWh = this.fg ? this.fg.get_value('source_warehouse') : "-";
 
+      rows = rows || [];
       const allRM = this.groups
         .filter(g => g && g.meta && Array.isArray(g.meta.rm_items))
         .map(g => g.meta.rm_items)
         .flat();
 
-      rows.forEach((r, idx) => {
+      rows.forEach((r, i) => {
         const planned = parseFloat(r.req_qty || 0);
         const arr = me.summaryRemain[r.code] || [];
-        const match = arr.find(x => x.row_id === r.code || x.idx === idx);
+        const match = arr.find(x => x.row_id === r.code || x.idx === i);
         const totalAct = match ? match.act_qty : 0;
         const totalPlanned = allRM
-          .filter(x => x.item_code === r.code)
-          .reduce((sum, x) => sum + (parseFloat(x.required_qty) || 0), 0);
+            .filter(x => x.item_code === r.code)
+            .reduce((sum, x) => sum + (parseFloat(x.required_qty) || 0), 0);
 
         r.act_qty = totalPlanned > 0 ? (planned / totalPlanned) * totalAct : 0;
         r.diff_qty = r.act_qty - planned;
@@ -964,25 +960,27 @@ frappe.provide("resto.stock_usage");
               <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
             </div>
           </div>
-          <table class="sut-table" id="sut-dt-${idx}" border="1">
-            <thead>
-              <tr>
-                <th style="text-align:center;">Code</th>
-                <th style="text-align:center;">Name</th>
-                <th style="text-align:right;">Req Qty</th>
-                <th style="text-align:right;">Act Qty</th>
-                <th style="text-align:right;">Diff Qty</th>
-                <th style="text-align:center;">UOM</th>
-                <th style="text-align:right;">Avail</th>
-                <th style="text-align:center;">WH</th>
-                <th style="text-align:center;">Remarks</th>
-                <th style="text-align:right;">Unit Cost</th>
-                <th style="text-align:right;">Cost</th>
-                <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div style="overflow-x:auto; width:100%;">
+            <table class="sut-table" border="1">
+              <thead>
+                <tr>
+                  <th style="text-align:center;">Code</th>
+                  <th style="text-align:center;">Name</th>
+                  <th style="text-align:right;">Req Qty</th>
+                  <th style="text-align:right;">Act Qty</th>
+                  <th style="text-align:right;">Diff Qty</th>
+                  <th style="text-align:center;">UOM</th>
+                  <th style="text-align:right;">Avail</th>
+                  <th style="text-align:center;">WH</th>
+                  <th style="text-align:center;">Remarks</th>
+                  <th style="text-align:right;">Unit Cost</th>
+                  <th style="text-align:right;">Cost</th>
+                  <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
           <div class="sut-summary">
             <div>Lines: <b id="sut-rm-lines-${idx}">0</b></div>
             <div>
@@ -997,114 +995,186 @@ frappe.provide("resto.stock_usage");
       this.$body.find("#sut-groups").append($block);
       $block.show();
 
-      this.groups[idx] = { meta, rows: rows || [], $block };
-      const getMaxQty = (code) => me.summaryRemain[code] || 0;
-      
+      this.groups[idx] = { meta, rows, $block };
+      const group = this.groups[idx];
+
       const renderTable = () => {
         const $tbody = $block.find("tbody");
         $tbody.empty();
 
-        me.groups[idx].rows.forEach((row, r) => {
-          const maxQty = getMaxQty(row.code);
-          console.log('ROW ITEM BLOCK', row)
+        group.rows.forEach((row, rIdx) => {
+          const $tr = $('<tr>').attr('data-row', rIdx);
 
-          $tbody.append(`
-            <tr data-row="${r}">
-              <td style="text-align:center;">${row.code || ""}</td>
-              <td style="text-align:center;">${row.name || ""}</td>
-              <td style="text-align:right;">${row.req_qty || 0}</td>
-              <td style="text-align:right;">${row.act_qty.toFixed(2)}</td>
-              <td style="text-align:right;">${row.diff_qty.toFixed(2) || 0}</td>
-              <td style="text-align:center;">${row.uom || ""}</td>
-              <td style="text-align:right;">${row.actual_qty}</td>
-              <td style="text-align:center;">${row.wh || ""}</td>
-              <td style="text-align:center;">
-                <input
-                  type="text"
-                  class="td-input"
-                  value="${row.remarks || ""}"
-                  data-col="remarks"
-                  style ="
-                    width:100%;
-                    border:none;
-                    padding:0;
-                    margin:0;
-                    background:transparent;
-                    font-size:inherit;
-                    font-family:inherit;
-                    text-align:left;
-                  "
-                />
-              </td>
-              <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
-              <td style="text-align:right;">${fmtCurrency(row.cost || 0)}</td>
-              <td style="text-align:center;"><input type="checkbox" class="check-row"></td>
-            </tr>
+          // ===== Code (Link Field ke Item) =====
+          const $tdCode = $('<td style="text-align:center;"></td>');
+          const code_control = frappe.ui.form.make_control({
+              parent: $tdCode[0],
+              df: {
+                  fieldtype: 'Link',
+                  options: 'Item',
+                  in_place_edit: true,
+              },
+              render_input: true,
+          });
+
+          $(code_control.wrapper).addClass("sut-table-input"); 
+          $(code_control.wrapper).find('input')
+            .removeClass("form-control input-sm")   
+            .addClass("td-input")
+            .css('text-align', 'left');
+
+          if (row.code) {
+            code_control.set_value(row.code);
+          }
+
+          code_control.$input.on('change', async function () {
+            const val = $(this).val();
+            row.code = val;
+
+            if (val) {
+              const item = await frappe.db.get_doc('Item', val);
+              // update langsung row
+              row.name = item.item_name;
+              row.uom = item.stock_uom;
+              row.unit_cost = parseFloat(item.valuation_rate || 0);
+              row.cost = row.unit_cost * row.act_qty;
+
+              const rm_item_obj = group.meta.rm_items[rIdx];
+              if (rm_item_obj) {
+                rm_item_obj.item_name = item.item_name;
+                rm_item_obj.uom = item.stock_uom;
+                rm_item_obj.unit_cost = parseFloat(item.valuation_rate || 0);
+              }
+              renderTable(); 
+            }
+          });
+
+          $tr.append($tdCode);
+
+          // ===== Name =====
+          const $tdName = $(`<td class="td-left">
+            <span>${row.name || ''}</span>
+          </td>`);
+          $tr.append($tdName);
+
+          // ===== Req Qty =====
+          const $tdReq = $(`<td style="text-align:right;">
+            <input type="number" class="td-input" value="${row.req_qty || 0}" />
+          </td>`);
+          $tdReq.find('input').on('input', function () {
+            row.req_qty = parseFloat($(this).val()) || 0;
+            row.diff_qty = row.act_qty - row.req_qty;
+            row.cost = row.act_qty * row.unit_cost;
+            renderTable();
+          });
+          $tr.append($tdReq);
+
+          // ===== Act Qty =====
+          const $tdAct = $(`<td style="text-align:right;">
+            <input type="number" class="td-input" value="${row.act_qty.toFixed(2)}" />
+          </td>`);
+          $tdAct.find('input').on('input', function () {
+            row.act_qty = parseFloat($(this).val()) || 0;
+            row.diff_qty = row.act_qty - row.req_qty;
+            row.cost = row.act_qty * row.unit_cost;
+            renderTable();
+          });
+          $tr.append($tdAct);
+
+          // ===== Diff Qty =====
+          $tr.append(`<td style="text-align:right;">${row.diff_qty.toFixed(2)}</td>`);
+
+          // ===== UOM =====
+          const $tdUOM = $(`<td style="text-align:center;">
+            <span>${row.uom || ''}</span>
+          </td>`);
+          $tr.append($tdUOM);
+
+          // ===== Avail =====
+          const $tdAvail = $(`<td style="text-align:right;">
+            <span>${row.actual_qty || 0}</span>
+          </td>`);
+          $tr.append($tdAvail);
+
+          // ===== WH =====
+          const $tdWH = $(`<td style="text-align:center;">
+            <span>${row.wh || ''} </span>
+          </td>`);
+          $tr.append($tdWH);
+
+          // ===== Remarks =====
+          const $tdRemarks = $(`<td style="text-align:center;">
+            <input type="text" class="td-input" style="text-align:left" value="${row.remarks || ''}" />
+          </td>`);
+          $tdRemarks.find('input').on('input', function () { row.remarks = $(this).val(); });
+          $tr.append($tdRemarks);
+
+          const $tdCost = $(`
+            <td style="text-align:right;">
+              <span>${fmtCurrency(row.unit_cost || 0)}</span>
+            </td>
           `);
-        });
+          $tr.append($tdCost);
 
-        $block.find(`#sut-rm-lines-${idx}`).text(this.groups[idx].rows.length);
+
+          // ===== Cost =====
+          $tr.append(`<td style="text-align:right;">${fmtCurrency(row.cost)}</td>`);
+
+          // ===== Checkbox =====
+          $tr.append('<td style="text-align:center;"><input type="checkbox" class="check-row"></td>');
+
+          $tbody.append($tr);
+      });
+
+
+        $block.find(`#sut-rm-lines-${idx}`).text(group.rows.length);
         $block.find(`#sut-total-rm-qty-${idx}`).text(
-          this.groups[idx].rows.reduce((a, b) => a + (parseFloat(b.req_qty) || 0), 0)
+          group.rows.reduce((a,b) => a + (parseFloat(b.req_qty)||0), 0)
         );
-
         $block.find(`#sut-total-rm-cost-${idx}`).text(
-          'Rp ' + this.groups[idx].rows
-            .reduce((a, b) => a + (parseFloat(b.cost) || 0), 0)
-            .toLocaleString('id-ID')
+          'Rp ' + group.rows.reduce((a,b) => a + (parseFloat(b.cost)||0), 0).toLocaleString('id-ID')
         );
       };
 
-      // Toolbar events
       $block.on("click", "[data-action]", (e) => {
         const action = $(e.currentTarget).data("action");
         if (action === "add") {
           const wh = this.fg.get_value("source_warehouse") || "";
-          this.groups[idx].rows.push({
-            code: "", name: "", req_qty: 1, act_qty: 0, diff_qty: 1,
-            uom: "", actual_qty: 0, wh, remarks: "", unit_cost: 0, cost: 0
+
+          group.rows.push({
+              code: "", name: "", req_qty: 1, act_qty: 0, diff_qty: 1,
+              uom: "", actual_qty: 0, wh, remarks: "", unit_cost: 0, cost: 0
           });
+
+          group.meta.rm_items.push({
+              item_code: "",
+              item_name: "",
+              required_qty: 1,
+              act_qty: 0,
+              uom: "",
+              actual_qty: 0,
+              wh,
+              remarks: "",
+              unit_cost: 0,
+              cost: 0
+          });
+
           renderTable();
         } else if (action === "remove") {
           const $checked = $block.find(".check-row:checked");
           const toRemove = $checked.closest("tr").map((_, el) => parseInt($(el).data("row"))).get();
-          this.groups[idx].rows = this.groups[idx].rows.filter((_, r) => !toRemove.includes(r));
+          group.rows = group.rows.filter((_, rIdx) => !toRemove.includes(rIdx));
+          group.meta.rm_items = group.meta.rm_items.filter((_, rIdx) => !toRemove.includes(rIdx))
           renderTable();
         } else if (action === "recalc") {
-          this.groups[idx].rows.forEach(r => {
-            r.diff_qty = (parseFloat(r.act_qty) || 0) - (parseFloat(r.req_qty) || 0);
-            r.cost = r.diff_qty * (parseFloat(r.unit_cost) || 0);
+          group.rows.forEach(r => {
+            r.diff_qty = r.act_qty - r.req_qty;
+            r.cost = r.act_qty * r.unit_cost;
           });
           renderTable();
         }
       });
 
-      const group = this.groups[idx];
-      const $grpBlock = group.$block;
-
-      $grpBlock.off("input blur", "input[data-col]");
-      $grpBlock.on("blur", "input[data-col='remarks']", function () {
-        const $input = $(this);
-        const rowIndex = parseInt($input.closest("tr").data("row"));
-        const val = $input.val() || "";
-
-        const group = me.groups[idx];
-        if (!group) return;
-
-        const aggRow = group.rows[rowIndex];
-        if (aggRow) {
-          aggRow.remarks = val;
-        }
-
-        if (!group.meta) group.meta = {};
-        if (!group.meta.rm_items) group.meta.rm_items = [];
-        group.meta.rm_items[rowIndex] = {
-          ...group.meta.rm_items[rowIndex],
-          remarks: val
-        };
-
-        console.log("Updated remarks:", val, "for row:", rowIndex);
-      });
       renderTable();
     }
 
@@ -1296,9 +1366,16 @@ frappe.provide("resto.stock_usage");
         rm_items.forEach((r, i) => {
           const tableRow = g.rows[i];
           if (tableRow) {
-            r.act_qty = tableRow.act_qty;
-            r.actual_qty = parseFloat(tableRow.actual_qty.toFixed(2) || 0); 
-            r.wh = tableRow.wh || ''; 
+            r.item_code = tableRow.code || '';
+            r.item_name = tableRow.name || '';
+            r.required_qty = parseFloat(tableRow.req_qty || 0);
+            r.act_qty = parseFloat(tableRow.act_qty || 0);
+            r.actual_qty = parseFloat(tableRow.actual_qty || 0);
+            r.uom = tableRow.uom || '';
+            r.wh = tableRow.wh || '';
+            r.unit_cost = parseFloat(tableRow.unit_cost || 0);
+            r.cost = parseFloat(tableRow.cost || 0);
+            r.remarks = tableRow.remarks || '';
           }
         });
       });
