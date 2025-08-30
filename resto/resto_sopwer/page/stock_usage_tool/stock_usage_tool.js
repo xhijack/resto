@@ -351,49 +351,49 @@ frappe.provide("resto.stock_usage");
 
   function aggregateRawMaterials(posBreakdown, defaultWarehouse = "-") {
     const rmAgg = {};
-    (posBreakdown || []).forEach(fgItem => {
-      (fgItem.rm_items || []).forEach(rm => {
 
-        const code = rm.item_code;
-        const whValue = rm.wh || defaultWarehouse;
-
-        if (!code) return;
-
-        if (!rmAgg[code]) {
-          rmAgg[code] = {
-            item_code: code,
-            item_name: rm.item_name || "",
-            stock_uom: rm.stock_uom || "",
-            act_qty: rm.act_qty || 0,
-            actual_qty: rm.actual_qty || "",
-            wh: whValue || "-",
-            total_required_qty: 0,  
-            total_cost: 0,
-            unit_cost: rm.unit_cost || ""
-          };
-        } else {
-          const whValue = rm.wh || fgItem.source_warehouse || "";
-          rmAgg[code].wh = whValue;
-        }
-
-        console.log("FG Items", fgItem)
-
-        let reqQty = Number(rm.required_qty);
-        let cost = Number(rm.cost);
-
-        if (!isNaN(reqQty)) {
-          rmAgg[code].total_required_qty += reqQty;
-        }
-
-        if (!isNaN(cost)) {
-          rmAgg[code].total_cost += cost;
-        }
-
-      });
+    (posBreakdown || []).forEach(item => {
+      // kalau bentuknya FG dengan rm_items
+      if (item.rm_items) {
+        item.rm_items.forEach(rm => processRM(rm, item.source_warehouse || defaultWarehouse));
+      } else {
+        // kalau langsung flat RM
+        processRM(item, defaultWarehouse);
+      }
     });
+
+    function processRM(rm, whValue) {
+      const code = rm.item_code;
+      if (!code) return;
+
+      if (!rmAgg[code]) {
+        rmAgg[code] = {
+          item_code: code,
+          item_name: rm.item_name || "",
+          stock_uom: rm.stock_uom || rm.uom || "",
+          act_qty: rm.act_qty || 0,
+          actual_qty: rm.actual_qty || "",
+          wh: rm.wh || whValue || "-",
+          total_required_qty: 0,
+          total_cost: 0,
+          unit_cost: rm.unit_cost || 0
+        };
+      }
+
+      let reqQty = Number(rm.required_qty);
+      let cost = Number(rm.cost);
+
+      if (!isNaN(reqQty)) {
+        rmAgg[code].total_required_qty += reqQty;
+      }
+      if (!isNaN(cost)) {
+        rmAgg[code].total_cost += cost;
+      }
+    }
 
     return Object.values(rmAgg);
   }
+
 
   resto.stock_usage.Page = class {
     constructor(wrapper) {
@@ -575,7 +575,6 @@ frappe.provide("resto.stock_usage");
         <table class="sut-table sut-fg-table">
           <thead>
             <tr>
-              <th></th>
               <th>Item Code</th>
               <th>Item Name</th>
               <th>Menu</th>
@@ -597,10 +596,7 @@ frappe.provide("resto.stock_usage");
       (items || []).forEach((meta, i) => {
         const c = this.get_fg_cost(i);
         html += `
-          <tr data-row="${i}">
-            <td style="text-align:center;">
-              <span class="sut-exp" data-row="${i}" style="cursor:pointer;user-select:none;">&#9654;</span>
-            </td>
+          <tr style="cursor:pointer;user-select:none;" class="sut-exp" data-row="${i}">
             <td>${frappe.utils.escape_html(meta.item_code || '')}</td>
             <td>${frappe.utils.escape_html(meta.item_name || '')}</td>
             <td>${frappe.utils.escape_html(meta.resto_menu || '')}</td>
@@ -620,7 +616,6 @@ frappe.provide("resto.stock_usage");
       // total row
       html += `
         <tr class="sut-total-row">
-          <td></td>
           <td><b>Total</b></td>
           <td></td>
           <td></td>
@@ -657,7 +652,6 @@ frappe.provide("resto.stock_usage");
         const isVisible = g.$block && g.$block.is(':visible');
 
         $('.sut-item-block').hide();
-        $('.sut-exp').html('&#9654;');
 
         // if (g && g.$block) {
         //   $('.sut-item-block').hide();
@@ -666,7 +660,6 @@ frappe.provide("resto.stock_usage");
         // }
 
         if (!isVisible) {
-          $(this).html('&#9660;');
           const meta = g.meta || g;
           const wh = me.fg.get_value('source_warehouse')
           const rowsRM = (meta.rm_items || []).map(x => {
@@ -701,11 +694,14 @@ frappe.provide("resto.stock_usage");
 
     // ===== RM SUMMARY =====
     render_rm_summary(rows, idx) {
+      console.log("ROWS Render RM SUMMARY", rows)
       const defaultWh = this.fg ? this.fg.get_value('source_warehouse') : "-";
       const me = this;
       const prev = this.groups[idx] || {};
 
       const aggregatedRM = aggregateRawMaterials(rows, defaultWh);
+      console.log("=== render_rm_summary ===");
+      console.log("aggregatedRM", aggregatedRM);
 
       if (prev.meta && Array.isArray(prev.meta.rm_items)) {
         aggregatedRM.forEach(r => {
@@ -740,7 +736,6 @@ frappe.provide("resto.stock_usage");
         }
       };
 
-
       const summaryRemain = {};
       aggregatedRM.forEach(r => {
         summaryRemain[r.item_code] = parseFloat(r.act_qty || 0);
@@ -753,7 +748,6 @@ frappe.provide("resto.stock_usage");
             <div><b>Summary Raw Material Items</b></div>
             <div style="display:flex; align-items:center; gap:4px;">
               <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
-              <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
             </div>
           </div>
           <table class="sut-table" id="sut-dt-${idx}" border="1">
@@ -796,6 +790,7 @@ frappe.provide("resto.stock_usage");
         const $tbody = $block.find("tbody");
         $tbody.empty();
         this.groups[idx].rows.forEach((row, r) => {
+          if (!row.item_code) return; 
           console.log("rows", row)
           $tbody.append(`
             <tr data-row="${r}">
@@ -811,19 +806,18 @@ frappe.provide("resto.stock_usage");
                   oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
                   style="
                     width:100%;
-                    border:none;
-                    padding:0;
-                    margin:0;
-                    background:transparent;
                     font-size:inherit;
                     font-family:inherit;
                     text-align:right;
+                    border: 1px solid #ccc; 
+                    padding: 2px 4px; 
+                    border-radius: 4px;
                   "
                 />
               </td>
 
               <td style="text-align:right;">${row.diff_qty || 0}</td>
-              <td style="text-align:center;">${row.stock_uom || ""}</td>
+              <td style="text-align:center;">${row.stock_uom || row.uom || ""}</td>
               <td style="text-align:right;">${row.actual_qty || 0}</td>
               <td style="text-align:center;">${defaultWh || ""}</td>
               <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
@@ -871,6 +865,13 @@ frappe.provide("resto.stock_usage");
             act_qty: parseFloat(r.act_qty) || 0
           }));
 
+          me.groups.forEach(g => {
+            if (g && g.$block) {
+              g.$block.hide();
+              g.$block = null;
+            }
+          });
+
           $input.closest("tr").find("td:eq(4)").text(aggRow.diff_qty);
           $input.closest("tr").find("td:eq(9)").text(fmtCurrency(aggRow.total_cost));
 
@@ -880,6 +881,7 @@ frappe.provide("resto.stock_usage");
 
         $block.find(`#sut-total-qty-${idx}`).text(total); 
         $block.find(`#sut-total-cost-${idx}`).text(totalCost);
+
       };
       renderTable();
     }
@@ -1021,7 +1023,12 @@ frappe.provide("resto.stock_usage");
           $(code_control.wrapper).find('input')
             .removeClass("form-control input-sm")   
             .addClass("td-input")
-            .css('text-align', 'left');
+            .css({
+              'text-align': 'left',
+              'border': '1px solid #ccc',
+              'padding': '2px 4px',
+              'border-radius': '4px'
+            });
 
           if (row.code) {
             code_control.set_value(row.code);
@@ -1059,7 +1066,13 @@ frappe.provide("resto.stock_usage");
 
           // ===== Req Qty =====
           const $tdReq = $(`<td style="text-align:right;">
-            <input type="number" class="td-input" value="${row.req_qty || 0}" />
+            <input 
+              type="text" 
+              class="td-input" 
+              style="border: 1px solid #ccc; padding: 2px 4px; border-radius: 4px;"
+              oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
+              value="${row.req_qty.toFixed(2)}" 
+            />
           </td>`);
           $tdReq.find('input').on('input', function () {
             row.req_qty = parseFloat($(this).val()) || 0;
@@ -1071,7 +1084,13 @@ frappe.provide("resto.stock_usage");
 
           // ===== Act Qty =====
           const $tdAct = $(`<td style="text-align:right;">
-            <input type="number" class="td-input" value="${row.act_qty.toFixed(2)}" />
+            <input 
+              type="text" 
+              class="td-input" 
+              style="border: 1px solid #ccc; padding: 2px 4px; border-radius: 4px;"
+              oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
+              value="${row.act_qty.toFixed(2)}" 
+            />
           </td>`);
           $tdAct.find('input').on('input', function () {
             row.act_qty = parseFloat($(this).val()) || 0;
@@ -1104,7 +1123,12 @@ frappe.provide("resto.stock_usage");
 
           // ===== Remarks =====
           const $tdRemarks = $(`<td style="text-align:center;">
-            <input type="text" class="td-input" style="text-align:left" value="${row.remarks || ''}" />
+            <input 
+              type="text" 
+              class="td-input" 
+              style="text-align:left; border: 1px solid #ccc; padding: 2px 4px; border-radius: 4px;" 
+              value="${row.remarks || ''}" 
+            />
           </td>`);
           $tdRemarks.find('input').on('input', function () { row.remarks = $(this).val(); });
           $tr.append($tdRemarks);
@@ -1138,6 +1162,8 @@ frappe.provide("resto.stock_usage");
 
       $block.on("click", "[data-action]", (e) => {
         const action = $(e.currentTarget).data("action");
+        const group = me.groups[idx];
+
         if (action === "add") {
           const wh = this.fg.get_value("source_warehouse") || "";
 
@@ -1172,7 +1198,55 @@ frappe.provide("resto.stock_usage");
             r.cost = r.act_qty * r.unit_cost;
           });
           renderTable();
-        }
+        } 
+        // else if (action === "save") {
+        //   group.rows.forEach(r => {
+        //     if (!r.code) return; 
+
+        //     let exist = group.meta.rm_items.find(x => x.item_code === r.code);
+        //     if (exist) {
+        //         exist.item_name = r.name || "";
+        //         exist.uom = r.uom || "";
+        //         exist.required_qty = r.req_qty || 0;
+        //         exist.act_qty = r.act_qty || 0;
+        //         exist.unit_cost = r.unit_cost || 0;
+        //         exist.total_cost = r.cost || 0;
+        //         exist.remarks = r.remarks || "";
+        //         exist.wh = r.wh || "";
+        //     } else {
+        //         group.meta.rm_items.push({
+        //             item_code: r.code,
+        //             item_name: r.name || "",
+        //             uom: r.uom || "",
+        //             required_qty: r.req_qty || 0,
+        //             act_qty: r.act_qty || 0,
+        //             unit_cost: r.unit_cost || 0,
+        //             total_cost: r.cost || 0,
+        //             remarks: r.remarks || "",
+        //             wh: r.wh || ""
+        //         });
+        //     }
+        //   });
+
+        //   this.summaryRemain = {};
+        //   group.meta.rm_items.forEach(r => {
+        //     this.summaryRemain[r.item_code] = r.act_qty;
+        //   });
+
+        //   // 🔴 jangan lempar group.meta.rm_items
+        //   // this.render_rm_summary(group.meta.rm_items, idx);
+
+        //   // ✅ lempar semua rm_items dari seluruh groups
+        //   const allRM = this.groups
+        //     .filter(g => g.meta && Array.isArray(g.meta.rm_items))
+        //     .map(g => g.meta.rm_items)
+        //     .flat();
+
+        //   this.render_rm_summary(allRM);
+        //   console.log("Render rm Items", allRM)
+        //   frappe.msgprint("Raw Material changes saved!");
+        // }
+
       });
 
       renderTable();
@@ -1299,8 +1373,13 @@ frappe.provide("resto.stock_usage");
     }
 
     clear_all() { 
-      this.groups = []; 
-      this.$body.find('#sut-groups').empty(); 
+      const me = this;
+      me.groups.forEach(g => {
+        if (g && g.$block) {
+          g.$block.hide();
+          g.$block = null;
+        }
+      });
     }
 
     // ===== Availability =====
