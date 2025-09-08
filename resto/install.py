@@ -23,3 +23,14 @@ def after_migrate():
             "fetch_from": "resto_menu.menu_category",
             "read_only": 1,
         }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "pin_code", "dt": "User"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "User",
+            "fieldname": "pin_code",
+            "label": "PIN Code",
+            "fieldtype": "Data",
+            "length": 6,
+            "insert_after": "username"
+        }).insert(ignore_permissions=True)
