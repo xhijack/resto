@@ -12,7 +12,9 @@
   "recipe_item",
   "default_bom",
   "menu_category",
-  "enabled"
+  "enabled",
+  "add_ons",
+  "quick_notes"
  ],
  "fields": [
   {
@@ -63,11 +65,23 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "label": "Enabled"
+  },
+  {
+   "fieldname": "add_ons",
+   "fieldtype": "Table",
+   "label": "Add Ons",
+   "options": "Menu Add Ons"
+  },
+  {
+   "fieldname": "quick_notes",
+   "fieldtype": "Table",
+   "label": "Quick Notes",
+   "options": "Quick Notes"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-08-10 11:59:01.614805",
+ "modified": "2025-09-08 13:26:23.218869",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
@@ -87,6 +101,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []

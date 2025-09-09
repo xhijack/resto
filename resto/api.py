@@ -22,3 +22,16 @@ def login_with_pin(email, pin):
         frappe.log_error(message=frappe.get_traceback(), title="Login With PIN Failed")
         frappe.local.response["http_status_code"] = 500
         return {"status": "error", "message": frappe.utils.cstr(e)}
+
+@frappe.whitelist(allow_guest=False)
+def create_customer(name, mobile_no):
+    doc = frappe.get_doc({
+        "doctype": "Customer",
+        "customer_name": name,
+        "customer_type": "Company",
+        "mobile_no": mobile_no,
+        "mobile_number": mobile_no
+    })
+    doc.insert(ignore_permissions=True)
+    frappe.db.commit()
+    return doc.as_dict()
