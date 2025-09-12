@@ -703,14 +703,17 @@ frappe.provide("resto.stock_usage");
 
       const existingSummary = (prev.meta && Array.isArray(prev.meta.rm_items)) ? prev.meta.rm_items : [];
 
-      const merged = [...existingSummary];
+      const merged = [];
       aggregatedRM.forEach(r => {
-        const found = merged.find(m => m.item_code === r.item_code);
+        const found = existingSummary.find(m => m.item_code === r.item_code);
         if (found) {
-          found.required_qty = r.total_required_qty;
-          found.unit_cost = r.unit_cost;
-          found.diff_qty = (parseFloat(found.act_qty) || 0) - (parseFloat(found.required_qty) || 0);
-          found.total_cost = (parseFloat(found.act_qty) || 0) * (parseFloat(r.unit_cost) || 0);
+          merged.push({
+            ...found,
+            required_qty: r.total_required_qty,
+            unit_cost: r.unit_cost,
+            diff_qty: (parseFloat(found.act_qty) || 0) - (parseFloat(r.total_required_qty) || 0),
+            total_cost: (parseFloat(found.act_qty) || 0) * (parseFloat(r.unit_cost) || 0),
+          });
         } else {
           merged.push({
             item_code: r.item_code,
@@ -984,6 +987,7 @@ frappe.provide("resto.stock_usage");
               <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
               <button class="btn btn-default btn-sm" data-action="add">Add</button>
               <button class="btn btn-default btn-sm" data-action="remove">Remove</button>
+              <button class="btn btn-primary btn-sm" data-action="save">Save</button>
             </div>
           </div>
           <div style="overflow-x:auto; width:100%;">
@@ -1108,21 +1112,20 @@ frappe.provide("resto.stock_usage");
 
           // ===== Act Qty =====
           const $tdAct = $(`<td style="text-align:right;">
-            <input 
-              type="text" 
-              class="td-input" 
+            <input type="text" class="td-input"
               style="border: 1px solid #ccc; padding: 2px 4px; border-radius: 4px;"
               oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
-              value="${row.act_qty.toFixed(2)}" 
-            />
+              value="${(row._pending_act_qty ?? row.act_qty).toFixed(2)}" />
           </td>`);
+
           $tdAct.find('input').on('input', function () {
-            row.act_qty = parseFloat($(this).val()) || 0;
-            row.diff_qty = row.act_qty - row.req_qty;
-            row.cost = row.act_qty * row.unit_cost;
+            row._pending_act_qty = parseFloat($(this).val()) || 0;
+            row.diff_qty = (row._pending_act_qty ?? row.act_qty) - row.req_qty;
+            row.cost = (row._pending_act_qty ?? row.act_qty) * row.unit_cost;
             renderTable();
           });
           $tr.append($tdAct);
+
 
           // ===== Diff Qty =====
           $tr.append(`<td style="text-align:right;">${row.diff_qty.toFixed(2)}</td>`);
@@ -1223,6 +1226,25 @@ frappe.provide("resto.stock_usage");
           });
           renderTable();
         } 
+        else   if (action === "save") {
+          group.rows.forEach(row => {
+            if (row._pending_act_qty != null) {
+              row.act_qty = row._pending_act_qty;
+              delete row._pending_act_qty; // bersihkan setelah commit
+            }
+          });
+
+          // update summaryRemain
+          me.summaryRemain[group.meta.item_code] = group.rows.map(r => ({
+            row_id: r.code,
+            act_qty: r.act_qty,
+            req_qty: r.req_qty
+          }));
+
+          frappe.show_alert({message: "Saved successfully", indicator: "green"});
+          renderTable();
+        }
+
         // else if (action === "save") {
         //   group.rows.forEach(r => {
         //     if (!r.code) return; 
@@ -1457,7 +1479,6 @@ frappe.provide("resto.stock_usage");
       });
     }
 
-    // ===== Submit =====
     // ===== GET PAYLOAD =====
     get_payload() {
       const rm_breakdown_map = new Map();
@@ -1465,77 +1486,51 @@ frappe.provide("resto.stock_usage");
 
       this.groups.forEach(g => {
         if (!g) return;
-        const rm_items = g.meta.rm_items || [];
-        rm_items.forEach((r, i) => {
-          const tableRow = g.rows[i];
-          if (tableRow) {
-            r.item_code = tableRow.code || '';
-            r.item_name = tableRow.name || '';
-            r.required_qty = parseFloat(tableRow.req_qty || 0);
-            r.act_qty = parseFloat(tableRow.act_qty || 0);
-            r.actual_qty = parseFloat(tableRow.actual_qty || 0);
-            r.uom = tableRow.uom || '';
-            r.wh = tableRow.wh || '';
-            r.unit_cost = parseFloat(tableRow.unit_cost || 0);
-            r.cost = parseFloat(tableRow.cost || 0);
-            r.remarks = tableRow.remarks || '';
-          }
-        });
-      });
-
-      for (const g of this.groups) {
-        if (!g) continue;
-
         const meta = g.meta || {};
-        const rm_items = Array.isArray(meta.rm_items) ? meta.rm_items : [];
-        const rows_detail = [];
+        const rows = g.rows || [];
         let rm_value_total = 0;
+        const rows_detail = [];
 
-        rm_items.forEach((r, i) => {
-          const rm_item = r.item_code;
-          console.log("ROW PAYLOAD ", r)
-          if (!rm_item) return;
+        rows.forEach((row, i) => {
+          if (!row.code) return;
 
-          const arr = this.summaryRemain[rm_item] || [];
-          const totalAct = arr[i]?.act_qty || 0;  
-          const act = parseFloat((parseFloat(r.act_qty || 0)).toFixed(2));  
-          const planned = parseFloat((parseFloat(r.required_qty || 0)).toFixed(2));
+          const planned = parseFloat(row.req_qty || 0);
+          const act = parseFloat(row.act_qty || 0);
           const diffq = parseFloat((act - planned).toFixed(2));
-          const uc = parseFloat(r.unit_cost || 0);
-          const uom = r.uom || r.stock_uom || '';
+          const uc = parseFloat(row.unit_cost || 0);
           const cost = act * uc;
           rm_value_total += cost;
 
-          const key = rm_item;
+          const key = row.code;
           const ex = rm_breakdown_map.get(key) || {
-            rm_item,
+            rm_item: key,
             planned_qty: 0,
-            uom,
-            actual_qty: totalAct,
-            diff_qty: 0,
+            uom: row.uom || '',
+            actual_qty: 0,
+            diff_qty:0,
             valuation_rate_snapshot: uc
           };
           ex.planned_qty += planned;
+          ex.actual_qty += act;
           ex.diff_qty += diffq;
           if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
           rm_breakdown_map.set(key, ex);
 
           rows_detail.push({
-            rm_item,
-            name: r.item_name || '',
-            planned,
+            rm_item: row.code,
+            name: row.name || '',
+            planned, 
             act,
             diffq,
-            uom,
+            uom: row.uom || '',
             uc,
             cost,
-            avail: r.actual_qty,
-            remarks: r.remarks,
-            wh: r.wh
+            avail: parseFloat(row.actual_qty || 0),
+            remarks: row.remarks || '',
+            wh: row.wh || ''
           });
         });
 
-        // Summary menu
         const menuName = meta.resto_menu || meta.item_name || meta.item_code;
         const category = meta.category || "Uncategorized";
         const sellItem = meta.sell_item || meta.item_name || meta.item_code;
@@ -1545,20 +1540,119 @@ frappe.provide("resto.stock_usage");
           category,
           sell_item: sellItem,
           qty_sold: parseFloat(meta.qty || 0),
-          sales_amount: parseFloat(meta.selling_amount || 0),
+          sales_amount : parseFloat(meta.selling_amount || 0),
           rm_value_total,
-          margin_amount: parseFloat(meta.selling_amount || 0) - rm_value_total,
-          raw_material_breakdown: rows_detail
+          margin_amount : parseFloat(meta.selling_amount || 0) - rm_value_total,
+          raw_material_breakdown : rows_detail
         });
-      }
+      });
 
       const rm_breakdown = Array.from(rm_breakdown_map.values());
-
       console.log("Menu Summaries", menu_summaries);
-      console.log("RM Breakdown", rm_breakdown);
+      console.log("RM Breakdown", rm_breakdown)
 
-      return { menu_summaries, rm_breakdown };
+      return { menu_summaries, rm_breakdown }
     }
+    // get_payload() {
+    //   const rm_breakdown_map = new Map();
+    //   const menu_summaries = [];
+
+    //   this.groups.forEach(g => {
+    //     if (!g) return;
+    //     const rm_items = g.meta.rm_items || [];
+    //     rm_items.forEach((r, i) => {
+    //       const tableRow = g.rows[i];
+    //       if (tableRow) {
+    //         r.item_code = tableRow.code || '';
+    //         r.item_name = tableRow.name || '';
+    //         r.required_qty = parseFloat(tableRow.req_qty || 0);
+    //         r.act_qty = parseFloat(tableRow.act_qty || 0);
+    //         r.actual_qty = parseFloat(tableRow.actual_qty || 0);
+    //         r.uom = tableRow.uom || '';
+    //         r.wh = tableRow.wh || '';
+    //         r.unit_cost = parseFloat(tableRow.unit_cost || 0);
+    //         r.cost = parseFloat(tableRow.cost || 0);
+    //         r.remarks = tableRow.remarks || '';
+    //       }
+    //     });
+    //   });
+
+    //   for (const g of this.groups) {
+    //     if (!g) continue;
+
+    //     const meta = g.meta || {};
+    //     const rm_items = Array.isArray(meta.rm_items) ? meta.rm_items : [];
+    //     const rows_detail = [];
+    //     let rm_value_total = 0;
+
+    //     rm_items.forEach((r, i) => {
+    //       const rm_item = r.item_code;
+    //       console.log("ROW PAYLOAD ", r)
+    //       if (!rm_item) return;
+
+    //       const arr = this.summaryRemain[rm_item] || [];
+    //       const totalAct = arr[i]?.act_qty || 0;  
+    //       const act = parseFloat((parseFloat(r.act_qty || 0)).toFixed(2));  
+    //       const planned = parseFloat((parseFloat(r.required_qty || 0)).toFixed(2));
+    //       const diffq = parseFloat((act - planned).toFixed(2));
+    //       const uc = parseFloat(r.unit_cost || 0);
+    //       const uom = r.uom || r.stock_uom || '';
+    //       const cost = act * uc;
+    //       rm_value_total += cost;
+
+    //       const key = rm_item;
+    //       const ex = rm_breakdown_map.get(key) || {
+    //         rm_item,
+    //         planned_qty: 0,
+    //         uom,
+    //         actual_qty: totalAct,
+    //         diff_qty: 0,
+    //         valuation_rate_snapshot: uc
+    //       };
+    //       ex.planned_qty += planned;
+    //       ex.diff_qty += diffq;
+    //       if (!ex.valuation_rate_snapshot) ex.valuation_rate_snapshot = uc;
+    //       rm_breakdown_map.set(key, ex);
+
+    //       rows_detail.push({
+    //         rm_item,
+    //         name: r.item_name || '',
+    //         planned,
+    //         act,
+    //         diffq,
+    //         uom,
+    //         uc,
+    //         cost,
+    //         avail: r.actual_qty,
+    //         remarks: r.remarks,
+    //         wh: r.wh
+    //       });
+    //     });
+
+    //     // Summary menu
+    //     const menuName = meta.resto_menu || meta.item_name || meta.item_code;
+    //     const category = meta.category || "Uncategorized";
+    //     const sellItem = meta.sell_item || meta.item_name || meta.item_code;
+
+    //     menu_summaries.push({
+    //       menu: menuName,
+    //       category,
+    //       sell_item: sellItem,
+    //       qty_sold: parseFloat(meta.qty || 0),
+    //       sales_amount: parseFloat(meta.selling_amount || 0),
+    //       rm_value_total,
+    //       margin_amount: parseFloat(meta.selling_amount || 0) - rm_value_total,
+    //       raw_material_breakdown: rows_detail
+    //     });
+    //   }
+
+    //   const rm_breakdown = Array.from(rm_breakdown_map.values());
+
+    //   console.log("Menu Summaries", menu_summaries);
+    //   console.log("RM Breakdown", rm_breakdown);
+
+    //   return { menu_summaries, rm_breakdown };
+    // }
 
     async save_pos_consumption() {
       const pos_closing_entry = this.fg.get_value('pos_closing_entry');
