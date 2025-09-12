@@ -174,9 +174,10 @@ app_license = "mit"
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "resto.event.get_events"
-# }
+override_whitelisted_methods = {
+	"resto.api.login_with_pin": "resto.api.login_with_pin"
+}
+after_migrate = ["resto.install.after_migrate"]
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,
