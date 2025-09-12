@@ -703,207 +703,202 @@ frappe.provide("resto.stock_usage");
 
       const existingSummary = (prev.meta && Array.isArray(prev.meta.rm_items)) ? prev.meta.rm_items : [];
 
-      const merged = [];
-      aggregatedRM.forEach(r => {
-        const found = existingSummary.find(m => m.item_code === r.item_code);
-        if (found) {
-          merged.push({
-            ...found,
-            required_qty: r.total_required_qty,
-            unit_cost: r.unit_cost,
-            diff_qty: (parseFloat(found.act_qty) || 0) - (parseFloat(r.total_required_qty) || 0),
-            total_cost: (parseFloat(found.act_qty) || 0) * (parseFloat(r.unit_cost) || 0),
-          });
-        } else {
-          merged.push({
-            item_code: r.item_code,
-            item_name: r.item_name,
-            uom: r.stock_uom || r.uom,
-            required_qty: r.total_required_qty,
-            act_qty: 0,
-            diff_qty: -r.total_required_qty,
-            unit_cost: r.unit_cost,
-            total_cost: 0,
-            wh: defaultWh,
-            remarks: ""
-          });
-        }
-      });
+      const merged = aggregatedRM.map(r => {
+      const found = existingSummary.find(m => m.item_code === r.item_code);
 
-      // simpan kembali ke groups
-      this.groups[idx] = {
-        ...prev,
-        original_rows: aggregatedRM,
-        rows: merged,
-        $block: null,
-        meta: {
-          ...(prev.meta || {}),
-          rm_items: merged
-        }
+      const act_qty = found?.act_qty ?? r.act_qty ?? 0; // pakai act_qty lama dulu, kalau ga ada pakai r.act_qty, kalau ga ada 0
+      const required_qty = r.total_required_qty ?? r.required_qty ?? 0;
+      const unit_cost = r.unit_cost ?? 0;
+
+      return {
+        item_code: r.item_code,
+        item_name: r.item_name,
+        uom: r.stock_uom || r.uom,
+        required_qty,
+        act_qty,
+        diff_qty: act_qty - required_qty,
+        unit_cost,
+        total_cost: act_qty * unit_cost,
+        wh: r.wh || defaultWh,
+        remarks: r.remarks || ""
       };
+    });
 
-      // update summaryRemain
-      const summaryRemain = {};
-      merged.forEach(r => {
-        summaryRemain[r.item_code] = [{
-          row_id: r.item_code,
-          act_qty: parseFloat(r.act_qty || 0),
-          uom: r.uom || ""
-        }];
-      });
-      this.summaryRemain = summaryRemain;
-
-      // === RENDER UI ===
-      const $block = $(`
-        <div data-idx="${idx}">
-          <div class="sut-rm-toolbar">
-            <div><b>Summary Raw Material Items</b></div>
-            <div style="display:flex; align-items:center; gap:4px;">
-              <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
-            </div>
-          </div>
-          <table class="sut-table" id="sut-dt-${idx}" border="1">
-            <thead>
-              <tr>
-                <th style="text-align:center;">Code</th>
-                <th style="text-align:center;">Name</th>
-                <th style="text-align:right;">Req Qty</th>
-                <th style="text-align:right;">Act Qty</th>
-                <th style="text-align:right;">Diff Qty</th>
-                <th style="text-align:center;">UOM</th>
-                <th style="text-align:right;">Avail</th>
-                <th style="text-align:center;">WH</th>
-                <th style="text-align:right;">Unit Cost</th>
-                <th style="text-align:right;">Cost</th>
-                <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <div class="sut-summary">
-            <div>Lines: <b id="sut-lines-${idx}">0</b></div>
-            <div>
-              Total Required Qty: <b id="sut-total-qty-${idx}">0</b> &nbsp; | &nbsp;
-              Total RM Cost: <b id="sut-total-cost-${idx}">0</b>
-            </div>
-          </div>
-          <div class="rm-summary-actions" style="margin-top:10px; display:none; text-align:right;">
-            <button class="btn btn-primary btn-sm" data-action="save-summary">Save</button>
-          </div>
-        </div>
-      `);
-
-      this.$body.find(".sut-item-block").hide();
-      this.$body.find("#sut-rm-summary").empty().append($block);
-      $block.show();
-
-      this.groups[idx].$block = $block;
-
-      const renderTable = () => {
-        const $tbody = $block.find("tbody");
-        $tbody.empty();
-
-        this.groups[idx].rows.forEach((row, r) => {
-          if (!row.item_code) return;
-
-          $tbody.append(`
-            <tr data-row="${r}">
-              <td style="text-align:center;">${row.item_code || ""}</td>
-              <td style="text-align:center;">${row.item_name || ""}</td>
-              <td style="text-align:right;">${row.required_qty || 0}</td>
-              <td class="td-input">
-                <input
-                  type="text"
-                  class="td-input"
-                  value="${row.act_qty || 0}"
-                  data-col="act_qty"
-                  oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
-                  style="
-                    width:100%;
-                    font-size:inherit;
-                    font-family:inherit;
-                    text-align:right;
-                    border: 1px solid #ccc; 
-                    padding: 2px 4px; 
-                    border-radius: 4px;
-                  "
-                />
-              </td>
-              <td class="col-diff" style="text-align:right;">${row.diff_qty || (row.act_qty - (row.required_qty || 0))}</td>
-              <td style="text-align:center;">${row.uom || ""}</td>
-              <td style="text-align:right;">${row.actual_qty || 0}</td>
-              <td style="text-align:center;">${row.wh || defaultWh}</td>
-              <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
-              <td class="col-cost" style="text-align:right;">${fmtCurrency(row.total_cost || 0)}</td>
-              <td style="text-align:center;"><input type="checkbox" class="check-row"></td>
-            </tr>
-          `);
-        });
-
-        // update summary total
-        $block.find(`#sut-lines-${idx}`).text(this.groups[idx].rows.length);
-        const totalQty = this.groups[idx].rows.reduce((sum, r) => sum + (parseFloat(r.required_qty) || 0), 0);
-        const totalCost = this.groups[idx].rows.reduce((sum, r) => sum + (parseFloat(r.total_cost) || 0), 0);
-        $block.find(`#sut-total-qty-${idx}`).text(totalQty);
-        $block.find(`#sut-total-cost-${idx}`).text('Rp ' + totalCost.toLocaleString('id-ID'));
-
-        $block.off("input", "input[data-col]");
-        $block.on("input", "input[data-col]", function () {
-          const $input = $(this);
-          const rowIndex = parseInt($input.closest("tr").data("row"));
-          const val = parseFloat($input.val()) || 0;
-
-          const row = me.groups[idx].rows[rowIndex];
-          if (row) {
-            row._pending_act_qty = val; 
-          }
-
-          $block.find(".rm-summary-actions").show();
-        });
-
-        $block.off("click", "[data-action='save-summary']");
-        $block.on("click", "[data-action='save-summary']", function () {
-          me.groups[idx].rows.forEach((row, r) => {
-            const val = parseFloat($block.find(`tr[data-row="${r}"] input[data-col="act_qty"]`).val()) || 0;
-
-            row.act_qty = val;
-            row.diff_qty = val - (parseFloat(row.required_qty) || 0);
-            row.total_cost = val * (parseFloat(row.unit_cost) || 0);
-
-            me.summaryRemain[row.item_code] = [{
-              row_id: row.item_code,
-              act_qty: row.act_qty,
-              uom: row.uom || ""
-            }];
-
-            const rmRow = me.groups[idx].meta.rm_items.find(m => m.item_code === row.item_code);
-            if (rmRow) {
-              rmRow.act_qty = row.act_qty;
-              rmRow.diff_qty = row.diff_qty;
-              rmRow.total_cost = row.total_cost;
-            } else {
-              me.groups[idx].meta.rm_items.push({...row});
-            }
-
-            const $tr = $block.find(`tr[data-row="${r}"]`);
-            $tr.find(".col-diff").text(row.diff_qty);
-            $tr.find(".col-cost").text(fmtCurrency(row.total_cost));
-
-          });
-
-          const updatedTotalCost = me.groups[idx].rows.reduce(
-            (sum, r) => sum + (parseFloat(r.total_cost) || 0), 
-            0
-          );
-          $block.find(`#sut-total-cost-${idx}`).text('Rp ' + updatedTotalCost.toLocaleString('id-ID'));
-
-          $block.find(".rm-summary-actions").hide();
-        });
-
-      };
-
-      renderTable();
+  // simpan kembali ke groups
+  this.groups[idx] = {
+    ...prev,
+    original_rows: aggregatedRM,
+    rows: merged,
+    $block: null,
+    meta: {
+      ...(prev.meta || {}),
+      rm_items: merged
     }
+  };
+
+  // update summaryRemain
+  const summaryRemain = {};
+  merged.forEach(r => {
+    summaryRemain[r.item_code] = [{
+      row_id: r.item_code,
+      act_qty: parseFloat(r.act_qty || 0),
+      uom: r.uom || ""
+    }];
+  });
+  this.summaryRemain = summaryRemain;
+
+  // === RENDER UI ===
+  const $block = $(`
+    <div data-idx="${idx}">
+      <div class="sut-rm-toolbar">
+        <div><b>Summary Raw Material Items</b></div>
+        <div style="display:flex; align-items:center; gap:4px;">
+          <button class="btn btn-default btn-sm" data-action="recalc">Recalculate</button>
+        </div>
+      </div>
+      <table class="sut-table" id="sut-dt-${idx}" border="1">
+        <thead>
+          <tr>
+            <th style="text-align:center;">Code</th>
+            <th style="text-align:center;">Name</th>
+            <th style="text-align:right;">Req Qty</th>
+            <th style="text-align:right;">Act Qty</th>
+            <th style="text-align:right;">Diff Qty</th>
+            <th style="text-align:center;">UOM</th>
+            <th style="text-align:right;">Avail</th>
+            <th style="text-align:center;">WH</th>
+            <th style="text-align:right;">Unit Cost</th>
+            <th style="text-align:right;">Cost</th>
+            <th style="text-align:center;"><input type="checkbox" class="check-all"></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="sut-summary">
+        <div>Lines: <b id="sut-lines-${idx}">0</b></div>
+        <div>
+          Total Required Qty: <b id="sut-total-qty-${idx}">0</b> &nbsp; | &nbsp;
+          Total RM Cost: <b id="sut-total-cost-${idx}">0</b>
+        </div>
+      </div>
+      <div class="rm-summary-actions" style="margin-top:10px; display:none; text-align:right;">
+        <button class="btn btn-primary btn-sm" data-action="save-summary">Save</button>
+      </div>
+    </div>
+  `);
+
+  this.$body.find(".sut-item-block").hide();
+  this.$body.find("#sut-rm-summary").empty().append($block);
+  $block.show();
+
+  this.groups[idx].$block = $block;
+
+  const renderTable = () => {
+    const $tbody = $block.find("tbody");
+    $tbody.empty();
+
+    this.groups[idx].rows.forEach((row, r) => {
+      if (!row.item_code) return;
+
+      $tbody.append(`
+        <tr data-row="${r}">
+          <td style="text-align:center;">${row.item_code || ""}</td>
+          <td style="text-align:center;">${row.item_name || ""}</td>
+          <td style="text-align:right;">${row.required_qty || 0}</td>
+          <td class="td-input">
+            <input
+              type="text"
+              class="td-input"
+              value="${(row.act_qty ?? 0).toFixed(2)}"
+              data-col="act_qty"
+              oninput="this.value = this.value.replace(/[^0-9.]/g, '')"
+              style="
+                width:100%;
+                font-size:inherit;
+                font-family:inherit;
+                text-align:right;
+                border: 1px solid #ccc; 
+                padding: 2px 4px; 
+                border-radius: 4px;
+              "
+            />
+          </td>
+          <td class="col-diff" style="text-align:right;">${row.diff_qty}</td>
+          <td style="text-align:center;">${row.uom || ""}</td>
+          <td style="text-align:right;">${row.actual_qty || 0}</td>
+          <td style="text-align:center;">${row.wh || defaultWh}</td>
+          <td style="text-align:right;">${fmtCurrency(row.unit_cost || 0)}</td>
+          <td class="col-cost" style="text-align:right;">${fmtCurrency(row.total_cost || 0)}</td>
+          <td style="text-align:center;"><input type="checkbox" class="check-row"></td>
+        </tr>
+      `);
+    });
+
+    // update summary total
+    $block.find(`#sut-lines-${idx}`).text(this.groups[idx].rows.length);
+    const totalQty = this.groups[idx].rows.reduce((sum, r) => sum + (parseFloat(r.required_qty) || 0), 0);
+    const totalCost = this.groups[idx].rows.reduce((sum, r) => sum + (parseFloat(r.total_cost) || 0), 0);
+    $block.find(`#sut-total-qty-${idx}`).text(totalQty);
+    $block.find(`#sut-total-cost-${idx}`).text('Rp ' + totalCost.toLocaleString('id-ID'));
+
+    $block.off("input", "input[data-col]");
+    $block.on("input", "input[data-col]", function () {
+      const $input = $(this);
+      const rowIndex = parseInt($input.closest("tr").data("row"));
+      const val = parseFloat($input.val()) || 0;
+
+      const row = me.groups[idx].rows[rowIndex];
+      if (row) {
+        row._pending_act_qty = val; 
+      }
+
+      $block.find(".rm-summary-actions").show();
+    });
+
+    $block.off("click", "[data-action='save-summary']");
+    $block.on("click", "[data-action='save-summary']", function () {
+      me.groups[idx].rows.forEach((row, r) => {
+        const val = parseFloat($block.find(`tr[data-row="${r}"] input[data-col="act_qty"]`).val()) || 0;
+
+        row.act_qty = val;
+        row.diff_qty = val - (parseFloat(row.required_qty) || 0);
+        row.total_cost = val * (parseFloat(row.unit_cost) || 0);
+
+        me.summaryRemain[row.item_code] = [{
+          row_id: row.item_code,
+          act_qty: row.act_qty,
+          uom: row.uom || ""
+        }];
+
+        const rmRow = me.groups[idx].meta.rm_items.find(m => m.item_code === row.item_code);
+        if (rmRow) {
+          rmRow.act_qty = row.act_qty;
+          rmRow.diff_qty = row.diff_qty;
+          rmRow.total_cost = row.total_cost;
+        } else {
+          me.groups[idx].meta.rm_items.push({...row});
+        }
+
+        const $tr = $block.find(`tr[data-row="${r}"]`);
+        $tr.find(".col-diff").text(row.diff_qty);
+        $tr.find(".col-cost").text(fmtCurrency(row.total_cost));
+
+      });
+
+      const updatedTotalCost = me.groups[idx].rows.reduce(
+        (sum, r) => sum + (parseFloat(r.total_cost) || 0), 
+        0
+      );
+      $block.find(`#sut-total-cost-${idx}`).text('Rp ' + updatedTotalCost.toLocaleString('id-ID'));
+
+      $block.find(".rm-summary-actions").hide();
+    });
+
+  };
+
+  renderTable();
+}
+
 
     refreshSummary(me) {
       const allRM = me.groups
@@ -1119,11 +1114,13 @@ frappe.provide("resto.stock_usage");
           </td>`);
 
           $tdAct.find('input').on('input', function () {
-            row._pending_act_qty = parseFloat($(this).val()) || 0;
-            row.diff_qty = (row._pending_act_qty ?? row.act_qty) - row.req_qty;
-            row.cost = (row._pending_act_qty ?? row.act_qty) * row.unit_cost;
+            row.act_qty = parseFloat($(this).val()) || 0;  // langsung isi act_qty
+            console.log("ACT QTY SET", row.code, row.act_qty); // debug
+            row.diff_qty = row.act_qty - row.req_qty;
+            row.cost = row.act_qty * row.unit_cost;
             renderTable();
           });
+
           $tr.append($tdAct);
 
 
@@ -1218,6 +1215,9 @@ frappe.provide("resto.stock_usage");
           const toRemove = $checked.closest("tr").map((_, el) => parseInt($(el).data("row"))).get();
           group.rows = group.rows.filter((_, rIdx) => !toRemove.includes(rIdx));
           group.meta.rm_items = group.meta.rm_items.filter((_, rIdx) => !toRemove.includes(rIdx))
+          const items = this.groups.map(g => g.meta || {});
+          console.log("ITEMS RM SUMMARY", items);
+          this.render_rm_summary(items);
           renderTable();
         } else if (action === "recalc") {
           group.rows.forEach(r => {
@@ -1226,73 +1226,34 @@ frappe.provide("resto.stock_usage");
           });
           renderTable();
         } 
-        else   if (action === "save") {
-          group.rows.forEach(row => {
-            if (row._pending_act_qty != null) {
-              row.act_qty = row._pending_act_qty;
-              delete row._pending_act_qty; // bersihkan setelah commit
-            }
-          });
+        else if (action === "save") {
 
-          // update summaryRemain
           me.summaryRemain[group.meta.item_code] = group.rows.map(r => ({
             row_id: r.code,
             act_qty: r.act_qty,
             req_qty: r.req_qty
           }));
 
-          frappe.show_alert({message: "Saved successfully", indicator: "green"});
+          if (!group.meta) group.meta = {};
+          group.meta.rm_items = group.rows.map(r => ({
+            item_code: r.code,
+            item_name: r.name,
+            uom: r.uom,
+            required_qty: r.req_qty,
+            act_qty: r.act_qty,
+            diff_qty: r.diff_qty,
+            unit_cost: r.unit_cost,
+            total_cost: r.cost,
+            wh: r.wh,
+            remarks: r.remarks
+          }));
+
+          const items = this.groups.map(g => g.meta || {});
+          console.log("ITEMS RM SUMMARY", items);
+          this.render_rm_summary(items);
+          frappe.show_alert({ message: "Saved successfully", indicator: "green" });
           renderTable();
         }
-
-        // else if (action === "save") {
-        //   group.rows.forEach(r => {
-        //     if (!r.code) return; 
-
-        //     let exist = group.meta.rm_items.find(x => x.item_code === r.code);
-        //     if (exist) {
-        //         exist.item_name = r.name || "";
-        //         exist.uom = r.uom || "";
-        //         exist.required_qty = r.req_qty || 0;
-        //         exist.act_qty = r.act_qty || 0;
-        //         exist.unit_cost = r.unit_cost || 0;
-        //         exist.total_cost = r.cost || 0;
-        //         exist.remarks = r.remarks || "";
-        //         exist.wh = r.wh || "";
-        //     } else {
-        //         group.meta.rm_items.push({
-        //             item_code: r.code,
-        //             item_name: r.name || "",
-        //             uom: r.uom || "",
-        //             required_qty: r.req_qty || 0,
-        //             act_qty: r.act_qty || 0,
-        //             unit_cost: r.unit_cost || 0,
-        //             total_cost: r.cost || 0,
-        //             remarks: r.remarks || "",
-        //             wh: r.wh || ""
-        //         });
-        //     }
-        //   });
-
-        //   this.summaryRemain = {};
-        //   group.meta.rm_items.forEach(r => {
-        //     this.summaryRemain[r.item_code] = r.act_qty;
-        //   });
-
-        //   // 🔴 jangan lempar group.meta.rm_items
-        //   // this.render_rm_summary(group.meta.rm_items, idx);
-
-        //   // ✅ lempar semua rm_items dari seluruh groups
-        //   const allRM = this.groups
-        //     .filter(g => g.meta && Array.isArray(g.meta.rm_items))
-        //     .map(g => g.meta.rm_items)
-        //     .flat();
-
-        //   this.render_rm_summary(allRM);
-        //   console.log("Render rm Items", allRM)
-        //   frappe.msgprint("Raw Material changes saved!");
-        // }
-
       });
 
       renderTable();
@@ -1489,6 +1450,8 @@ frappe.provide("resto.stock_usage");
         const meta = g.meta || {};
         const rows = g.rows || [];
         let rm_value_total = 0;
+
+        console.log("ROWS PAYLOAD", rows)
         const rows_detail = [];
 
         rows.forEach((row, i) => {
