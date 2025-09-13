@@ -35,3 +35,16 @@ def create_customer(name, mobile_no):
     doc.insert(ignore_permissions=True)
     frappe.db.commit()
     return doc.as_dict()
+
+@frappe.whitelist(allow_guest=True)
+def update_table_status(table_name, status, taken_by=None):
+    if not table_name:
+        frappe.throw("table_name wajib diisi")
+
+    doc = frappe.get_doc("Table", table_name)
+    doc.status = status
+    doc.taken_by = taken_by
+    doc.save(ignore_permissions=True)
+
+    frappe.db.commit()
+    return {"success": True, "table": doc}

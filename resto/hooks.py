@@ -175,7 +175,8 @@ app_license = "mit"
 # ------------------------------
 #
 override_whitelisted_methods = {
-	"resto.api.login_with_pin": "resto.api.login_with_pin"
+	"resto.api.login_with_pin": "resto.api.login_with_pin",
+    "resto.api.update_table_status": "resto.api.update_table_status",
 }
 after_migrate = ["resto.install.after_migrate"]
 #
