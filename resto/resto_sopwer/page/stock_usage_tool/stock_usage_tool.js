@@ -1496,7 +1496,7 @@ frappe.provide("resto.stock_usage");
 
         const menuName = meta.resto_menu || meta.item_name || meta.item_code;
         const category = meta.category || "Uncategorized";
-        const sellItem = meta.sell_item || meta.item_name || meta.item_code;
+        const sellItem = meta.sell_item || meta.item_code;
 
         menu_summaries.push({
           menu: menuName,
