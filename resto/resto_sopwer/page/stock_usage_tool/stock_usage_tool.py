@@ -563,12 +563,16 @@ def create_pos_consumption(
     doc = frappe.new_doc("POS Consumption")
     doc.pos_closing = pce.name
     doc.company = company
-    doc.warehouse = warehouse
+
+    if "warehouse" in [df.fieldname for df in doc.meta.fields]:
+        doc.warehouse = warehouse
+
     doc.closing_start = closing_start
     doc.closing_end = closing_end
     doc.status = "Draft"
     if notes:
         doc.notes = notes
+
 
     # Resolve child table fieldnames dynamically by options
     menu_ct = None
