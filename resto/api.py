@@ -36,22 +36,20 @@ def create_customer(name, mobile_no):
     frappe.db.commit()
     return doc.as_dict()
 
-@frappe.whitelist(allow_guest=True)
-def update_table_status(name, status, taken_by=None, pax=None, customer=None, type_customer=None):
-    if not frappe.db.exists("Table", name):
-        return {"success": False, "error": f"Table {name} not found"}
+import frappe
 
+@frappe.whitelist()
+def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None):
     doc = frappe.get_doc("Table", name)
+
     doc.status = status
-    doc.taken_by = taken_by
-    if pax:
-        doc.pax = pax
-    if customer:
-        doc.customer = customer
-    if type_customer:
-        doc.type_customer = type_customer
+    doc.taken_by = taken_by or None
+    doc.pax = int(pax) if pax else 0
+
+    doc.customer = None if not customer else customer
+    doc.type_customer = None if not type_customer else type_customer
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
-    return {"success": True, "table": doc.as_dict()}
+    return {"success": True, "message": f"Table {doc.table_name} updated"}
