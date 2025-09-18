@@ -53,3 +53,15 @@ def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_
     frappe.db.commit()
 
     return {"success": True, "message": f"Table {doc.table_name} updated"}
+
+@frappe.whitelist()
+def get_select_options(doctype, fieldname):
+    meta = frappe.get_meta(doctype)
+    field = next((f for f in meta.fields if f.fieldname == fieldname and f.fieldtype == "Select"), None)
+
+    if not field:
+        frappe.throw(f"Field {fieldname} bukan Select di {doctype}")
+
+    options = [opt for opt in (field.options or "").split("\n") if opt]
+
+    return {"options": options}
