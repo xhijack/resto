@@ -39,7 +39,7 @@ def create_customer(name, mobile_no):
 import frappe
 
 @frappe.whitelist()
-def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None):
+def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, order=None):
     doc = frappe.get_doc("Table", name)
 
     doc.status = status
@@ -48,6 +48,7 @@ def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_
 
     doc.customer = None if not customer else customer
     doc.type_customer = None if not type_customer else type_customer
+    doc.order = None if not order else order
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
