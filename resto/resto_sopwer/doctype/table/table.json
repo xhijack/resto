@@ -10,11 +10,7 @@
   "floor",
   "customer",
   "taken_by",
-<<<<<<< HEAD
   "column_break_taef",
-=======
-  "column_break_xeew",
->>>>>>> b11c53968f1f3ce3e11e21a977003c259e4d7f15
   "zone",
   "status",
   "pax",
@@ -30,30 +26,12 @@
    "label": "Table Name"
   },
   {
-<<<<<<< HEAD
-=======
-   "fieldname": "table_type",
-   "fieldtype": "Select",
-   "label": "Table Type",
-   "options": "2\n4\n6"
-  },
-  {
-   "fieldname": "floor",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "in_standard_filter": 1,
-   "label": "Floor",
-   "options": "1\n2\n3"
-  },
-  {
->>>>>>> b11c53968f1f3ce3e11e21a977003c259e4d7f15
    "fieldname": "customer",
    "fieldtype": "Link",
    "label": "Customer",
    "options": "Customer"
   },
   {
-<<<<<<< HEAD
    "fieldname": "type_customer",
    "fieldtype": "Select",
    "label": "Type Customer",
@@ -61,15 +39,6 @@
   },
   {
    "fieldname": "column_break_taef",
-=======
-   "fieldname": "taken_by",
-   "fieldtype": "Link",
-   "label": "Taken By",
-   "options": "User"
-  },
-  {
-   "fieldname": "column_break_xeew",
->>>>>>> b11c53968f1f3ce3e11e21a977003c259e4d7f15
    "fieldtype": "Column Break"
   },
   {
@@ -94,7 +63,6 @@
    "label": "Pax"
   },
   {
-<<<<<<< HEAD
    "fieldname": "floor",
    "fieldtype": "Select",
    "in_list_view": 1,
@@ -112,12 +80,6 @@
    "fieldtype": "Link",
    "label": "Taken By",
    "options": "User"
-=======
-   "fieldname": "type_customer",
-   "fieldtype": "Select",
-   "label": "Type Customer",
-   "options": "\nPersonal\nFamily\nCorporate"
->>>>>>> b11c53968f1f3ce3e11e21a977003c259e4d7f15
   },
   {
    "fieldname": "order",
@@ -129,11 +91,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
-<<<<<<< HEAD
  "modified": "2025-09-18 13:31:50.717097",
-=======
- "modified": "2025-09-19 08:41:31.086721",
->>>>>>> b11c53968f1f3ce3e11e21a977003c259e4d7f15
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Table",
