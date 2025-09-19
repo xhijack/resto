@@ -37,7 +37,6 @@ def after_migrate():
             "fieldtype": "Table",
             "insert_after": "resto_menu",
             "options": "Quick Notes",
-            "read_only": 1,
         }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': "add_ons", "dt": "POS Invoice Item"}):
@@ -49,7 +48,6 @@ def after_migrate():
             "fieldtype": "Table",
             "insert_after": "resto_menu",
             "options": "Menu Add Ons",
-            "read_only": 1,
         }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': "pin_code", "dt": "User"}):
