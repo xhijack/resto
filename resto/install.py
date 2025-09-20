@@ -72,3 +72,14 @@ def after_migrate():
             "insert_after": "pos_profile",
         }).insert(ignore_permissions=True)
 
+    if not frappe.db.exists("Custom Field", {"fieldname": "user_pos_permission", "dt": "User"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "User",
+            "fieldname": "user_pos_permission",
+            "label": "User POS Permission",
+            "fieldtype": "Table",
+            "options": "User POS Permission",
+            "insert_after": "roles"
+        }).insert(ignore_permissions=True)
+

@@ -6,22 +6,44 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "item_name"
+  "item",
+  "item_name",
+  "bom"
  ],
  "fields": [
   {
+   "fetch_from": "item.item_name",
    "fieldname": "item_name",
    "fieldtype": "Data",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Item Name"
+  },
+  {
+   "fieldname": "item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item",
+   "link_filters": "[[\"Item\", \"item_group\",\"=\",\"Quick Notes\"]]",
+   "options": "Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "bom",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "BOM",
+   "link_filters": "[[\"BOM\", \"item\",\"=\",\"eval:doc.item\" ]]",
+   "options": "BOM"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-09-08 13:25:50.507839",
+ "modified": "2025-09-20 15:45:02.493616",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Quick Notes",

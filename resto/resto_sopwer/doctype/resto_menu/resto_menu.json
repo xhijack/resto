@@ -12,6 +12,7 @@
   "recipe_item",
   "default_bom",
   "menu_category",
+  "price_list",
   "enabled",
   "add_ons",
   "quick_notes"
@@ -77,11 +78,18 @@
    "fieldtype": "Table",
    "label": "Quick Notes",
    "options": "Quick Notes"
+  },
+  {
+   "default": "Standard Selling",
+   "fieldname": "price_list",
+   "fieldtype": "Link",
+   "label": "Price List",
+   "options": "Price List"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-08 13:26:23.218869",
+ "modified": "2025-09-20 15:22:40.718384",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
