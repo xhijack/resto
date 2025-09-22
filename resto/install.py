@@ -44,8 +44,7 @@ def after_migrate():
             "dt": "POS Invoice Item",
             "fieldname": "add_ons",
             "label": "Add Ons",
-            "fieldtype": "MultiSelect",
-            "options": "Menu Add Ons",
+            "fieldtype": "Small Text",
             "insert_after": "quick_notes",
         }).insert(ignore_permissions=True)
 
