@@ -34,9 +34,8 @@ def after_migrate():
             "dt": "POS Invoice Item",
             "fieldname": "quick_notes",
             "label": "Quick Notes",
-            "fieldtype": "Table",
+            "fieldtype": "Small Text",
             "insert_after": "resto_menu",
-            "options": "Quick Notes",
         }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': "add_ons", "dt": "POS Invoice Item"}):
@@ -45,9 +44,9 @@ def after_migrate():
             "dt": "POS Invoice Item",
             "fieldname": "add_ons",
             "label": "Add Ons",
-            "fieldtype": "Table",
-            "insert_after": "resto_menu",
+            "fieldtype": "MultiSelect",
             "options": "Menu Add Ons",
+            "insert_after": "quick_notes",
         }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': "pin_code", "dt": "User"}):
@@ -70,16 +69,5 @@ def after_migrate():
             "fieldtype": "Select",
             "options": "\nBelum Dikirim\nDikirim ke Dapur\nSelesai",
             "insert_after": "pos_profile",
-        }).insert(ignore_permissions=True)
-
-    if not frappe.db.exists("Custom Field", {"fieldname": "user_pos_permission", "dt": "User"}):
-        frappe.get_doc({
-            "doctype": "Custom Field",
-            "dt": "User",
-            "fieldname": "user_pos_permission",
-            "label": "User POS Permission",
-            "fieldtype": "Table",
-            "options": "User POS Permission",
-            "insert_after": "roles"
         }).insert(ignore_permissions=True)
 
