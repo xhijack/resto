@@ -28,6 +28,26 @@ def after_migrate():
             "read_only": 1,
         }).insert(ignore_permissions=True)
 
+    if not frappe.db.exists("Custom Field", {'fieldname': "quick_notes", "dt": "POS Invoice Item"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "quick_notes",
+            "label": "Quick Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "resto_menu",
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "add_ons", "dt": "POS Invoice Item"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "add_ons",
+            "label": "Add Ons",
+            "fieldtype": "Small Text",
+            "insert_after": "quick_notes",
+        }).insert(ignore_permissions=True)
+
     if not frappe.db.exists("Custom Field", {'fieldname': "pin_code", "dt": "User"}):
         frappe.get_doc({
             "doctype": "Custom Field",

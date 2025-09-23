@@ -1,0 +1,117 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-09-11 09:36:42.882595",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "table_name",
+  "table_type",
+  "floor",
+  "customer",
+  "taken_by",
+  "column_break_taef",
+  "zone",
+  "status",
+  "pax",
+  "type_customer",
+  "order"
+ ],
+ "fields": [
+  {
+   "fieldname": "table_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Table Name"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "type_customer",
+   "fieldtype": "Select",
+   "label": "Type Customer",
+   "options": "\nPersonal\nFamily\nCorporate"
+  },
+  {
+   "fieldname": "column_break_taef",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "zone",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Zone",
+   "options": "Pilih Zona\nZona T\nZona A\nZona B\nZona C"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Kosong\nTerisi\nReserved\nHas Taken\nHas Ordered"
+  },
+  {
+   "fieldname": "pax",
+   "fieldtype": "Float",
+   "label": "Pax"
+  },
+  {
+   "fieldname": "floor",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Floor",
+   "options": "1\n2\n3"
+  },
+  {
+   "fieldname": "table_type",
+   "fieldtype": "Select",
+   "label": "Table Type",
+   "options": "2\n4\n6"
+  },
+  {
+   "fieldname": "taken_by",
+   "fieldtype": "Link",
+   "label": "Taken By",
+   "options": "User"
+  },
+  {
+   "fieldname": "order",
+   "fieldtype": "Link",
+   "label": "Order",
+   "options": "POS Invoice"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2025-09-18 13:31:50.717097",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "Table",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
