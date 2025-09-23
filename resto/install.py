@@ -39,14 +39,15 @@ def after_migrate():
             "insert_after": "username"
         }).insert(ignore_permissions=True)
 
-    if not frappe.db.exists("Custom Field", {"fieldname": "status_kitchen", "dt": "POS Invoice"}):
+    if not frappe.db.exists("Custom Field", {'fieldname': "status_kitchen", "dt": "POS Invoice Item"}):
         frappe.get_doc({
             "doctype": "Custom Field",
-            "dt": "POS Invoice",
+            "dt": "POS Invoice Item",
             "fieldname": "status_kitchen",
             "label": "Status Kitchen",
             "fieldtype": "Select",
-            "options": "\nBelum Dikirim\nDikirim ke Dapur\nSelesai",
-            "insert_after": "pos_profile",
+            "insert_after": "item_code",
+            "options": "\nNot Send\nAlready Send To Kitchen\nVoid Menu",
         }).insert(ignore_permissions=True)
+
 
