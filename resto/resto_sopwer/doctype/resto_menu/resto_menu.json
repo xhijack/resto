@@ -15,7 +15,8 @@
   "price_list",
   "enabled",
   "add_ons",
-  "quick_notes"
+  "quick_notes",
+  "printer_menu"
  ],
  "fields": [
   {
@@ -85,11 +86,17 @@
    "fieldtype": "Link",
    "label": "Price List",
    "options": "Price List"
+  },
+  {
+   "fieldname": "printer_menu",
+   "fieldtype": "Table",
+   "label": "Printer Menu",
+   "options": "Printer Menu"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-20 15:22:40.718384",
+ "modified": "2025-09-27 13:38:36.958439",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
