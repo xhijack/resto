@@ -42,8 +42,8 @@
   {
    "fieldname": "printers",
    "fieldtype": "Table",
-   "label": "Printers",
-   "options": "Printer Menu"
+   "label": "Kitchen Station",
+   "options": "Branch Kitchen Station"
   },
   {
    "fieldname": "column_break_gfcm",
@@ -63,7 +63,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-27 17:25:20.863946",
+ "modified": "2025-09-30 11:20:33.957168",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Branch Menu",
