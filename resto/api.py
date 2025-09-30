@@ -2,6 +2,8 @@ import frappe
 from frappe import _
 import json
 
+from resto.printing import pos_invoice_print_now
+
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(email, pin):
     try:
@@ -115,11 +117,7 @@ def create_pos_invoice(payload):
     }
 
 def get_branch_menu_by_resto_menu(pos_name):
-    """
-    Ambil data Branch Menu berdasarkan resto_menu yang ada di POS Invoice
-    """
     branch_results = []
-
     items = frappe.get_all(
         "POS Invoice Item",
         filters={"parent": pos_name},
@@ -131,16 +129,27 @@ def get_branch_menu_by_resto_menu(pos_name):
         if not resto_menu:
             continue
 
-        branch_menu = frappe.get_all(
+        branch_menus = frappe.get_all(
             "Branch Menu",
             filters={"menu_item": resto_menu},
-            fields=["*"]
+            fields=["name","branch","menu_item"]
         )
 
-        branch_results.append({
-            "resto_menu": resto_menu,
-            "branches": branch_menu
-        })
+        for bm in branch_menus:
+            bm_doc = frappe.get_doc("Branch Menu", bm.name)
+            kitchen_printers = []
+            for ks in bm_doc.printers:
+                if ks.printer_name:
+                    kitchen_printers.append({
+                        "station": ks.kitchen_station,
+                        "printer_name": ks.printer_name
+                    })
+
+            branch_results.append({
+                "resto_menu": resto_menu,
+                "branch": bm.branch,
+                "kitchen_printers": kitchen_printers
+            })
 
     return branch_results
 
@@ -156,11 +165,18 @@ def send_to_kitchen(payload):
 
         branch_data = get_branch_menu_by_resto_menu(pos_name)
 
+        for branch in branch_data:
+            for kp in branch["kitchen_printers"]:
+                printer_name = kp["printer_name"]
+                pos_invoice_print_now(pos_name, printer_name)
+
         return {
             "status": "success",
             "pos_invoice": pos_name,
             "branch_data": branch_data
         }
+
+
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
