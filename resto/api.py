@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+import json
 
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(email, pin):
@@ -36,8 +37,6 @@ def create_customer(name, mobile_no):
     frappe.db.commit()
     return doc.as_dict()
 
-import frappe
-
 @frappe.whitelist()
 def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, order=None):
     doc = frappe.get_doc("Table", name)
@@ -66,3 +65,106 @@ def get_select_options(doctype, fieldname):
     options = [opt for opt in (field.options or "").split("\n") if opt]
 
     return {"options": options}
+
+def create_pos_invoice(payload):
+    """
+    Fungsi reusable untuk membuat & submit POS Invoice.
+    Return dict { status, name }
+    """
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+
+    customer    = payload.get("customer")
+    pos_profile = payload.get("pos_profile")
+    items       = payload.get("items", [])
+    payments    = payload.get("payments", [])
+
+    pos_invoice = frappe.get_doc({
+        "doctype": "POS Invoice",
+        "customer": customer,
+        "pos_profile": pos_profile,
+        "company": frappe.db.get_single_value("Global Defaults", "default_company"),
+        "items": [],
+        "payments": [],
+    })
+
+    for item in items:
+        pos_invoice.append("items", {
+            "item_code": item.get("item_code"),
+            "qty": item.get("qty"),
+            "rate": item.get("rate"),
+            "resto_menu": item.get("resto_menu"),
+            "category": item.get("category"),
+            "status_kitchen": item.get("status_kitchen"),
+            "add_ons": item.get("add_ons"),
+            "quick_notes": item.get("quick_notes")
+        })
+
+    for pay in payments:
+        pos_invoice.append("payments", {
+            "mode_of_payment": pay.get("mode_of_payment"),
+            "amount": pay.get("amount")
+        })
+
+    pos_invoice.insert(ignore_permissions=True)
+    pos_invoice.save()
+
+    return {
+        "status": "success",
+        "name": pos_invoice.name
+    }
+
+def get_branch_menu_by_resto_menu(pos_name):
+    """
+    Ambil data Branch Menu berdasarkan resto_menu yang ada di POS Invoice
+    """
+    branch_results = []
+
+    items = frappe.get_all(
+        "POS Invoice Item",
+        filters={"parent": pos_name},
+        fields=["resto_menu"]
+    )
+
+    for it in items:
+        resto_menu = it.get("resto_menu")
+        if not resto_menu:
+            continue
+
+        branch_menu = frappe.get_all(
+            "Branch Menu",
+            filters={"menu_item": resto_menu},
+            fields=["*"]
+        )
+
+        branch_results.append({
+            "resto_menu": resto_menu,
+            "branches": branch_menu
+        })
+
+    return branch_results
+
+@frappe.whitelist()
+def send_to_kitchen(payload):
+    """
+    1. Buat POS Invoice
+    2. Cari Branch Menu per resto_menu
+    """
+    try:
+        result = create_pos_invoice(payload)
+        pos_name = result["name"]
+
+        branch_data = get_branch_menu_by_resto_menu(pos_name)
+
+        return {
+            "status": "success",
+            "pos_invoice": pos_name,
+            "branch_data": branch_data
+        }
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
