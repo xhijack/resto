@@ -70,4 +70,12 @@ def after_migrate():
             "options": "\nNot Send\nAlready Send To Kitchen\nVoid Menu",
         }).insert(ignore_permissions=True)
 
-
+    if not frappe.db.exists("Custom Field", {'fieldname': 'queue', 'dt': 'POS Invoice'}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "queue",
+            "label": "Queue",
+            "fieldtype": "Data",
+            "insert_after": "status_kitchen"
+        }).insert(ignore_permissions=True)

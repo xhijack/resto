@@ -80,6 +80,7 @@ def create_pos_invoice(payload):
     pos_profile = payload.get("pos_profile")
     items       = payload.get("items", [])
     payments    = payload.get("payments", [])
+    queue       = payload.get("queue")
 
     pos_invoice = frappe.get_doc({
         "doctype": "POS Invoice",
@@ -88,6 +89,7 @@ def create_pos_invoice(payload):
         "company": frappe.db.get_single_value("Global Defaults", "default_company"),
         "items": [],
         "payments": [],
+        "queue": queue,
     })
 
     for item in items:
