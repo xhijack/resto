@@ -13,7 +13,7 @@ ESC = b"\x1b"
 GS  = b"\x1d"
 
 def _esc_init() -> bytes:
-    return ESC + b'@'  # Initialize
+    return ESC + b'@' 
 
 def _esc_align_left() -> bytes:
     return ESC + b'a' + b'\x00'
@@ -310,13 +310,69 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
     job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
     return job_id
 
+def get_item_printers(item: Dict) -> List[str]:
+    # ambil daftar printer dari branch menu
+    branch_menu = item.get("resto_menu")
+    if not branch_menu:
+        return []
+    doc = frappe.get_doc("Branch Menu", branch_menu)
+    printers = []
+    for ks in doc.get("printers") or []:
+        if ks.get("printer_name"):
+            printers.append(ks["printer_name"])
+    return printers
+
+def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict]) -> bytes:
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_align_center() + _esc_bold(True)
+    out += (f"KITCHEN ORDER - {station_name}\n").encode("ascii", "ignore")
+    out += _esc_bold(False) + _esc_align_left()
+
+    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
+    out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
+    out += _line("-").encode() + b"\n"
+
+    for it in items:
+        qty = int(it["qty"]) if it["qty"].is_integer() else it["qty"]
+        line = f"{qty} x {it['item_name']}"
+        for w in _wrap_text(line, LINE_WIDTH):
+            out += (w + "\n").encode("ascii", "ignore")
+
+    out += _line("-").encode() + b"\n"
+    out += _esc_feed(3) + _esc_cut_full()
+    return out
+
+
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
 def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
+    """Print POS Invoice:
+       1. Ke printer kasir (semua item).
+       2. Ke printer kitchen sesuai mapping Branch Menu -> Kitchen Station.
+    """
+
+    data = _collect_pos_invoice(name)
+    results = []
+
+    # Print All Menu
     raw = build_escpos_from_pos_invoice(name, bool(int(add_qr)), qr_data)
     job_id = cups_print_raw(raw, printer_name)
-    frappe.msgprint(f"Terkirim ke printer '{printer_name}' (Job ID: {job_id})")
-    return {"ok": True, "job_id": job_id, "printer": printer_name}
+    results.append({"printer": printer_name, "job_id": job_id, "type": "bill"})
+
+    kitchen_groups: Dict[str, List[Dict]] = {}
+    for it in data["items"]:
+        for printer in get_item_printers(it):
+            kitchen_groups.setdefault(printer, []).append(it)
+    
+    for kprinter, items in kitchen_groups.items():
+        raw_kitchen = build_kitchen_receipt(data, kprinter, items)
+        kitchen_job = cups_print_raw(raw_kitchen, kprinter)
+        results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
+
+    frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
+    return {"ok": True, "jobs": results}
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
