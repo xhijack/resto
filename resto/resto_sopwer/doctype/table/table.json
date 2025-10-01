@@ -55,7 +55,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Kosong\nTerisi\nReserved\nHas Taken\nHas Ordered"
+   "options": "Kosong\nTerisi\nReserved\nHas Taken\nHas Ordered\nPrint Bill"
   },
   {
    "fieldname": "pax",
