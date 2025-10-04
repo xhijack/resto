@@ -471,6 +471,7 @@ def kitchen_print_from_payload(payload: str, title_prefix: str = "KITCHEN ORDER"
       - transaction_date (opsional, fallback now)
       - items: list (opsional, bisa kosong)
     """
+    print(payload)
     import json
     try:
         obj = json.loads(payload or "[]")
