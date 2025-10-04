@@ -91,10 +91,10 @@ def _fit(text: str, width: int) -> str:
         return text
     if width <= 1:
         return text[:width]
-    return text[: width - 1] + "…"  # ellipsis 1 char
+    return text[: width - 1] + "…"
 
 def _line(char: str = "-") -> str:
-    return char * LINE_WIDTH  # tepat sepanjang kolom
+    return char * LINE_WIDTH
 
 def _pad_lr(left: str, right: str, width: int) -> str:
     space = width - len(left) - len(right)
@@ -251,7 +251,7 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
 # --- ESC/POS size helper ---
 def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
-    # GS '!' n -> set ukuran karakter
+    """Set character size: width multiplier dan height multiplier (0..7)."""
     w = max(0, min(7, int(width_mul)))
     h = max(0, min(7, int(height_mul)))
     return GS + b'!' + bytes([(w << 4) | h])
@@ -386,29 +386,18 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
     return out
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "KITCHEN ORDER") -> bytes:
-    """
-    entry:
-      {
-        "kitchen_station": "HOT KITCHEN",
-        "printer_name": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "transaction_date": "2025-10-10 15:23:00",
-        "items": [
-          {"resto_menu": "...", "short_name": "...", "qty": 2, "quick_notes": "...", "add_ons": "..."}
-        ]
-      }
-    """
-    station = _safe_str(entry.get("kitchen_station")) or "-"
-    inv     = _safe_str(entry.get("pos_invoice")) or "-"
-    tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    station = (entry.get("kitchen_station") or "").strip() or "-"
+    inv     = (entry.get("pos_invoice") or "").strip()
+    tdate   = (entry.get("transaction_date") or "").strip()
+    if not tdate:
+        tdate = frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
     items   = entry.get("items") or []
 
     out = b""
     out += _esc_init()
     out += _esc_font_a()
 
-    # NOTE: tidak ada feed & garis di atas -> hindari "garis dua" di header
-    # Header
+    # --- HEADER tanpa ekstra garis atau feed atas ---
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{title_prefix} - {station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
@@ -417,34 +406,46 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
-    # Items (besar, satu baris, height x3; lebar normal supaya muat 32 kolom)
+    # --- ITEMS ---
     for it in items:
-        qty        = _fmt_qty(it.get("qty") or 0)
-        short_name = _safe_str(it.get("short_name"))
-        menu_name  = _safe_str(it.get("resto_menu"))
-        add_ons    = _safe_str(it.get("add_ons"))
-        qnotes     = _safe_str(it.get("quick_notes"))
+        qty        = it.get("qty", 0)
+        # Format qty sebagai integer kalau bulat
+        try:
+            fq = float(qty)
+            qty_s = str(int(fq)) if fq.is_integer() else str(fq)
+        except:
+            qty_s = str(qty)
+        short_name = (it.get("short_name") or "").strip()
+        menu_name  = (it.get("resto_menu") or "").strip()
+        add_ons    = (it.get("add_ons") or "").strip()
+        qnotes     = (it.get("quick_notes") or "").strip()
 
         title = short_name or menu_name or "-"
 
-        # Besarkan tingginya saja (height*3), tetap 1 baris (truncate jika terlalu panjang)
-        out += _esc_char_size(0, 3) + _esc_bold(True)
-        big_line = _fit(f"{qty} x {title}", LINE_WIDTH)
+        # Beri ukuran yang lebih tinggi secara konservatif
+        # coba height multiplier = 2 atau 3 (uji mana yang muncul)
+        # width_mul = 0 (normal width), height_mul = 2 atau 3
+        # misalnya kita pilih height_mul = 2
+        height_mul = 2  # bisa diubah ke 3 jika printer mendukung
+        out += _esc_char_size(0, height_mul) + _esc_bold(True)
+        big_line = _fit(f"{qty_s} x {title}", LINE_WIDTH)
         out += (big_line + "\n").encode("ascii", "ignore")
         out += _esc_bold(False) + _esc_char_size(0, 0)
 
-        # Sub-informasi normal (opsional; akan tetap 1 baris per info)
+        # Sub-informasi (ukuran normal)
         if short_name and menu_name and menu_name != short_name:
-            out += (f"  - Menu : {_fit(menu_name, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
+            out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
         if add_ons:
-            out += (f"  - Add  : {_fit(add_ons, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
+            out += (f"  Add  : {_fit(add_ons, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
         if qnotes:
-            out += (f"  - Note : {_fit(qnotes, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
+            out += (f"  Note : {_fit(qnotes, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
 
-        out += b"\n"  # spacer per item
+        out += b"\n"
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
+    # spacing bawah untuk cutter
     out += _esc_feed(3) + _esc_cut_full()
+
     return out
 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
