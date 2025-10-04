@@ -297,21 +297,24 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
 
 # ========== CUPS RAW PRINT ==========
 def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
-    conn = cups.Connection()
-    printers = conn.getPrinters()
-    if printer_name not in printers:
-        raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
+    try:
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        if printer_name not in printers:
+            raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(raw_bytes)
-        tmp_path = tmp.name
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = tmp.name
 
-    # Kunci: opsi "raw": "true" agar ESC/POS tak difilter
-    job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
-    return job_id
+        job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
+        return job_id
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
+        raise
+
 
 def get_item_printers(item: Dict) -> List[str]:
-    # ambil daftar printer dari branch menu
     branch_menu = item.get("resto_menu")
     if not branch_menu:
         return []
@@ -348,31 +351,30 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
 def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
-    """Print POS Invoice:
-       1. Ke printer kasir (semua item).
-       2. Ke printer kitchen sesuai mapping Branch Menu -> Kitchen Station.
-    """
+    try:
+        data = _collect_pos_invoice(name)
+        results = []
 
-    data = _collect_pos_invoice(name)
-    results = []
+        raw = build_escpos_from_pos_invoice(name, bool(int(add_qr)), qr_data)
+        job_id = cups_print_raw(raw, printer_name)
+        results.append({"printer": printer_name, "job_id": job_id, "type": "bill"})
 
-    # Print All Menu
-    raw = build_escpos_from_pos_invoice(name, bool(int(add_qr)), qr_data)
-    job_id = cups_print_raw(raw, printer_name)
-    results.append({"printer": printer_name, "job_id": job_id, "type": "bill"})
+        kitchen_groups: Dict[str, List[Dict]] = {}
+        for it in data["items"]:
+            for printer in get_item_printers(it):
+                kitchen_groups.setdefault(printer, []).append(it)
+        
+        for kprinter, items in kitchen_groups.items():
+            raw_kitchen = build_kitchen_receipt(data, kprinter, items)
+            kitchen_job = cups_print_raw(raw_kitchen, kprinter)
+            results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
-    kitchen_groups: Dict[str, List[Dict]] = {}
-    for it in data["items"]:
-        for printer in get_item_printers(it):
-            kitchen_groups.setdefault(printer, []).append(it)
-    
-    for kprinter, items in kitchen_groups.items():
-        raw_kitchen = build_kitchen_receipt(data, kprinter, items)
-        kitchen_job = cups_print_raw(raw_kitchen, kprinter)
-        results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
+        frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
+        return {"ok": True, "jobs": results}
 
-    frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
-    return {"ok": True, "jobs": results}
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "POS Invoice Print Error")
+        frappe.throw(f"Gagal print invoice {name}: {str(e)}")
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()

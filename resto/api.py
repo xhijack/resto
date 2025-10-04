@@ -168,8 +168,10 @@ def send_to_kitchen(payload):
         branch_data = get_branch_menu_by_resto_menu(pos_name)
 
         for branch in branch_data:
-            for kp in branch["kitchen_printers"]:
-                printer_name = kp["printer_name"]
+            for kp in branch.get("kitchen_printers", []):
+                printer_name = kp.get("printer_name")
+                if not printer_name:
+                    raise Exception("Printer name tidak ditemukan di kitchen_printers")
                 pos_invoice_print_now(pos_name, printer_name)
 
         return {
@@ -178,11 +180,10 @@ def send_to_kitchen(payload):
             "branch_data": branch_data
         }
 
-
-
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+
+        frappe.throw(
+            title="Send to Kitchen Error",
+            msg=str(e)
+        )
