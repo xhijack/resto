@@ -458,26 +458,49 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     return out
 
 # ========== API: print kitchen dari payload (per entry menentukan printer_name) ==========
+# ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
-def kitchen_print_from_payload(payload: str, title_prefix: str = "KITCHEN ORDER") -> dict:
+def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> dict:
     """
-    payload: JSON object ATAU JSON array of objects (format seperti di docstring builder).
-             Jika object tunggal, akan di-wrap menjadi list satu elemen.
+    payload: boleh salah satu dari:
+      - dict  (single entry)
+      - list  (list of entry)
+      - str   (JSON untuk dict/list)
 
-    Setiap entry WAJIB punya:
-      - kitchen_station (untuk judul)
-      - printer_name    (nama queue printer di CUPS)
-      - pos_invoice
-      - transaction_date (opsional, fallback now)
-      - items: list (opsional, bisa kosong)
+    Entry format:
+      {
+        "kitchen_station": "HOT KITCHEN",
+        "printer_name": "HOTKITCHEN",
+        "pos_invoice": "POSINVOICE00001",
+        "transaction_date": "2025-10-10 15:23:00",  # opsional; fallback now()
+        "items": [
+          {
+            "resto_menu": "Nasi Goreng Spesial",
+            "short_name": "NGS",
+            "qty": 2,
+            "quick_notes": "Tanpa Sambel",
+            "add_ons": "Extra Kerupuk"
+          }
+        ]
+      }
     """
-    print(payload)
     import json
     try:
-        obj = json.loads(payload or "[]")
-        entries = obj if isinstance(obj, list) else [obj]
+        # 1) Normalisasi payload -> entries (list of dict)
+        if isinstance(payload, list):
+            entries = payload
+        elif isinstance(payload, dict):
+            entries = [payload]
+        elif isinstance(payload, (bytes, bytearray)):
+            obj = json.loads(payload.decode() if isinstance(payload, (bytes, bytearray)) else payload)
+            entries = obj if isinstance(obj, list) else [obj]
+        elif isinstance(payload, str):
+            obj = json.loads(payload or "[]")
+            entries = obj if isinstance(obj, list) else [obj]
+        else:
+            raise TypeError(f"payload bertipe {type(payload).__name__} tidak didukung")
 
-        # CUPS printers cache
+        # 2) Siapkan CUPS
         conn = cups.Connection()
         printers = conn.getPrinters()
 
@@ -493,8 +516,14 @@ def kitchen_print_from_payload(payload: str, title_prefix: str = "KITCHEN ORDER"
             if printer_name not in printers:
                 raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
+            # Pastikan fields opsional aman
+            entry.setdefault("pos_invoice", "")
+            entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
+            entry.setdefault("items", [])
+
             raw = build_kitchen_receipt_from_payload(entry, title_prefix=title_prefix)
 
+            # Kirim print raw
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
