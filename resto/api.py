@@ -238,7 +238,7 @@ def print_to_ks_now(pos_invoice):
             "kitchen_station": ksp.kitchen_station,
             "printer_name": ksp.printer_name,
             "pos_invoice": pos_invoice,
-            "items": ksp.items
+            "items": item.items
         }
         kitchen_print_from_payload(payload)
 
