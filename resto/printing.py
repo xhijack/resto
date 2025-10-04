@@ -444,7 +444,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         title = short_name or menu_name or "-"
 
         # --- BARIS UTAMA DIBESARKAN (2x width & height + bold) ---
-        out += _esc_char_size(1, 1) + _esc_bold(True)
+        out += _esc_char_size(5, 5) + _esc_bold(True)
         # Hindari wrap saat besar: pakai lebar separuh (kurangi 1–2 char aman)
         big_line = f"{qty} x {title}"
         for w in _wrap_text(big_line, max(1, LINE_WIDTH // 2 - 1)):
