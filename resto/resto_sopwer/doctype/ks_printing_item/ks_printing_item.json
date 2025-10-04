@@ -1,0 +1,77 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-04 14:24:52.107573",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "menu_item",
+  "item_name",
+  "short_name",
+  "qty",
+  "add_ons",
+  "quick_notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "menu_item",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Menu Item",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fieldname": "qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Qty",
+   "reqd": 1
+  },
+  {
+   "fieldname": "add_ons",
+   "fieldtype": "Small Text",
+   "label": "Add Ons"
+  },
+  {
+   "fieldname": "quick_notes",
+   "fieldtype": "Small Text",
+   "label": "Quick Notes"
+  },
+  {
+   "fetch_from": "menu_item.title",
+   "fieldname": "item_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item Name",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "menu_item.title",
+   "fieldname": "short_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "short_name",
+   "length": 24
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2025-10-04 15:04:41.828167",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "KS Printing Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -16,6 +16,7 @@
   "menu_category",
   "default_bom",
   "brand",
+  "short_name",
   "enabled",
   "section_break_exys",
   "printers",
@@ -114,12 +115,18 @@
    "fieldtype": "Table",
    "label": "Quick Notes",
    "options": "Quick Notes"
+  },
+  {
+   "fieldname": "short_name",
+   "fieldtype": "Data",
+   "label": "Short Name",
+   "length": 24
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-04 10:22:38.260655",
+ "modified": "2025-10-04 14:55:34.498431",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Branch Menu",
