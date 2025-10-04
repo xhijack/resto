@@ -7,13 +7,13 @@ import frappe
 from typing import List, Dict, Any
 
 # ========== Konstanta & Util ==========
-LINE_WIDTH = 32  # 80mm biasanya nyaman di 42 kolom. Sesuaikan 32-48 jika perlu.
+LINE_WIDTH = 32  # 80mm banyak yang default 32 kolom. Ubah ke 42 jika printermu 42 kolom.
 
 ESC = b"\x1b"
 GS  = b"\x1d"
 
 def _esc_init() -> bytes:
-    return ESC + b'@' 
+    return ESC + b'@'
 
 def _esc_align_left() -> bytes:
     return ESC + b'a' + b'\x00'
@@ -32,7 +32,7 @@ def _esc_font_a() -> bytes:
     return ESC + b'M' + b'\x00'
 
 def _esc_cut_full() -> bytes:
-    # Beberapa printer pakai GS V 0 (full cut). Di TM-U220, potongannya tergantung model.
+    # Beberapa printer pakai GS V 0 (full cut).
     return GS + b'V' + b'\x00'
 
 def _esc_feed(n: int) -> bytes:
@@ -61,14 +61,11 @@ def _esc_qr(data: str) -> bytes:
     return cmds
 
 def _fmt_money(val: float, currency: str = "IDR") -> str:
-    # Format Rp dengan pemisah ribuan; tanpa desimal utk rupiah.
-    # Jika butuh desimal, ubah jadi: f"{val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     n = 0 if currency.upper() in ("IDR", "RP") else 2
     if n == 0:
         s = f"{int(round(val)):n}"
     else:
         s = f"{val:,.2f}"
-    # Lokal ID: titik ribuan, koma desimal. Converter sederhana:
     s = s.replace(",", "X").replace(".", ",").replace("X", ".")
     prefix = "Rp " if currency.upper() in ("IDR", "RP") else (currency.upper() + " ")
     return prefix + s
@@ -100,7 +97,6 @@ def _line(char: str = "-") -> str:
     return char * LINE_WIDTH  # tepat sepanjang kolom
 
 def _pad_lr(left: str, right: str, width: int) -> str:
-    # Satu baris: left ... right (rata kiri-kanan)
     space = width - len(left) - len(right)
     if space < 1:
         return (left + " " + right)[0:width]
@@ -108,7 +104,6 @@ def _pad_lr(left: str, right: str, width: int) -> str:
 
 # ========== Normalisasi POS Invoice ==========
 def _collect_pos_invoice(name: str) -> Dict[str, Any]:
-    """Ambil POS Invoice + items/payments/taxes lewat frappe.get_doc."""
     doc = frappe.get_doc("POS Invoice", name)
 
     currency = doc.get("currency") or "IDR"
@@ -128,7 +123,6 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
 
     taxes = []
     for tx in doc.get("taxes", []):
-        # Ambil tax_amount_after_discount_amount bila ada, fallback ke tax_amount
         tval = tx.get("tax_amount_after_discount_amount")
         if tval is None:
             tval = tx.get("tax_amount")
@@ -175,7 +169,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "taxes": taxes,
         "payments": payments,
         "pos_profile": doc.get("pos_profile") or "",
-        "doc": doc,  # original doc kalau mau ambil field lain
+        "doc": doc,
     }
 
 # ========== Formatter Teks ke Baris ==========
@@ -191,16 +185,11 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
     lines.append(title.center(LINE_WIDTH))
     lines.append(_line("-"))
 
-    # Tanggal, Kasir (jika mau tambah owner, ambil dari doc.owner atau submitter)
     lines.append(_pad_lr(f"Tanggal", f"{data['posting_date']} {data['posting_time']}", LINE_WIDTH))
     if data["customer_name"]:
         lines.append(_pad_lr("Customer", data["customer_name"], LINE_WIDTH))
     lines.append(_line("-"))
 
-    # Items
-    # Format baris:
-    # Item name (wrap)
-    #   qty x rate ............. amount
     for it in data["items"]:
         name = it["item_name"] or it["item_code"] or "-"
         for w in _wrap_text(name, LINE_WIDTH):
@@ -208,7 +197,6 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
         qty_rate = f"{int(it['qty']) if it['qty'].is_integer() else it['qty']} x {_fmt_money(it['rate'], cur)}"
         amount = _fmt_money(it["amount"], cur)
         lines.append(_pad_lr("  " + qty_rate, amount, LINE_WIDTH))
-        # Diskon baris (optional)
         if it.get("discount_amount") or it.get("discount_percentage"):
             dsc = it.get("discount_amount") or 0
             dpc = it.get("discount_percentage") or 0
@@ -218,20 +206,16 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
             lines.append(_pad_lr(info, "", LINE_WIDTH))
 
     lines.append(_line("-"))
-
-    # Subtotal / Discount / Taxes
     lines.append(_pad_lr("Subtotal", _fmt_money(data["total"], cur), LINE_WIDTH))
     if data.get("discount_amount", 0) > 0:
         lines.append(_pad_lr("Diskon", "-" + _fmt_money(data["discount_amount"], cur), LINE_WIDTH))
 
-    # Pajak (kalau ada, tampilkan per baris)
     if data["taxes"]:
         for tx in data["taxes"]:
             desc = tx["description"] or "Tax"
             amt  = tx["amount"] or 0.0
             lines.append(_pad_lr(desc, _fmt_money(amt, cur), LINE_WIDTH))
 
-    # Grand Total / Rounded
     gt = data.get("rounded_total") or data.get("grand_total") or 0
     if data.get("rounded_total") and abs(data["rounded_total"] - data["grand_total"]) >= 0.5:
         lines.append(_pad_lr("Grand Total", _fmt_money(data["grand_total"], cur), LINE_WIDTH))
@@ -241,7 +225,6 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
     lines.append(_line("-"))
 
-    # Payments
     paid_sum = 0.0
     for p in data["payments"]:
         paid_sum += p["amount"]
@@ -251,7 +234,6 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
     change = data.get("change_amount", max(0.0, paid_sum - gt))
     lines.append(_pad_lr("Kembalian", _fmt_money(change, cur), LINE_WIDTH))
 
-    # Loyalty (opsional)
     if (data.get("loyalty_points") or 0) > 0:
         lines.append(_pad_lr("Loyalty Pts", str(data["loyalty_points"]), LINE_WIDTH))
     if (data.get("loyalty_amount") or 0) > 0:
@@ -259,7 +241,6 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
     lines.append(_line("-"))
 
-    # Footer
     if data.get("remarks"):
         for w in _wrap_text(data["remarks"], LINE_WIDTH):
             lines.append(w)
@@ -268,14 +249,12 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
     return lines
 
-
-# --- ADD this helper once (dekat util ESC/POS lain) ---
+# --- ESC/POS size helper ---
 def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
-    # GS '!' n  -> set ukuran karakter
+    # GS '!' n -> set ukuran karakter
     w = max(0, min(7, int(width_mul)))
     h = max(0, min(7, int(height_mul)))
     return GS + b'!' + bytes([(w << 4) | h])
-
 
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
@@ -288,7 +267,6 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
     out += _esc_align_left()
     out += _esc_bold(False)
 
-    # Header bold tengah utk judul toko & nomor invoice
     if data["company"]:
         out += _esc_align_center() + _esc_bold(True)
         for h in _wrap_text(data["company"], LINE_WIDTH):
@@ -302,7 +280,6 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
     for ln in lines:
         out += (ln + "\n").encode("ascii", "ignore")
 
-    # Tambah QR (opsional): mis. link ke /printview atau POS Invoice URL
     if add_qr and qr_data:
         out += _esc_align_center()
         out += _esc_qr(qr_data)
@@ -329,7 +306,6 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
         raise
-
 
 def get_item_printers(item: Dict) -> List[str]:
     branch_menu = item.get("resto_menu")
@@ -364,7 +340,6 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += _esc_feed(3) + _esc_cut_full()
     return out
 
-
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
 def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
@@ -380,7 +355,7 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
         for it in data["items"]:
             for printer in get_item_printers(it):
                 kitchen_groups.setdefault(printer, []).append(it)
-        
+
         for kprinter, items in kitchen_groups.items():
             raw_kitchen = build_kitchen_receipt(data, kprinter, items)
             kitchen_job = cups_print_raw(raw_kitchen, kprinter)
@@ -392,7 +367,6 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "POS Invoice Print Error")
         frappe.throw(f"Gagal print invoice {name}: {str(e)}")
-
 
 # ========== Kitchen: builder dari payload kustom (pakai printer_name per entry) ==========
 def _fmt_qty(val: float | int) -> str:
@@ -412,6 +386,18 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
     return out
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "KITCHEN ORDER") -> bytes:
+    """
+    entry:
+      {
+        "kitchen_station": "HOT KITCHEN",
+        "printer_name": "HOTKITCHEN",
+        "pos_invoice": "POSINVOICE00001",
+        "transaction_date": "2025-10-10 15:23:00",
+        "items": [
+          {"resto_menu": "...", "short_name": "...", "qty": 2, "quick_notes": "...", "add_ons": "..."}
+        ]
+      }
+    """
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
@@ -421,9 +407,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += _esc_init()
     out += _esc_font_a()
 
-    # --- TOP MARGIN: cegah header kepotong oleh cutter ---
-    out += _esc_feed(2)
-
+    # NOTE: tidak ada feed & garis di atas -> hindari "garis dua" di header
     # Header
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{title_prefix} - {station}\n").encode("ascii", "ignore")
@@ -431,9 +415,9 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
-    out += _line("-").encode() + b"\n"
+    out += (_line("-") + "\n").encode("ascii", "ignore")
 
-    # Items
+    # Items (besar, satu baris, height x3; lebar normal supaya muat 32 kolom)
     for it in items:
         qty        = _fmt_qty(it.get("qty") or 0)
         short_name = _safe_str(it.get("short_name"))
@@ -443,67 +427,40 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
         title = short_name or menu_name or "-"
 
-        # --- BARIS UTAMA DIBESARKAN (2x width & height + bold) ---
-        out += _esc_char_size(5, 5) + _esc_bold(True)
-        # Hindari wrap saat besar: pakai lebar separuh (kurangi 1–2 char aman)
-        big_line = f"{qty} x {title}"
-        for w in _wrap_text(big_line, max(1, LINE_WIDTH // 2 - 1)):
-            out += (w + "\n").encode("ascii", "ignore")
-        # Kembalikan ke normal
+        # Besarkan tingginya saja (height*3), tetap 1 baris (truncate jika terlalu panjang)
+        out += _esc_char_size(0, 3) + _esc_bold(True)
+        big_line = _fit(f"{qty} x {title}", LINE_WIDTH)
+        out += (big_line + "\n").encode("ascii", "ignore")
         out += _esc_bold(False) + _esc_char_size(0, 0)
 
-        # Sub-informasi tetap normal size
+        # Sub-informasi normal (opsional; akan tetap 1 baris per info)
         if short_name and menu_name and menu_name != short_name:
-            out += (f"  - Menu : {menu_name}\n").encode("ascii", "ignore")
+            out += (f"  - Menu : {_fit(menu_name, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
         if add_ons:
-            out += (f"  - Add  : {add_ons}\n").encode("ascii", "ignore")
+            out += (f"  - Add  : {_fit(add_ons, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
         if qnotes:
-            out += (f"  - Note : {qnotes}\n").encode("ascii", "ignore")
+            out += (f"  - Note : {_fit(qnotes, LINE_WIDTH-4)}\n").encode("ascii", "ignore")
 
         out += b"\n"  # spacer per item
 
-    out += _line("-").encode() + b"\n"
-
-    # Biar rapi di bawah sebelum cut
-    out += _esc_feed(4) + _esc_cut_full()
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _esc_feed(3) + _esc_cut_full()
     return out
 
-# ========== API: print kitchen dari payload (per entry menentukan printer_name) ==========
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
 def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> dict:
     """
-    payload: boleh salah satu dari:
-      - dict  (single entry)
-      - list  (list of entry)
-      - str   (JSON untuk dict/list)
-
-    Entry format:
-      {
-        "kitchen_station": "HOT KITCHEN",
-        "printer_name": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "transaction_date": "2025-10-10 15:23:00",  # opsional; fallback now()
-        "items": [
-          {
-            "resto_menu": "Nasi Goreng Spesial",
-            "short_name": "NGS",
-            "qty": 2,
-            "quick_notes": "Tanpa Sambel",
-            "add_ons": "Extra Kerupuk"
-          }
-        ]
-      }
+    payload: dict (single) / list (multi) / str (JSON)
     """
     import json
     try:
-        # 1) Normalisasi payload -> entries (list of dict)
         if isinstance(payload, list):
             entries = payload
         elif isinstance(payload, dict):
             entries = [payload]
         elif isinstance(payload, (bytes, bytearray)):
-            obj = json.loads(payload.decode() if isinstance(payload, (bytes, bytearray)) else payload)
+            obj = json.loads(payload.decode())
             entries = obj if isinstance(obj, list) else [obj]
         elif isinstance(payload, str):
             obj = json.loads(payload or "[]")
@@ -511,7 +468,6 @@ def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> 
         else:
             raise TypeError(f"payload bertipe {type(payload).__name__} tidak didukung")
 
-        # 2) Siapkan CUPS
         conn = cups.Connection()
         printers = conn.getPrinters()
 
@@ -527,14 +483,12 @@ def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> 
             if printer_name not in printers:
                 raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
-            # Pastikan fields opsional aman
             entry.setdefault("pos_invoice", "")
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
 
             raw = build_kitchen_receipt_from_payload(entry, title_prefix=title_prefix)
 
-            # Kirim print raw
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
@@ -571,7 +525,4 @@ def pos_invoice_print_enqueue(name: str, printer_name: str, add_qr: int = 0, qr_
 def _enqueue_worker(name: str, printer_name: str, add_qr: bool, qr_data: str | None):
     raw = build_escpos_from_pos_invoice(name, add_qr, qr_data)
     job_id = cups_print_raw(raw, printer_name)
-    # Simpan log sederhana (opsional)
     frappe.logger("pos_print").info({"invoice": name, "printer": printer_name, "job_id": job_id})
-
-
