@@ -7,7 +7,7 @@ import frappe
 from typing import List, Dict, Any
 
 # ========== Konstanta & Util ==========
-LINE_WIDTH = 42  # 80mm biasanya nyaman di 42 kolom. Sesuaikan 32-48 jika perlu.
+LINE_WIDTH = 32  # 80mm biasanya nyaman di 42 kolom. Sesuaikan 32-48 jika perlu.
 
 ESC = b"\x1b"
 GS  = b"\x1d"
@@ -88,8 +88,16 @@ def _wrap_text(text: str, width: int) -> List[str]:
         lines.append(cur)
     return lines
 
+def _fit(text: str, width: int) -> str:
+    """Potong ke 1 baris tepat (no wrap)."""
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return text[: width - 1] + "…"  # ellipsis 1 char
+
 def _line(char: str = "-") -> str:
-    return (char * LINE_WIDTH)[:LINE_WIDTH]
+    return char * LINE_WIDTH  # tepat sepanjang kolom
 
 def _pad_lr(left: str, right: str, width: int) -> str:
     # Satu baris: left ... right (rata kiri-kanan)
@@ -263,14 +271,10 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
 # --- ADD this helper once (dekat util ESC/POS lain) ---
 def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
-    """
-    Set char size via GS '!' n
-    width_mul, height_mul: 0..7 (0=normal, 1=2x, 2=3x, ...)
-    """
+    # GS '!' n  -> set ukuran karakter
     w = max(0, min(7, int(width_mul)))
     h = max(0, min(7, int(height_mul)))
-    n = (w << 4) | h
-    return GS + b'!' + bytes([n])
+    return GS + b'!' + bytes([(w << 4) | h])
 
 
 # ========== Builder ESC/POS ==========
