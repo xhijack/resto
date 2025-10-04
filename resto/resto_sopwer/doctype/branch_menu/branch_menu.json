@@ -8,11 +8,19 @@
  "field_order": [
   "branch",
   "menu_item",
-  "brand",
+  "menu_code",
+  "sell_item",
+  "recipe_item",
   "column_break_gfcm",
   "price_list",
+  "menu_category",
+  "default_bom",
+  "brand",
+  "enabled",
   "section_break_exys",
-  "printers"
+  "printers",
+  "add_ons",
+  "quick_notes"
  ],
  "fields": [
   {
@@ -58,12 +66,60 @@
   {
    "fieldname": "section_break_exys",
    "fieldtype": "Section Break"
+  },
+  {
+   "fetch_from": "menu_item.menu_code",
+   "fieldname": "menu_code",
+   "fieldtype": "Data",
+   "label": "Menu Code"
+  },
+  {
+   "fetch_from": "menu_item.sell_item",
+   "fieldname": "sell_item",
+   "fieldtype": "Data",
+   "label": "Sell Item"
+  },
+  {
+   "fetch_from": "menu_item.recipe_item",
+   "fieldname": "recipe_item",
+   "fieldtype": "Data",
+   "label": "Recipe Item"
+  },
+  {
+   "fetch_from": "menu_item.default_bom",
+   "fieldname": "default_bom",
+   "fieldtype": "Data",
+   "label": "Default BOM"
+  },
+  {
+   "fetch_from": "menu_item.menu_category",
+   "fieldname": "menu_category",
+   "fieldtype": "Data",
+   "label": "Menu Category"
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "add_ons",
+   "fieldtype": "Table",
+   "label": "Add Ons",
+   "options": "Menu Add Ons"
+  },
+  {
+   "fieldname": "quick_notes",
+   "fieldtype": "Table",
+   "label": "Quick Notes",
+   "options": "Quick Notes"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-30 11:20:33.957168",
+ "modified": "2025-10-04 10:22:38.260655",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Branch Menu",
