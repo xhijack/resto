@@ -170,6 +170,7 @@ def send_to_kitchen(payload):
         for branch in branch_data:
             for kp in branch.get("kitchen_printers", []):
                 printer_name = kp.get("printer_name")
+                frappe.log(f"Sending to printer {printer_name} for POS {pos_name}")
                 if not printer_name:
                     raise Exception("Printer name tidak ditemukan di kitchen_printers")
                 pos_invoice_print_now(pos_name, printer_name)
