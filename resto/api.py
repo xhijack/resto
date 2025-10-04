@@ -223,12 +223,8 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
     doc.pos_invoice = pos_invoice
     for item in items:
         doc.append("items", {
-            "item_code": item.get("item_code"),
+            "menu_item": item.get("resto_menu"),
             "qty": item.get("qty"),
-            "rate": item.get("rate"),
-            "resto_menu": item.get("resto_menu"),
-            "category": item.get("category"),
-            "status_kitchen": item.get("status_kitchen"),
             "add_ons": item.get("add_ons"),
             "quick_notes": item.get("quick_notes")
         })
