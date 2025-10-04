@@ -8,6 +8,7 @@
  "field_order": [
   "naming_series",
   "kitchen_station",
+  "printer_name",
   "transaction_date",
   "column_break_xjsr",
   "pos_invoice",
@@ -65,12 +66,21 @@
    "fieldtype": "Select",
    "label": "Naming Series",
    "options": "KSP.YY.MM.DD.#####"
+  },
+  {
+   "fetch_from": "kitchen_station.printer_name",
+   "fieldname": "printer_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Printer Name",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-04 14:34:17.275695",
+ "modified": "2025-10-04 15:31:40.976805",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "KS Printing",
