@@ -233,14 +233,12 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
 def print_to_ks_now(pos_invoice):
     from resto.printing import kitchen_print_from_payload
     for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-        import pdb
-        pdb.set_trace()
         ksp = send_to_ks_printing(item.get("kitchen_station"), pos_invoice, item.get("items", []))
         payload = {
             "kitchen_station": ksp.kitchen_station,
             "printer_name": ksp.printer_name,
             "pos_invoice": pos_invoice,
-            "items": item.items
+            "items": item.get("items", [])
         }
         kitchen_print_from_payload(payload)
 
