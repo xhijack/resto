@@ -377,7 +377,7 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
         frappe.throw(f"Gagal print invoice {name}: {str(e)}")
 
 
-# ========== Kitchen: builder dari payload kustom ==========
+# ========== Kitchen: builder dari payload kustom (pakai printer_name per entry) ==========
 def _fmt_qty(val: float | int) -> str:
     try:
         f = float(val)
@@ -398,7 +398,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     """
     entry:
       {
-        "kitchen_station": "HOTKITCHEN",
+        "kitchen_station": "HOT KITCHEN",
+        "printer_name": "HOTKITCHEN",
         "pos_invoice": "POSINVOICE00001",
         "transaction_date": "2025-10-10 15:23:00",
         "items": [
@@ -442,62 +443,57 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
         # Jika short_name ada, tampilkan nama menu penuh sebagai sub-informasi
         if short_name and menu_name and menu_name != short_name:
-            out = _append_wrapped(out, f"• Menu : {menu_name}", indent=2)
+            out = _append_wrapped(out, f"- Menu : {menu_name}", indent=2)
 
         if add_ons:
-            out = _append_wrapped(out, f"• Add  : {add_ons}", indent=2)
+            out = _append_wrapped(out, f"- Add  : {add_ons}", indent=2)
 
         if qnotes:
-            out = _append_wrapped(out, f"• Note : {qnotes}", indent=2)
+            out = _append_wrapped(out, f"- Note : {qnotes}", indent=2)
 
-        # Spacer antar item
-        out += b"\n"
+        out += b"\n"  # spacer
 
     out += _line("-").encode() + b"\n"
     out += _esc_feed(3) + _esc_cut_full()
     return out
 
-# ========== API: print kitchen dari payload ==========
+# ========== API: print kitchen dari payload (per entry menentukan printer_name) ==========
 @frappe.whitelist()
-def kitchen_print_from_payload(payload: str, station_printers: str | None = None, title_prefix: str = "KITCHEN ORDER") -> dict:
+def kitchen_print_from_payload(payload: str, title_prefix: str = "KITCHEN ORDER") -> dict:
     """
-    payload: JSON array of entries (lihat format di atas)
-    station_printers: JSON mapping optional, contoh:
-        {"HOTKITCHEN": "TMU220_HOT", "DRINK": "TMU220_BAR"}
-    - jika tidak diberikan, diasumsikan nama printer == kitchen_station
+    payload: JSON object ATAU JSON array of objects (format seperti di docstring builder).
+             Jika object tunggal, akan di-wrap menjadi list satu elemen.
+
+    Setiap entry WAJIB punya:
+      - kitchen_station (untuk judul)
+      - printer_name    (nama queue printer di CUPS)
+      - pos_invoice
+      - transaction_date (opsional, fallback now)
+      - items: list (opsional, bisa kosong)
     """
     import json
-
     try:
-        entries = json.loads(payload or "[]")
-        if not isinstance(entries, list):
-            raise ValueError("payload harus berupa JSON array")
+        obj = json.loads(payload or "[]")
+        entries = obj if isinstance(obj, list) else [obj]
 
-        mapping = {}
-        if station_printers:
-            mapping = json.loads(station_printers or "{}")
-            if not isinstance(mapping, dict):
-                raise ValueError("station_printers harus berupa JSON object")
-
-        # CUPS printers cache (sekali ambil untuk validasi cepat)
+        # CUPS printers cache
         conn = cups.Connection()
         printers = conn.getPrinters()
 
         results = []
         for entry in entries:
             station = _safe_str(entry.get("kitchen_station"))
+            printer_name = _safe_str(entry.get("printer_name")) or station
             if not station:
                 raise ValueError("Setiap entry wajib memiliki 'kitchen_station'")
-
-            # Tentukan printer: dari mapping, fallback ke nama station
-            printer_name = _safe_str(mapping.get(station)) or station
+            if not printer_name:
+                raise ValueError("Setiap entry wajib memiliki 'printer_name'")
 
             if printer_name not in printers:
                 raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
             raw = build_kitchen_receipt_from_payload(entry, title_prefix=title_prefix)
 
-            # Simpan ke file sementara & kirim RAW (pakai conn langsung biar 1 koneksi)
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
@@ -516,7 +512,6 @@ def kitchen_print_from_payload(payload: str, station_printers: str | None = None
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Kitchen Print Error (from payload)")
         frappe.throw(f"Gagal print kitchen: {str(e)}")
-
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
