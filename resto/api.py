@@ -228,7 +228,7 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
             "add_ons": item.get("add_ons"),
             "quick_notes": item.get("quick_notes")
         })
-    doc.insert(ignore_permissions=True)
+    return doc.insert(ignore_permissions=True)
 
 
 @frappe.whitelist()
