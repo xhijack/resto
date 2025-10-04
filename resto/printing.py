@@ -260,6 +260,19 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
     return lines
 
+
+# --- ADD this helper once (dekat util ESC/POS lain) ---
+def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
+    """
+    Set char size via GS '!' n
+    width_mul, height_mul: 0..7 (0=normal, 1=2x, 2=3x, ...)
+    """
+    w = max(0, min(7, int(width_mul)))
+    h = max(0, min(7, int(height_mul)))
+    n = (w << 4) | h
+    return GS + b'!' + bytes([n])
+
+
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
     data = _collect_pos_invoice(name)
@@ -395,24 +408,6 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
     return out
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "KITCHEN ORDER") -> bytes:
-    """
-    entry:
-      {
-        "kitchen_station": "HOT KITCHEN",
-        "printer_name": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "transaction_date": "2025-10-10 15:23:00",
-        "items": [
-          {
-            "resto_menu": "Nasi Goreng Spesial",
-            "short_name": "NGS",
-            "qty": 2,
-            "quick_notes": "Tanpa Sambel",
-            "add_ons": "Extra Kerupuk"
-          }
-        ]
-      }
-    """
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
@@ -421,6 +416,11 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out = b""
     out += _esc_init()
     out += _esc_font_a()
+
+    # --- TOP MARGIN: cegah header kepotong oleh cutter ---
+    out += _esc_feed(2)
+
+    # Header
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{title_prefix} - {station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
@@ -429,7 +429,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
     out += _line("-").encode() + b"\n"
 
-    # Item lines
+    # Items
     for it in items:
         qty        = _fmt_qty(it.get("qty") or 0)
         short_name = _safe_str(it.get("short_name"))
@@ -437,24 +437,31 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
 
-        # Judul baris pakai short_name kalau ada, else resto_menu
         title = short_name or menu_name or "-"
-        out = _append_wrapped(out, f"{qty} x {title}", indent=0)
 
-        # Jika short_name ada, tampilkan nama menu penuh sebagai sub-informasi
+        # --- BARIS UTAMA DIBESARKAN (2x width & height + bold) ---
+        out += _esc_char_size(1, 1) + _esc_bold(True)
+        # Hindari wrap saat besar: pakai lebar separuh (kurangi 1–2 char aman)
+        big_line = f"{qty} x {title}"
+        for w in _wrap_text(big_line, max(1, LINE_WIDTH // 2 - 1)):
+            out += (w + "\n").encode("ascii", "ignore")
+        # Kembalikan ke normal
+        out += _esc_bold(False) + _esc_char_size(0, 0)
+
+        # Sub-informasi tetap normal size
         if short_name and menu_name and menu_name != short_name:
-            out = _append_wrapped(out, f"- Menu : {menu_name}", indent=2)
-
+            out += (f"  - Menu : {menu_name}\n").encode("ascii", "ignore")
         if add_ons:
-            out = _append_wrapped(out, f"- Add  : {add_ons}", indent=2)
-
+            out += (f"  - Add  : {add_ons}\n").encode("ascii", "ignore")
         if qnotes:
-            out = _append_wrapped(out, f"- Note : {qnotes}", indent=2)
+            out += (f"  - Note : {qnotes}\n").encode("ascii", "ignore")
 
-        out += b"\n"  # spacer
+        out += b"\n"  # spacer per item
 
     out += _line("-").encode() + b"\n"
-    out += _esc_feed(3) + _esc_cut_full()
+
+    # Biar rapi di bawah sebelum cut
+    out += _esc_feed(4) + _esc_cut_full()
     return out
 
 # ========== API: print kitchen dari payload (per entry menentukan printer_name) ==========
