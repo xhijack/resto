@@ -206,31 +206,40 @@ def get_branch_menu_by_resto_menu(pos_name):
 def send_to_kitchen(payload):
     """
     1. Buat POS Invoice
-    2. Cari Branch Menu per resto_menu
+    2. Print ke kitchen station
     """
     try:
         result = create_pos_invoice(payload)
         pos_name = result["name"]
 
-        # grouped = grouping_items_to_kitchen_station("", pos_name)
-        # for kitchen_station, items in grouped.items():
-            # send_to_ks_printing(kitchen_station, pos_name, items)
-
-        branch_data = get_branch_menu_by_resto_menu(pos_name)
-
-        for branch in branch_data:
-            for kp in branch.get("kitchen_printers", []):
-                printer_name = kp.get("printer_name")
-                frappe.log(f"Sending to printer {printer_name} for POS {pos_name}")
-                if not printer_name:
-                    raise Exception("Printer name tidak ditemukan di kitchen_printers")
-                pos_invoice_print_now(pos_name, printer_name)
+        print_to_ks_now(pos_name)
 
         return {
             "status": "success",
             "pos_invoice": pos_name,
-            "branch_data": branch_data
+            "message": f"POS Invoice {pos_name} created and sent to kitchen."
         }
+
+
+        # grouped = grouping_items_to_kitchen_station("", pos_name)
+        # for kitchen_station, items in grouped.items():
+            # send_to_ks_printing(kitchen_station, pos_name, items)
+
+        # branch_data = get_branch_menu_by_resto_menu(pos_name)
+
+        # for branch in branch_data:
+        #     for kp in branch.get("kitchen_printers", []):
+        #         printer_name = kp.get("printer_name")
+        #         frappe.log(f"Sending to printer {printer_name} for POS {pos_name}")
+        #         if not printer_name:
+        #             raise Exception("Printer name tidak ditemukan di kitchen_printers")
+        #         pos_invoice_print_now(pos_name, printer_name)
+
+        # return {
+        #     "status": "success",
+        #     "pos_invoice": pos_name,
+        #     "branch_data": branch_data
+        # }
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
@@ -239,6 +248,8 @@ def send_to_kitchen(payload):
             title="Send to Kitchen Error",
             msg=str(e)
         )
+
+# def print_bill(pos_name, printer_name) :
 
 def grouping_items_to_kitchen_station(branch, pos_name):
     """
