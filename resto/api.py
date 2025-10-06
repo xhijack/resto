@@ -7,24 +7,71 @@ from resto.printing import pos_invoice_print_now
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(email, pin):
     try:
-        user = frappe.db.get_value("User", {"email": email}, ["name", "pin_code"], as_dict=True)
-
+        user = frappe.db.get_value(
+            "User",
+            {"email": email},
+            ["name", "pin_code", "username", "full_name"],
+            as_dict=True
+        )
         if not user:
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "User not found"}
-        
-        if user.get("pin_code") == pin:
-            frappe.local.login_manager.user = user.get("name")
-            frappe.local.login_manager.post_login()
-            return {"status": "success", "message": "Logged In"}
-        else:
+
+        if user.get("pin_code") != pin:
             frappe.local.response["http_status_code"] = 401
             return {"status": "error", "message": "Invalid PIN"}
-    
+
+        # 🧹 Hapus semua session lama user ini (device lama ketendang)
+        frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
+
+        # 🗝️ Hapus credential lama
+        frappe.db.set_value("User", user.get("name"), "api_key", None)
+        frappe.db.set_value("User", user.get("name"), "api_secret", None)
+
+        # 🔐 Login baru
+        login_manager = frappe.auth.LoginManager()
+        login_manager.user = user.get("name")
+        login_manager.post_login()
+
+        # 🔑 Generate API key baru
+        api_key, api_secret = generate_keys(user.get("name"))
+
+        frappe.response["message"] = {
+            "status": "success",
+            "message": "Authentication success",
+            "sid": frappe.session.sid,
+            "api_key": api_key,
+            "api_secret": api_secret,
+            "username": user.get("username"),
+            "full_name": user.get("full_name"),
+            "email": email,
+        }
+
+        frappe.db.commit()
+
+        return frappe.response["message"]
+
     except Exception as e:
-        frappe.log_error(message=frappe.get_traceback(), title="Login With PIN Failed")
+        frappe.log_error(frappe.get_traceback(), "Login With PIN Failed")
         frappe.local.response["http_status_code"] = 500
         return {"status": "error", "message": frappe.utils.cstr(e)}
+
+def generate_keys(user):
+    user_details = frappe.get_doc("User", user)
+    api_secret = frappe.generate_hash(length=30)  # random baru tiap login
+
+    # Kalau belum punya API key, buat baru
+    if not user_details.api_key:
+        api_key = frappe.generate_hash(length=15)
+        user_details.api_key = api_key
+    else:
+        api_key = user_details.api_key
+
+    # Simpan API secret baru (menendang token lama)
+    user_details.api_secret = api_secret
+    user_details.save(ignore_permissions=True)
+
+    return api_key, api_secret
 
 @frappe.whitelist(allow_guest=False)
 def create_customer(name, mobile_no):
