@@ -79,3 +79,14 @@ def after_migrate():
             "fieldtype": "Data",
             "insert_after": "status_kitchen"
         }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "branch", "dt": "POS Invoice"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "branch",
+            "label": "Branch",
+            "fieldtype": "Link",
+            "options": "Branch",
+            "insert_after": "due_date",
+        }).insert(ignore_permissions=True)
