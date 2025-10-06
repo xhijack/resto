@@ -43,11 +43,11 @@
   },
   {
    "fieldname": "zone",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Zone",
-   "options": "Pilih Zona\nZona TA\nZona A\nZona B\nZona C"
+   "options": "Table Zone"
   },
   {
    "fieldname": "status",
@@ -64,10 +64,10 @@
   },
   {
    "fieldname": "floor",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Floor",
-   "options": "1\n2\n3\nTA"
+   "options": "Table Floor"
   },
   {
    "fieldname": "table_type",
@@ -90,7 +90,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-09-30 15:59:59.144430",
+ "modified": "2025-10-06 08:37:43.703400",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Table",
@@ -109,6 +109,7 @@
    "write": 1
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []
