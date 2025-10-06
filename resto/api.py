@@ -165,11 +165,18 @@ def send_to_kitchen(payload):
         result = create_pos_invoice(payload)
         pos_name = result["name"]
 
+        # grouped = grouping_items_to_kitchen_station("", pos_name)
+        # for kitchen_station, items in grouped.items():
+            # send_to_ks_printing(kitchen_station, pos_name, items)
+
         branch_data = get_branch_menu_by_resto_menu(pos_name)
 
         for branch in branch_data:
-            for kp in branch["kitchen_printers"]:
-                printer_name = kp["printer_name"]
+            for kp in branch.get("kitchen_printers", []):
+                printer_name = kp.get("printer_name")
+                frappe.log(f"Sending to printer {printer_name} for POS {pos_name}")
+                if not printer_name:
+                    raise Exception("Printer name tidak ditemukan di kitchen_printers")
                 pos_invoice_print_now(pos_name, printer_name)
 
         return {
@@ -178,11 +185,162 @@ def send_to_kitchen(payload):
             "branch_data": branch_data
         }
 
-
-
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
-        return {
-            "status": "error",
-            "message": str(e)
+
+        frappe.throw(
+            title="Send to Kitchen Error",
+            msg=str(e)
+        )
+
+def grouping_items_to_kitchen_station(branch, pos_name):
+    """
+    ***UNUSED***
+
+    Grouping items by kitchen_station di POS Invoice Item.
+    Return dict { kitchen_station: [items] }
+    """
+    items = frappe.get_all(
+        "POS Invoice Item",
+        filters={"parent": pos_name},
+        fields=["item_code", "qty", "rate", "resto_menu", "category", "status_kitchen", "add_ons", "quick_notes"]
+    )
+
+    grouped = {}
+    for item in items:
+        branch_menu = frappe.get_doc("Branch Menu", filters={"branch": branch, "menu_item": item.get("resto_menu")})
+        for ks in branch_menu.printers:
+            kitchen_station = ks.printer_name
+            if kitchen_station not in grouped:
+                grouped[kitchen_station] = []
+            grouped[kitchen_station].append(item)
+    return grouped
+        
+
+def send_to_ks_printing(kitchen_station, pos_invoice, items):
+    doc = frappe.new_doc("KS Printing")
+    doc.kitchen_station = kitchen_station
+    doc.pos_invoice = pos_invoice
+    for item in items:
+        doc.append("items", {
+            "menu_item": item.get("resto_menu"),
+            "qty": item.get("qty"),
+            "add_ons": item.get("add_ons"),
+            "quick_notes": item.get("quick_notes")
+        })
+    return doc.insert(ignore_permissions=True)
+
+def print_to_ks_now(pos_invoice):
+    from resto.printing import kitchen_print_from_payload
+    for item in get_branch_menu_for_kitchen_printing(pos_invoice):
+        ksp = send_to_ks_printing(item.get("kitchen_station"), pos_invoice, item.get("items", []))
+        payload = {
+            "kitchen_station": ksp.kitchen_station,
+            "printer_name": ksp.printer_name,
+            "pos_invoice": pos_invoice,
+            "items": item.get("items", [])
         }
+        kitchen_print_from_payload(payload)
+
+@frappe.whitelist()
+def get_branch_menu_for_kitchen_printing(pos_name: str):
+    """
+    Return list of tickets grouped by kitchen_station:
+    [
+      {
+        "kitchen_station": "HOTKITCHEN",
+        "pos_invoice": "POSINVOICE00001",
+        "items": [
+          {
+            "resto_menu": "Nasi Goreng Spesial",
+            "short_name": "NGS",
+            "qty": 2,
+            "quick_notes": "Tanpa Sambel",
+            "add_ons": "Extra Kerupuk"
+          }
+        ]
+      },
+      ...
+    ]
+    """
+    # Ambil branch dari POS Invoice agar pencarian Branch Menu relevan
+    branch = frappe.db.get_value("POS Invoice", pos_name, "branch")
+
+    # Ambil item dari POS Invoice Item (asumsi ada custom fields quick_notes & add_ons)
+    pos_items = frappe.get_all(
+        "POS Invoice Item",
+        filters={"parent": pos_name},
+        fields=["name", "resto_menu", "qty", "quick_notes", "add_ons"]
+    )
+
+    if not pos_items:
+        return []
+
+    # Group hasil per kitchen_station
+    tickets_by_station = {}  # station -> list[items]
+    short_name_cache = {}    # resto_menu -> short_name
+
+    for it in pos_items:
+        resto_menu = it.get("resto_menu")
+        if not resto_menu:
+            continue
+
+        # Ambil short_name dari Resto Menu (cache biar hemat query)
+        if resto_menu not in short_name_cache:
+            short_name_cache[resto_menu] = frappe.db.get_value(
+                "Resto Menu", resto_menu, "short_name"
+            ) or ""
+
+        # Cari Branch Menu yang sesuai resto_menu (dan branch jika tersedia)
+        bm_filters = {"menu_item": resto_menu}
+        if branch:
+            bm_filters["branch"] = branch
+
+        branch_menus = frappe.get_all(
+            "Branch Menu",
+            filters=bm_filters,
+            fields=["name"]
+        )
+
+        if not branch_menus:
+            # Jika tidak ada Branch Menu yang cocok, skip item ini
+            # (atau bisa diarahkan ke station default jika ada requirement)
+            continue
+
+        # Kumpulkan station yang punya printer aktif (deduplicate)
+        stations = set()
+        for bm in branch_menus:
+            bm_doc = frappe.get_doc("Branch Menu", bm.name)
+            for ks in (bm_doc.printers or []):
+                # Hanya station yang benar-benar punya printer_name
+                if getattr(ks, "printer_name", None):
+                    stations.add(getattr(ks, "kitchen_station", None))
+
+        # Tambahkan item ini ke setiap station terkait
+        for station in stations:
+            if not station:
+                continue
+
+            tickets_by_station.setdefault(station, []).append({
+                "resto_menu": resto_menu,
+                "short_name": short_name_cache.get(resto_menu, ""),
+                "qty": it.get("qty") or 0,
+                "quick_notes": it.get("quick_notes") or "",
+                "add_ons": it.get("add_ons") or "",
+            })
+
+    # Susun output list dengan field pos_invoice
+    result = []
+    for station, items in tickets_by_station.items():
+        if not items:
+            continue
+        result.append({
+            "kitchen_station": station,
+            "pos_invoice": pos_name,
+            "items": items
+        })
+
+    # (Opsional) urutkan biar stabil
+    result.sort(key=lambda x: x["kitchen_station"] or "")
+    return result
+
