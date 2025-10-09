@@ -87,21 +87,35 @@ def create_customer(name, mobile_no):
     return doc.as_dict()
 
 @frappe.whitelist()
-def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, order=None):
+def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, orders=None):
+    import json
+    
     doc = frappe.get_doc("Table", name)
 
     doc.status = status
     doc.taken_by = taken_by or None
     doc.pax = int(pax) if pax else 0
-
     doc.customer = None if not customer else customer
     doc.type_customer = None if not type_customer else type_customer
-    doc.order = None if not order else order
+
+    if isinstance(orders, str):
+        try:
+            orders = json.loads(orders)
+        except Exception:
+            orders = []
+
+    doc.set("orders", [])
+
+    if orders:
+        for o in orders:
+            doc.append("orders", {
+                "invoice_name": o.get("invoice_name")
+            })
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
-    return {"success": True, "message": f"Table {doc.table_name} updated"}
+    return {"success": True, "message": f"Table {doc.name} updated successfully"}
 
 @frappe.whitelist()
 def get_select_options(doctype, fieldname):
@@ -402,3 +416,44 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
     result.sort(key=lambda x: x["kitchen_station"] or "")
     return result
 
+@frappe.whitelist()
+def get_all_tables_with_details():
+    tables = frappe.get_all(
+        "Table",
+        fields=[
+            "name",
+            "table_name",
+            "status",
+            "table_type",
+            "zone",
+            "customer",
+            "pax",
+            "type_customer",
+            "floor",
+            "taken_by",
+            "order",
+        ],
+        order_by="table_name asc"
+    )
+
+    result = []
+    for t in tables:
+        doc = frappe.get_doc("Table", t.name)
+        result.append({
+            "id": t.name,
+            "name": t.table_name,
+            "status": t.status or "Kosong",
+            "type": t.table_type,
+            "zone": t.zone,
+            "customer": t.customer or None,
+            "pax": t.pax or 0,
+            "typeCustomer": t.type_customer or None,
+            "floor": t.floor or "1",
+            "takenBy": t.taken_by or None,
+            "order": t.order or None,
+            "orders": [
+                {"invoice_name": o.invoice_name} for o in doc.orders
+            ],
+        })
+
+    return result

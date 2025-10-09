@@ -15,7 +15,9 @@
   "status",
   "pax",
   "type_customer",
-  "order"
+  "order",
+  "section_break_cxlx",
+  "orders"
  ],
  "fields": [
   {
@@ -86,11 +88,21 @@
    "fieldtype": "Link",
    "label": "Order",
    "options": "POS Invoice"
+  },
+  {
+   "fieldname": "section_break_cxlx",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "orders",
+   "fieldtype": "Table",
+   "label": "Orders",
+   "options": "Table Order"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-03 14:21:15.516522",
+ "modified": "2025-10-09 16:07:09.900973",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Table",
@@ -109,7 +121,6 @@
    "write": 1
   }
  ],
- "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": []
