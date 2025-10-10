@@ -137,11 +137,12 @@ def create_pos_invoice(payload):
     if isinstance(payload, str):
         payload = json.loads(payload)
 
-    customer    = payload.get("customer")
-    pos_profile = payload.get("pos_profile")
-    items       = payload.get("items", [])
-    payments    = payload.get("payments", [])
-    queue       = payload.get("queue")
+    customer         = payload.get("customer")
+    pos_profile      = payload.get("pos_profile")
+    items            = payload.get("items", [])
+    payments         = payload.get("payments", [])
+    queue            = payload.get("queue")
+    additional_items = payload.get("additional_items", [])
 
     pos_invoice = frappe.get_doc({
         "doctype": "POS Invoice",
@@ -151,6 +152,7 @@ def create_pos_invoice(payload):
         "items": [],
         "payments": [],
         "queue": queue,
+        "additional_items": [],
     })
 
     for item in items:
@@ -163,6 +165,14 @@ def create_pos_invoice(payload):
             "status_kitchen": item.get("status_kitchen"),
             "add_ons": item.get("add_ons"),
             "quick_notes": item.get("quick_notes")
+        })
+
+    for add_item in additional_items:
+        pos_invoice.append("additional_items", {
+            "item_name": add_item.get("item_name"),
+            "add_on": add_item.get("add_on"),
+            "price": add_item.get("price"),
+            "notes": add_item.get("notes")
         })
 
     for pay in payments:
