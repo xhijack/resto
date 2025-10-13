@@ -73,6 +73,11 @@ def generate_keys(user):
 
     return api_key, api_secret
 
+@frappe.whitelist(allow_guest=True)
+def get_branch_list():
+    data = frappe.get_all("Branch", fields=["name", "branch"])
+    return data
+
 @frappe.whitelist(allow_guest=False)
 def create_customer(name, mobile_no):
     doc = frappe.get_doc({
