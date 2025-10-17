@@ -197,8 +197,7 @@ def create_pos_invoice(payload):
         "items": [],
         "payments": [],
         "queue": queue,
-        # jika kamu punya child table "add_ons", tambahkan di bawah ini:
-        "add_ons": [],
+        "additional_items": [],   # ✅ gunakan fieldname yang sesuai
     })
 
     # Tambahkan item utama
@@ -210,7 +209,7 @@ def create_pos_invoice(payload):
             "resto_menu": item.get("resto_menu"),
             "category": item.get("category"),
             "status_kitchen": item.get("status_kitchen"),
-            "add_ons": item.get("add_ons"),  # ✅ diperbaiki dari "additional_items"
+            "add_ons": item.get("add_ons"),  # tetap string field di item
             "quick_notes": item.get("quick_notes"),
         })
 
@@ -221,14 +220,18 @@ def create_pos_invoice(payload):
             "amount": pay.get("amount")
         })
 
-    # Tambahkan detail add-ons & notes (kalau pakai child table "add_ons")
-    for add in additional_items:
-        pos_invoice.append("add_ons", {
-            "item_name": add.get("item_name"),
-            "add_on": add.get("add_on"),
-            "price": add.get("price"),
-            "notes": add.get("notes"),
-        })
+    # ✅ Tambahkan child table Additional Items
+    if frappe.get_meta("POS Invoice").get_field("additional_items"):
+        for add in additional_items:
+            pos_invoice.append("additional_items", {
+                "item_name": add.get("item_name"),
+                "add_on": add.get("add_on"),
+                "price": add.get("price"),
+                "notes": add.get("notes"),
+            })
+    else:
+        frappe.log_error("Field 'additional_items' tidak ditemukan di POS Invoice",
+                         "Create POS Invoice Error")
 
     # Simpan dokumen
     pos_invoice.insert(ignore_permissions=True)

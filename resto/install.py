@@ -90,3 +90,14 @@ def after_migrate():
             "options": "Branch",
             "insert_after": "due_date",
         }).insert(ignore_permissions=True)
+    
+    if not frappe.db.exists("Custom Field", {'fieldname': "additional_items", "dt": "POS Invoice"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "additional_items",
+            "label": "Additional Items",
+            "fieldtype": "Table",
+            "options": "Additional Items",  
+            "insert_after": "items",
+        }).insert(ignore_permissions=True)
