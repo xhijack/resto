@@ -123,6 +123,45 @@ def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_
     return {"success": True, "message": f"Table {doc.name} updated successfully"}
 
 @frappe.whitelist()
+def add_table_order(table_name, order):
+    """Tambah order baru ke Table tanpa menghapus orders lama"""
+    import json
+
+    if not table_name or not order:
+        frappe.throw("Table name dan order wajib diisi.")
+
+    # Ambil dokumen Table
+    doc = frappe.get_doc("Table", table_name)
+
+    # Pastikan order bisa dibaca (bisa dikirim sebagai dict atau JSON string)
+    if isinstance(order, str):
+        try:
+            order = json.loads(order)
+        except Exception:
+            order = {"invoice_name": order}
+
+    invoice_name = order.get("invoice_name")
+    if not invoice_name:
+        frappe.throw("Field 'invoice_name' wajib ada di order.")
+
+    # Cek apakah invoice_name sudah ada
+    existing_invoices = {o.invoice_name for o in doc.orders}
+    if invoice_name in existing_invoices:
+        return {"success": False, "message": f"Invoice {invoice_name} sudah ada di Table {table_name}"}
+
+    # Tambahkan order baru
+    doc.append("orders", {"invoice_name": invoice_name})
+
+    # Ubah status jadi 'Terisi' jika sebelumnya kosong
+    if doc.status == "Kosong":
+        doc.status = "Terisi"
+
+    doc.save(ignore_permissions=True)
+    frappe.db.commit()
+
+    return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
+
+@frappe.whitelist()
 def get_select_options(doctype, fieldname):
     meta = frappe.get_meta(doctype)
     field = next((f for f in meta.fields if f.fieldname == fieldname and f.fieldtype == "Select"), None)
@@ -149,6 +188,7 @@ def create_pos_invoice(payload):
     queue            = payload.get("queue")
     additional_items = payload.get("additional_items", [])
 
+    # Buat dokumen POS Invoice baru
     pos_invoice = frappe.get_doc({
         "doctype": "POS Invoice",
         "customer": customer,
@@ -157,9 +197,11 @@ def create_pos_invoice(payload):
         "items": [],
         "payments": [],
         "queue": queue,
-        "additional_items": [],
+        # jika kamu punya child table "add_ons", tambahkan di bawah ini:
+        "add_ons": [],
     })
 
+    # Tambahkan item utama
     for item in items:
         pos_invoice.append("items", {
             "item_code": item.get("item_code"),
@@ -168,24 +210,27 @@ def create_pos_invoice(payload):
             "resto_menu": item.get("resto_menu"),
             "category": item.get("category"),
             "status_kitchen": item.get("status_kitchen"),
-            "add_ons": item.get("add_ons"),
-            "quick_notes": item.get("quick_notes")
+            "add_ons": item.get("add_ons"),  # ✅ diperbaiki dari "additional_items"
+            "quick_notes": item.get("quick_notes"),
         })
 
-    for add_item in additional_items:
-        pos_invoice.append("additional_items", {
-            "item_name": add_item.get("item_name"),
-            "add_on": add_item.get("add_on"),
-            "price": add_item.get("price"),
-            "notes": add_item.get("notes")
-        })
-
+    # Tambahkan pembayaran
     for pay in payments:
         pos_invoice.append("payments", {
             "mode_of_payment": pay.get("mode_of_payment"),
             "amount": pay.get("amount")
         })
 
+    # Tambahkan detail add-ons & notes (kalau pakai child table "add_ons")
+    for add in additional_items:
+        pos_invoice.append("add_ons", {
+            "item_name": add.get("item_name"),
+            "add_on": add.get("add_on"),
+            "price": add.get("price"),
+            "notes": add.get("notes"),
+        })
+
+    # Simpan dokumen
     pos_invoice.insert(ignore_permissions=True)
     pos_invoice.save()
 
