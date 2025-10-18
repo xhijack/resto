@@ -17,6 +17,7 @@
   "enabled",
   "short_name",
   "section_break_sham",
+  "printers",
   "add_ons",
   "quick_notes"
  ],
@@ -101,11 +102,17 @@
    "fieldtype": "Data",
    "label": "Short Name",
    "length": 24
+  },
+  {
+   "fieldname": "printers",
+   "fieldtype": "Table",
+   "label": "Printers",
+   "options": "Branch Kitchen Station"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-04 14:16:58.219059",
+ "modified": "2025-10-18 13:37:32.319143",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
