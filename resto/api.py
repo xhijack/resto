@@ -283,46 +283,30 @@ def get_branch_menu_by_resto_menu(pos_name):
 def send_to_kitchen(payload):
     """
     1. Buat POS Invoice
-    2. Print ke kitchen station
+    2. Print ke kitchen station (optional — error tidak batalkan invoice)
     """
     try:
         result = create_pos_invoice(payload)
         pos_name = result["name"]
 
-        print_to_ks_now(pos_name)
+        try:
+            print_to_ks_now(pos_name)
+            printing_status = "Printing berhasil"
+        except Exception as print_err:
+            frappe.log_error(frappe.get_traceback(), f"Printing Error for POS {pos_name}")
+            printing_status = f"Printing gagal: {str(print_err)}"
 
         return {
             "status": "success",
             "pos_invoice": pos_name,
-            "message": f"POS Invoice {pos_name} created and sent to kitchen."
+            "message": f"POS Invoice {pos_name} created. {printing_status}"
         }
 
-
-        # grouped = grouping_items_to_kitchen_station("", pos_name)
-        # for kitchen_station, items in grouped.items():
-            # send_to_ks_printing(kitchen_station, pos_name, items)
-
-        # branch_data = get_branch_menu_by_resto_menu(pos_name)
-
-        # for branch in branch_data:
-        #     for kp in branch.get("kitchen_printers", []):
-        #         printer_name = kp.get("printer_name")
-        #         frappe.log(f"Sending to printer {printer_name} for POS {pos_name}")
-        #         if not printer_name:
-        #             raise Exception("Printer name tidak ditemukan di kitchen_printers")
-        #         pos_invoice_print_now(pos_name, printer_name)
-
-        # return {
-        #     "status": "success",
-        #     "pos_invoice": pos_name,
-        #     "branch_data": branch_data
-        # }
-
     except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Send to Kitchen Error")
-
+        # Kalau pembuatan invoice yang gagal, baru dianggap fatal
+        frappe.log_error(frappe.get_traceback(), "Send to Kitchen - Invoice Creation Error")
         frappe.throw(
-            title="Send to Kitchen Error",
+            title="POS Invoice Creation Error",
             msg=str(e)
         )
 
