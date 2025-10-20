@@ -10,7 +10,7 @@ class RestoMenu(Document):
 	pass
 
 @frappe.whitelist()
-def make_branch_menu(source_name, branch=None, price_list=None):
+def make_branch_menu(source_name, branch=None, price_list=None, rate=0):
     """
     Duplikasi Resto Menu -> Branch Menu (termasuk child).
     Set juga field branch & price_list jika diisi dari dialog.
@@ -22,8 +22,13 @@ def make_branch_menu(source_name, branch=None, price_list=None):
         if price_list:
             # sesuaikan dengan nama field sebenarnya di Branch Menu
             target.price_list = price_list
+        
+        target.rate = rate
 
     mapping = {
+        "Printers": {
+            "doctype": "Branch Menu Printer",
+        },
         "Resto Menu": {
             "doctype": "Branch Menu",
             # "field_map": {"field_di_resto": "field_di_branch"},  # jika perlu

@@ -1,0 +1,101 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2025-10-18 11:17:09.175732",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "item_menu",
+  "menu_code",
+  "sell_item",
+  "recipe_item",
+  "column_break_jrma",
+  "menu_category",
+  "short_name",
+  "section_break_rinb",
+  "branch_menu"
+ ],
+ "fields": [
+  {
+   "fieldname": "item_menu",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Menu",
+   "link_filters": "[[\"Resto Menu\",\"enabled\",\"=\",\"1\"]]",
+   "options": "Resto Menu",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_menu.menu_code",
+   "fieldname": "menu_code",
+   "fieldtype": "Data",
+   "label": "Menu Code"
+  },
+  {
+   "fetch_from": "item_menu.sell_item",
+   "fieldname": "sell_item",
+   "fieldtype": "Data",
+   "label": "Sell Item"
+  },
+  {
+   "fetch_from": "item_menu.recipe_item",
+   "fieldname": "recipe_item",
+   "fieldtype": "Data",
+   "label": "Recipe Item"
+  },
+  {
+   "fieldname": "column_break_jrma",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fetch_from": "item_menu.menu_category",
+   "fieldname": "menu_category",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Menu Category",
+   "options": "Item Group",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "item_menu.short_name",
+   "fieldname": "short_name",
+   "fieldtype": "Data",
+   "label": "Short Name"
+  },
+  {
+   "fieldname": "section_break_rinb",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "branch_menu",
+   "fieldtype": "Table",
+   "label": "Branch Menu",
+   "options": "Resto Menu Detail Tool"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2025-10-18 11:56:13.940729",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "Resto Menu Tool",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

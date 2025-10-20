@@ -2,7 +2,11 @@ import frappe
 from frappe import _
 import json
 
-from resto.printing import pos_invoice_print_now
+@frappe.whitelist()
+def print_now():
+    from resto.printing import pos_invoice_print_now  # import hanya ketika dipakai
+    return pos_invoice_print_now()
+
 
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(email, pin):
