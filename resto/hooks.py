@@ -137,13 +137,11 @@ app_license = "mit"
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "POS Invoice": {
+        "before_save": "resto.events.pos_invoice.exclude_void_items_from_total"
+    }
+}
 
 # Scheduled Tasks
 # ---------------
