@@ -9,21 +9,21 @@ def print_now():
 
 
 @frappe.whitelist(allow_guest=True)
-def login_with_pin(email, pin):
+def login_with_pin(pin):
     try:
         user = frappe.db.get_value(
             "User",
-            {"email": email},
-            ["name", "pin_code", "username", "full_name"],
+            {"pin_code": pin},
+            ["name", "email", "username", "full_name"],
             as_dict=True
         )
         if not user:
             frappe.local.response["http_status_code"] = 404
-            return {"status": "error", "message": "User not found"}
+            return {"status": "error", "message": "PIN Code not found"}
 
-        if user.get("pin_code") != pin:
-            frappe.local.response["http_status_code"] = 401
-            return {"status": "error", "message": "Invalid PIN"}
+        # if user.get("pin_code") != pin:
+        #     frappe.local.response["http_status_code"] = 401
+        #     return {"status": "error", "message": "Invalid PIN"}
 
         # 🧹 Hapus semua session lama user ini (device lama ketendang)
         frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
@@ -48,7 +48,7 @@ def login_with_pin(email, pin):
             "api_secret": api_secret,
             "username": user.get("username"),
             "full_name": user.get("full_name"),
-            "email": email,
+            "email": user.get("email"),
         }
 
         frappe.db.commit()
