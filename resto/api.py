@@ -471,7 +471,7 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
     result.sort(key=lambda x: x["kitchen_station"] or "")
     return result
 
-@frappe.whitelist()
+@frappe.whitelist(allow_guest=True)
 def get_all_tables_with_details():
     tables = frappe.get_all(
         "Table",
