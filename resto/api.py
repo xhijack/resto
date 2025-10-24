@@ -97,8 +97,6 @@ def create_customer(name, mobile_no):
 
 @frappe.whitelist()
 def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, orders=None):
-    import json
-    
     doc = frappe.get_doc("Table", name)
 
     doc.status = status
@@ -111,15 +109,21 @@ def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_
         try:
             orders = json.loads(orders)
         except Exception:
+            frappe.log_error("Gagal parse orders JSON", orders)
             orders = []
+
+    elif not isinstance(orders, list):
+        orders = []
 
     doc.set("orders", [])
 
     if orders:
         for o in orders:
-            doc.append("orders", {
-                "invoice_name": o.get("invoice_name")
-            })
+            invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
+            if invoice_name:
+                doc.append("orders", {
+                    "invoice_name": invoice_name
+                })
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
