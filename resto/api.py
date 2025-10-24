@@ -13,7 +13,7 @@ def login_with_pin(pin):
     try:
         user = frappe.db.get_value(
             "User",
-            {"pin_code": pin},
+            {"pincode": pin},
             ["name", "email", "username", "full_name"],
             as_dict=True
         )

@@ -48,11 +48,24 @@ def after_migrate():
             "insert_after": "quick_notes",
         }).insert(ignore_permissions=True)
 
-    if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
+    # if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
+    #     frappe.get_doc({
+    #         "doctype": "Custom Field",
+    #         "dt": "User",
+    #         "fieldname": "pin_code",
+    #         "label": "PIN Code",
+    #         "fieldtype": "Data",
+    #         "unique": 1,
+    #         "length": 6,
+    #         "insert_after": "username",
+    #         "description": "Masukkan 6 digit PIN unik untuk login"
+    #     }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {"fieldname": "pincode", "dt": "User"}):
         frappe.get_doc({
             "doctype": "Custom Field",
             "dt": "User",
-            "fieldname": "pin_code",
+            "fieldname": "pincode",
             "label": "PIN Code",
             "fieldtype": "Data",
             "unique": 1,
