@@ -587,13 +587,13 @@ def build_escpos_bill(name: str) -> bytes:
     # Format waktu cetak
     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
 
-    separator = "-" * 42 + "\n"  # untuk kertas 80mm
+    separator = ("-" * LINE_WIDTH + "\n").encode()
 
     out = b""
     out += _esc_init()
     out += _esc_font_a()
 
-    # ===== HEADER (Company) =====
+    # ===== HEADER =====
     if company:
         out += _esc_align_center() + _esc_bold(True)
         out += (f"{company}\n").encode("ascii", "ignore")
@@ -601,12 +601,12 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== INFORMASI INVOICE =====
     out += _esc_align_left()
-    out += separator.encode()
+    out += separator
     out += (f"Invoice : {data['name']}\n").encode("ascii", "ignore")
     if customer:
         out += (f"Customer: {customer}\n").encode("ascii", "ignore")
     out += (f"Tanggal : {print_time}\n").encode("ascii", "ignore")
-    out += separator.encode()
+    out += separator
 
     # ===== ITEMS =====
     for item in items:
@@ -616,37 +616,37 @@ def build_escpos_bill(name: str) -> bytes:
         amount = item.get("amount", 0)
 
         out += (f"{item_name}\n").encode("ascii", "ignore")
-        line = f"  {qty} x {format_number(rate)}".ljust(24) + f"{format_number(amount)}"
+        line = f"  {qty} x {format_number(rate)}".ljust(LINE_WIDTH - 8) + f"{format_number(amount)}"
         out += (line + "\n").encode("ascii", "ignore")
 
-    out += separator.encode()
+    out += separator
 
     # ===== TOTALS =====
-    out += ("Subtotal:".ljust(24) + f"{format_number(total)}\n").encode("ascii", "ignore")
+    out += ("Subtotal:".ljust(LINE_WIDTH - 8) + f"{format_number(total)}\n").encode("ascii", "ignore")
     if discount:
-        out += ("Discount:".ljust(24) + f"-{format_number(discount)}\n").encode("ascii", "ignore")
+        out += ("Discount:".ljust(LINE_WIDTH - 8) + f"-{format_number(discount)}\n").encode("ascii", "ignore")
     if tax_total:
-        out += ("Tax:".ljust(24) + f"{format_number(tax_total)}\n").encode("ascii", "ignore")
+        out += ("Tax:".ljust(LINE_WIDTH - 8) + f"{format_number(tax_total)}\n").encode("ascii", "ignore")
 
     out += _esc_bold(True)
-    out += ("TOTAL:".ljust(24) + f"{format_number(grand_total)}\n").encode("ascii", "ignore")
+    out += ("TOTAL:".ljust(LINE_WIDTH - 8) + f"{format_number(grand_total)}\n").encode("ascii", "ignore")
     out += _esc_bold(False)
-    out += separator.encode()
+    out += separator
 
     # ===== PAYMENT =====
     for pay in payments:
         mop = pay.get("mode_of_payment") or "-"
         amt = pay.get("amount") or 0
-        out += (f"{mop}:".ljust(24) + f"{format_number(amt)}\n").encode("ascii", "ignore")
+        out += (f"{mop}:".ljust(LINE_WIDTH - 8) + f"{format_number(amt)}\n").encode("ascii", "ignore")
 
     if change:
-        out += ("Change:".ljust(24) + f"{format_number(change)}\n").encode("ascii", "ignore")
+        out += ("Change:".ljust(LINE_WIDTH - 8) + f"{format_number(change)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
-    out += separator.encode()
+    out += separator
     out += _esc_align_center()
     out += b"Terima kasih!\n"
-    out += _esc_feed(3)  # beri jeda sebelum potong kertas
+    out += b"\n\n\n"  # spasi 3 baris agar footer tidak kepotong
     out += _esc_cut_full()
 
     return out
