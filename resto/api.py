@@ -4,7 +4,7 @@ import json
 
 @frappe.whitelist()
 def print_now():
-    from resto.printing import pos_invoice_print_now  # import hanya ketika dipakai
+    from resto.printing import pos_invoice_print_now
     return pos_invoice_print_now()
 
 
@@ -311,7 +311,6 @@ def send_to_kitchen(payload):
         }
 
     except Exception as e:
-        # Kalau pembuatan invoice yang gagal, baru dianggap fatal
         frappe.log_error(frappe.get_traceback(), "Send to Kitchen - Invoice Creation Error")
         frappe.throw(
             title="POS Invoice Creation Error",
@@ -512,3 +511,15 @@ def get_all_tables_with_details():
         })
 
     return result
+
+@frappe.whitelist()
+def print_bill_now(invoice_name: str, printer_name: str):
+    from resto.printing import _enqueue_bill_worker
+
+    try:
+        job_id = _enqueue_bill_worker(invoice_name, printer_name)
+        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer_name}")
+        return {"ok": True, "job_id": job_id}
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Print Bill Error")
+        frappe.throw(f"Gagal print bill {invoice_name}: {str(e)}")

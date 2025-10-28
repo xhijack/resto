@@ -557,3 +557,102 @@ def _enqueue_worker(name: str, printer_name: str, add_qr: bool, qr_data: str | N
     job_id = cups_print_raw(raw, printer_name)
     # Simpan log sederhana (opsional)
     frappe.logger("pos_print").info({"invoice": name, "printer": printer_name, "job_id": job_id})
+
+def format_number(val) -> str:
+    try:
+        return f"{float(val):,.0f}".replace(",", ".")
+    except Exception:
+        return str(val or 0)
+
+# function print bill
+# ========== Builder ESC/POS Print Bill ==========
+def build_escpos_bill(name: str) -> bytes:
+    data = _collect_pos_invoice(name)
+
+    items = data.get("items", [])
+    payments = data.get("payments", [])
+    taxes = data.get("taxes", [])
+
+    company = data.get("company") or ""
+    customer = data.get("customer_name") or data.get("customer") or ""
+    total = data.get("total", 0)
+    discount = data.get("discount_amount", 0)
+    tax_total = data.get("total_taxes_and_charges", 0)
+    grand_total = data.get("grand_total", 0)
+    paid = data.get("paid_amount", 0)
+    change = data.get("change_amount", 0)
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+
+    # ===== HEADER =====
+    if company:
+        out += _esc_align_center() + _esc_bold(True)
+        out += (f"{company}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
+    out += _esc_align_left()
+    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
+    if customer:
+        out += (f"Customer: {customer}\n").encode("ascii", "ignore")
+    out += b"\n"
+
+    # ===== ITEMS =====
+    for item in items:
+        item_name = item.get("item_name", "")
+        qty = item.get("qty", 0)
+        rate = item.get("rate", 0)
+        amount = item.get("amount", 0)
+
+        # Nama item
+        out += (f"{item_name}\n").encode("ascii", "ignore")
+
+        # Qty x Harga = Subtotal
+        line = f"  {qty} x {format_number(rate)}".ljust(24) + f"{format_number(amount)}"
+        out += (line + "\n").encode("ascii", "ignore")
+
+    out += b"\n"
+
+    # ===== TOTALS =====
+    out += ("Subtotal:".ljust(24) + f"{format_number(total)}\n").encode("ascii", "ignore")
+    if discount:
+        out += ("Discount:".ljust(24) + f"-{format_number(discount)}\n").encode("ascii", "ignore")
+    if tax_total:
+        out += ("Tax:".ljust(24) + f"{format_number(tax_total)}\n").encode("ascii", "ignore")
+
+    out += _esc_bold(True)
+    out += ("TOTAL:".ljust(24) + f"{format_number(grand_total)}\n").encode("ascii", "ignore")
+    out += _esc_bold(False)
+
+    # ===== PAYMENT =====
+    out += b"\n"
+    for pay in payments:
+        mop = pay.get("mode_of_payment") or "-"
+        amt = pay.get("amount") or 0
+        out += (f"{mop}:".ljust(24) + f"{format_number(amt)}\n").encode("ascii", "ignore")
+
+    if change:
+        out += ("Change:".ljust(24) + f"{format_number(change)}\n").encode("ascii", "ignore")
+
+    # ===== FOOTER =====
+    out += b"\n"
+    out += _esc_align_center()
+    out += b"Terima kasih!\n"
+    out += _esc_feed(2)
+    out += _esc_cut_full()
+
+    return out
+
+def _enqueue_bill_worker(name: str, printer_name: str):
+    raw = build_escpos_bill(name)
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "bill"
+    })
+
+    return job_id
