@@ -567,7 +567,6 @@ def format_number(val) -> str:
         return str(val or 0)
 
 # function print bill
-# ========== Builder ESC/POS Print Bill ==========
 def build_escpos_bill(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
@@ -646,8 +645,10 @@ def build_escpos_bill(name: str) -> bytes:
     out += separator
     out += _esc_align_center()
     out += b"Terima kasih!\n"
-    out += b"\n\n\n"  # spasi 3 baris agar footer tidak kepotong
-    out += _esc_cut_full()
+    out += b"Semoga hari Anda menyenangkan!\n"
+
+    # Feed bawah + cut
+    out += _esc_feed(5) + _esc_cut_full()
 
     return out
 
