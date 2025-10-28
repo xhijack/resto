@@ -648,7 +648,7 @@ def build_escpos_bill(name: str) -> bytes:
     out += b"Semoga hari Anda menyenangkan!\n"
 
     # Feed bawah + cut
-    out += _esc_feed(5) + _esc_cut_full()
+    out += _esc_feed(8) + _esc_cut_full()
 
     return out
 
