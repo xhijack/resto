@@ -142,7 +142,6 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "rate": float(standard_price or 0),
             "amount": float(it.get("amount") or 0),
             "uom": it.get("uom") or it.get("stock_uom"),
-            "order_type": it.get("order_type"),
             "discount_percentage": float(it.get("discount_percentage") or 0),
             "discount_amount": float(it.get("discount_amount") or 0),
             "description": it.get("description") or "",
@@ -183,6 +182,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "company": doc.get("company") or "",
         "customer": doc.get("customer") or "",
         "customer_name": doc.get("customer_name") or "",
+        "order_type": doc.get("order_type") or "",
         "currency": currency,
         "total": float(doc.get("total") or 0),
         "discount_amount": float(doc.get("discount_amount") or 0),
@@ -663,9 +663,11 @@ def build_escpos_bill(name: str) -> bytes:
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
         out += _esc_bold(True)
-        out += (f"Pax : {pax}\n").encode("ascii", "ignore")
+        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
+
 
     # Nama kasir
     cashier_name = get_cashier_name(data["name"])
@@ -727,20 +729,19 @@ def build_escpos_bill(name: str) -> bytes:
     out += _esc_bold(False)
 
     # ===== PAYMENT =====
-    out += (separator + "\n").encode("ascii", "ignore")
     for pay in payments:
         mop = pay.get("mode_of_payment") or "-"
         amt = pay.get("amount") or 0
-        out += (f"{mop}:".ljust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+        out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
     if change:
-        out += (f"Change:".ljust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_align_center()
     out += b"Terima kasih!\n"
-    out += b"Semoga hari Anda menyenangkan!\n"
+    out += b"Selamat menikmati hidangan Anda!\n"
 
     # Feed bawah + cut
     out += _esc_feed(8) + _esc_cut_full()
