@@ -644,17 +644,19 @@ def build_escpos_bill(name: str) -> bytes:
 
     out += (separator + "\n").encode("ascii", "ignore")
 
-    # ITEMS
+    # ===== ITEMS =====
     for item in items:
         item_name = item.get("item_name", "")
-        qty = item.get("qty", 0)
+        qty = int(item.get("qty", 0))  # buang desimal
         rate = item.get("rate", 0)
         amount = item.get("amount", 0)
 
+        # Cetak item utama
         out += (f"{item_name}\n").encode("ascii", "ignore")
-        line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount)}"
+        line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount).rjust(12)}"
         out += (line + "\n").encode("ascii", "ignore")
 
+        # Cetak add-ons jika ada
         add_ons_str = item.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
@@ -664,9 +666,10 @@ def build_escpos_bill(name: str) -> bytes:
                     price = price.replace(")", "").strip()
                     name = name.strip()
                     out += ("  " + name + "\n").encode("ascii", "ignore")
-                    add_line = f"  @{format_number(float(price))}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price))}"
+                    add_line = f"  @{format_number(float(price))}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price)).rjust(12)}"
                     out += (add_line + "\n").encode("ascii", "ignore")
 
+        # Cetak quick notes jika ada
         notes = item.get("quick_notes", "")
         if notes:
             out += ("  # " + notes + "\n").encode("ascii", "ignore")
