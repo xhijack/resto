@@ -612,10 +612,12 @@ def build_escpos_bill(name: str) -> bytes:
     paid = data.get("paid_amount", 0)
     change = data.get("change_amount", 0)
 
+    # Hitung total qty semua items
+    total_qty = sum(int(item.get("qty", 0)) for item in items)
+
     # Format waktu cetak
     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
 
-    # Separator sebagai string
     separator = "-" * LINE_WIDTH
 
     out = b""
@@ -627,6 +629,7 @@ def build_escpos_bill(name: str) -> bytes:
         out += _esc_align_center() + _esc_bold(True)
         out += (f"{company}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
+
     out += _esc_align_left()
     out += (separator + "\n").encode("ascii", "ignore")
 
@@ -638,7 +641,7 @@ def build_escpos_bill(name: str) -> bytes:
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += ("Table: " + table_names + "\n").encode("ascii", "ignore")
+        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
     out += (f"Purpose : \n").encode("ascii", "ignore")
@@ -659,13 +662,14 @@ def build_escpos_bill(name: str) -> bytes:
         item_name = item.get("item_name", "")
         qty = int(item.get("qty", 0))
         rate = item.get("rate", 0)
-
         amount = rate * qty
 
+        # Item utama
         out += (f"{item_name}\n").encode("ascii", "ignore")
         line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount).rjust(12)}"
         out += (line + "\n").encode("ascii", "ignore")
 
+        # Add-ons
         add_ons_str = item.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
@@ -674,48 +678,53 @@ def build_escpos_bill(name: str) -> bytes:
                     name, price = add.rsplit("(", 1)
                     price = price.replace(")", "").strip()
                     name = name.strip()
-                    out += ("  " + name + "\n").encode("ascii", "ignore")
-                    add_line = f"  @{format_number(float(price))}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price)).rjust(12)}"
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price)).rjust(12)}"
                     out += (add_line + "\n").encode("ascii", "ignore")
 
+        # Notes
         notes = item.get("quick_notes", "")
         if notes:
-            out += ("  # " + notes + "\n").encode("ascii", "ignore")
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
 
+    # ===== TOTAL QTY =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
-        out += (separator + "\n").encode("ascii", "ignore")
+    # ===== TOTALS =====
+    out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
 
-        # ===== TOTALS =====
-        out += ("Subtotal:".ljust(LINE_WIDTH - 8) + f"{format_number(total)}\n").encode("ascii", "ignore")
-        if discount:
-            out += ("Discount:".ljust(LINE_WIDTH - 8) + f"-{format_number(discount)}\n").encode("ascii", "ignore")
-        if tax_total:
-            out += ("Tax:".ljust(LINE_WIDTH - 8) + f"{format_number(tax_total)}\n").encode("ascii", "ignore")
+    # Tambahan biaya seperti service charge, pajak, dll
+    service_charge = next((t["amount"] for t in taxes if "service" in t["description"].lower()), 0)
+    if service_charge:
+        out += (f"{'Service Charge:'.rjust(LINE_WIDTH - 12)}{format_number(service_charge).rjust(12)}\n").encode("ascii", "ignore")
 
-        out += _esc_bold(True)
-        out += ("TOTAL:".ljust(LINE_WIDTH - 8) + f"{format_number(grand_total)}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
-        out += (separator + "\n").encode("ascii", "ignore")
+    if tax_total:
+        out += (f"{'Tax:'.rjust(LINE_WIDTH - 12)}{format_number(tax_total).rjust(12)}\n").encode("ascii", "ignore")
 
-        # ===== PAYMENT =====
-        for pay in payments:
-            mop = pay.get("mode_of_payment") or "-"
-            amt = pay.get("amount") or 0
-            out += (f"{mop}:".ljust(LINE_WIDTH - 8) + f"{format_number(amt)}\n").encode("ascii", "ignore")
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += _esc_bold(True)
+    out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
+    out += _esc_bold(False)
 
-        if change:
-            out += ("Change:".ljust(LINE_WIDTH - 8) + f"{format_number(change)}\n").encode("ascii", "ignore")
+    # ===== PAYMENT =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    for pay in payments:
+        mop = pay.get("mode_of_payment") or "-"
+        amt = pay.get("amount") or 0
+        out += (f"{mop}:".ljust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
-        # ===== FOOTER =====
-        out += (separator + "\n").encode("ascii", "ignore")
-        out += _esc_align_center()
-        out += b"Terima kasih!\n"
-        out += b"Semoga hari Anda menyenangkan!\n"
+    if change:
+        out += (f"Change:".ljust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
-        # Feed bawah + cut
-        out += _esc_feed(8) + _esc_cut_full()
+    # ===== FOOTER =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += _esc_align_center()
+    out += b"Terima kasih!\n"
+    out += b"Semoga hari Anda menyenangkan!\n"
 
-        return out
+    # Feed bawah + cut
+    out += _esc_feed(8) + _esc_cut_full()
+    return out
 
 def _enqueue_bill_worker(name: str, printer_name: str):
     raw = build_escpos_bill(name)
