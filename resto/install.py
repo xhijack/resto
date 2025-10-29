@@ -116,3 +116,14 @@ def after_migrate():
             "options": "Additional Items",  
             "insert_after": "items",
         }).insert(ignore_permissions=True)
+    
+    if not frappe.db.exists("Custom Field", {'fieldname': "order_type", "dt": "POS Invoice"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "order_type",
+            "label": "Order Type",
+            "fieldtype": "Select",
+            "options": "Dine In\nTake Away",
+            "insert_after": "branch",
+        }).insert(ignore_permissions=True)

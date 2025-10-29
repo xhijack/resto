@@ -142,6 +142,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "rate": float(standard_price or 0),
             "amount": float(it.get("amount") or 0),
             "uom": it.get("uom") or it.get("stock_uom"),
+            "order_type": it.get("order_type"),
             "discount_percentage": float(it.get("discount_percentage") or 0),
             "discount_amount": float(it.get("discount_amount") or 0),
             "description": it.get("description") or "",
@@ -590,6 +591,20 @@ def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
     table_names = ", ".join([t["parent"] for t in table_orders])
     return table_names
 
+def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
+    table_orders = frappe.get_all(
+        "Table Order",
+        filters={"invoice_name": pos_invoice_name},
+        fields=["parent"]
+    )
+
+    total_pax = 0
+    for t in table_orders:
+        pax = frappe.db.get_value("Table", t["parent"], "pax") or 0
+        total_pax += pax
+    return total_pax
+
+
 def get_cashier_name(pos_invoice_name: str) -> str:
     invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
     owner = invoice.owner
@@ -604,6 +619,7 @@ def build_escpos_bill(name: str) -> bytes:
     taxes = data.get("taxes", [])
 
     company = data.get("company") or ""
+    order_type = data.get("order_type") or ""
     customer = data.get("customer_name") or data.get("customer") or ""
     total = data.get("total", 0)
     discount = data.get("discount_amount", 0)
@@ -644,8 +660,12 @@ def build_escpos_bill(name: str) -> bytes:
         out += (f"Table: {table_names}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
-    out += (f"Purpose : \n").encode("ascii", "ignore")
-    out += (f"Pax : \n").encode("ascii", "ignore")
+    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(data["name"])
+    if pax:
+        out += _esc_bold(True)
+        out += (f"Pax : {pax}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
 
     # Nama kasir
     cashier_name = get_cashier_name(data["name"])
