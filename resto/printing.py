@@ -602,7 +602,8 @@ def build_escpos_bill(name: str) -> bytes:
     # Format waktu cetak
     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
 
-    separator = ("-" * LINE_WIDTH + "\n").encode()
+    # Separator sebagai string
+    separator = "-" * LINE_WIDTH
 
     out = b""
     out += _esc_init()
@@ -613,10 +614,10 @@ def build_escpos_bill(name: str) -> bytes:
         out += _esc_align_center() + _esc_bold(True)
         out += (f"{company}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
-
-   # ===== INFORMASI INVOICE =====
     out += _esc_align_left()
     out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== INFORMASI INVOICE =====
     out += (f"No : {data['name']}\n").encode("ascii", "ignore")
     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
 
@@ -638,8 +639,7 @@ def build_escpos_bill(name: str) -> bytes:
     if customer:
         out += (f"Customer: {customer}\n").encode("ascii", "ignore")
 
-        
-    out += separator
+    out += (separator + "\n").encode("ascii", "ignore")
 
     # ===== ITEMS =====
     for item in items:
@@ -652,7 +652,7 @@ def build_escpos_bill(name: str) -> bytes:
         line = f"  {qty} x {format_number(rate)}".ljust(LINE_WIDTH - 8) + f"{format_number(amount)}"
         out += (line + "\n").encode("ascii", "ignore")
 
-    out += separator
+    out += (separator + "\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
     out += ("Subtotal:".ljust(LINE_WIDTH - 8) + f"{format_number(total)}\n").encode("ascii", "ignore")
@@ -664,7 +664,7 @@ def build_escpos_bill(name: str) -> bytes:
     out += _esc_bold(True)
     out += ("TOTAL:".ljust(LINE_WIDTH - 8) + f"{format_number(grand_total)}\n").encode("ascii", "ignore")
     out += _esc_bold(False)
-    out += separator
+    out += (separator + "\n").encode("ascii", "ignore")
 
     # ===== PAYMENT =====
     for pay in payments:
@@ -676,7 +676,7 @@ def build_escpos_bill(name: str) -> bytes:
         out += ("Change:".ljust(LINE_WIDTH - 8) + f"{format_number(change)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
-    out += separator
+    out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_align_center()
     out += b"Terima kasih!\n"
     out += b"Semoga hari Anda menyenangkan!\n"
