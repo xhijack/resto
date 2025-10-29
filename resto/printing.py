@@ -569,12 +569,13 @@ def format_number(val) -> str:
 # function print bill
 
 def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
-    tables = frappe.get_all(
-        "Table",
-        filters=[["orders", "invoice_name", "=", pos_invoice_name]],
-        fields=["table_name"]
+    table_orders = frappe.get_all(
+        "Table Order",
+        filters={"invoice_name": pos_invoice_name},
+        fields=["parent"] 
     )
-    table_names = ", ".join([t["table_name"] for t in tables])
+
+    table_names = ", ".join([t["parent"] for t in table_orders])
     return table_names
 
 def get_cashier_name(pos_invoice_name: str) -> str:
