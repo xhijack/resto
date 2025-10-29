@@ -182,6 +182,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "company": doc.get("company") or "",
         "customer": doc.get("customer") or "",
         "customer_name": doc.get("customer_name") or "",
+        "order_type": doc.get("order_type") or "",
         "currency": currency,
         "total": float(doc.get("total") or 0),
         "discount_amount": float(doc.get("discount_amount") or 0),
@@ -590,6 +591,20 @@ def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
     table_names = ", ".join([t["parent"] for t in table_orders])
     return table_names
 
+def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
+    table_orders = frappe.get_all(
+        "Table Order",
+        filters={"invoice_name": pos_invoice_name},
+        fields=["parent"]
+    )
+
+    total_pax = 0
+    for t in table_orders:
+        pax = frappe.db.get_value("Table", t["parent"], "pax") or 0
+        total_pax += pax
+    return total_pax
+
+
 def get_cashier_name(pos_invoice_name: str) -> str:
     invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
     owner = invoice.owner
@@ -604,6 +619,7 @@ def build_escpos_bill(name: str) -> bytes:
     taxes = data.get("taxes", [])
 
     company = data.get("company") or ""
+    order_type = data.get("order_type") or ""
     customer = data.get("customer_name") or data.get("customer") or ""
     total = data.get("total", 0)
     discount = data.get("discount_amount", 0)
@@ -644,8 +660,14 @@ def build_escpos_bill(name: str) -> bytes:
         out += (f"Table: {table_names}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
-    out += (f"Purpose : \n").encode("ascii", "ignore")
-    out += (f"Pax : \n").encode("ascii", "ignore")
+    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(data["name"])
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
 
     # Nama kasir
     cashier_name = get_cashier_name(data["name"])
@@ -707,20 +729,19 @@ def build_escpos_bill(name: str) -> bytes:
     out += _esc_bold(False)
 
     # ===== PAYMENT =====
-    out += (separator + "\n").encode("ascii", "ignore")
     for pay in payments:
         mop = pay.get("mode_of_payment") or "-"
         amt = pay.get("amount") or 0
-        out += (f"{mop}:".ljust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+        out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
     if change:
-        out += (f"Change:".ljust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_align_center()
     out += b"Terima kasih!\n"
-    out += b"Semoga hari Anda menyenangkan!\n"
+    out += b"Selamat menikmati hidangan Anda!\n"
 
     # Feed bawah + cut
     out += _esc_feed(8) + _esc_cut_full()

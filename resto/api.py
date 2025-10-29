@@ -196,12 +196,14 @@ def create_pos_invoice(payload):
     payments         = payload.get("payments", [])
     queue            = payload.get("queue")
     additional_items = payload.get("additional_items", [])
+    order_type       = payload.get("order_type")
 
     # Buat dokumen POS Invoice baru
     pos_invoice = frappe.get_doc({
         "doctype": "POS Invoice",
         "customer": customer,
         "pos_profile": pos_profile,
+        "order_type": order_type,
         "company": frappe.db.get_single_value("Global Defaults", "default_company"),
         "items": [],
         "payments": [],
