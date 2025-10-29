@@ -567,6 +567,22 @@ def format_number(val) -> str:
         return str(val or 0)
 
 # function print bill
+
+def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
+    tables = frappe.get_all(
+        "Table",
+        filters=[["orders", "invoice_name", "=", pos_invoice_name]],
+        fields=["table_name"]
+    )
+    table_names = ", ".join([t["table_name"] for t in tables])
+    return table_names
+
+def get_cashier_name(pos_invoice_name: str) -> str:
+    invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
+    owner = invoice.owner
+    user = frappe.get_doc("User", owner)
+    return user.full_name or owner  
+
 def build_escpos_bill(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
@@ -598,13 +614,31 @@ def build_escpos_bill(name: str) -> bytes:
         out += (f"{company}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
-    # ===== INFORMASI INVOICE =====
+   # ===== INFORMASI INVOICE =====
     out += _esc_align_left()
-    out += separator
-    out += (f"Invoice : {data['name']}\n").encode("ascii", "ignore")
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+
+    # Nama table
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    if table_names:
+        out += _esc_bold(True)
+        out += ("Table: " + table_names + "\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
+    out += (f"Purpose : \n").encode("ascii", "ignore")
+    out += (f"Pax : \n").encode("ascii", "ignore")
+
+    # Nama kasir
+    cashier_name = get_cashier_name(data["name"])
+    out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
+
+    # Customer
     if customer:
         out += (f"Customer: {customer}\n").encode("ascii", "ignore")
-    out += (f"Tanggal : {print_time}\n").encode("ascii", "ignore")
+
+        
     out += separator
 
     # ===== ITEMS =====
