@@ -1,49 +1,50 @@
 import frappe
 from frappe import _
 import json
+from frappe.auth import LoginManager
+from frappe.core.doctype.user.user import generate_keys
 
 @frappe.whitelist()
 def print_now():
     from resto.printing import pos_invoice_print_now
     return pos_invoice_print_now()
 
-
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(pin):
     try:
+        # 🔍 Cari user berdasarkan PIN
         user = frappe.db.get_value(
             "User",
             {"pincode": pin},
             ["name", "email", "username", "full_name"],
             as_dict=True
         )
+
         if not user:
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        # 🧹 Hapus semua session lama user ini (device lama ketendang)
+        # 🧹 Hapus semua session lama user ini (device lama akan logout otomatis)
         frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
-        frappe.db.commit()
 
-        # 🗝️ Hapus credential lama
+        # 🔐 Hapus API Key dan Secret lama
         frappe.db.set_value("User", user.get("name"), "api_key", None)
         frappe.db.set_value("User", user.get("name"), "api_secret", None)
+        frappe.db.commit()  # Commit dulu agar benar-benar bersih
 
-        # 💾 Commit dulu agar benar-benar terhapus sebelum generate key baru
-        frappe.db.commit()
-
-        # 🔐 Login baru
-        login_manager = frappe.auth.LoginManager()
+        # 🚪 Login baru pakai LoginManager
+        login_manager = LoginManager()
         login_manager.user = user.get("name")
         login_manager.post_login()
 
-        # 🔑 Generate API key baru
+        # 🔑 Buat API Key & Secret baru
         api_key, api_secret = generate_keys(user.get("name"))
 
+        # 🧾 Response ke frontend
         frappe.response["message"] = {
             "status": "success",
             "message": "Authentication success",
-            "sid": frappe.session.sid,
+            "sid": frappe.session.sid,  # ← ini penting untuk session
             "api_key": api_key,
             "api_secret": api_secret,
             "username": user.get("username"),
@@ -58,7 +59,6 @@ def login_with_pin(pin):
         frappe.log_error(frappe.get_traceback(), "Login With PIN Failed")
         frappe.local.response["http_status_code"] = 500
         return {"status": "error", "message": frappe.utils.cstr(e)}
-
 
 def generate_keys(user):
     user_details = frappe.get_doc("User", user)
