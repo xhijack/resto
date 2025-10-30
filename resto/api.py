@@ -37,9 +37,7 @@ def login_with_pin(pin):
         login_manager.post_login()
 
         # 🔑 Generate API key baru
-        api_key, api_secret = frappe.utils.password.create_api_key_secret(user.get("name"))
-        # atau jika kamu pakai helper generate_keys sendiri:
-        # api_key, api_secret = generate_keys(user.get("name"))
+        api_key, api_secret = generate_keys(user.get("name"))
 
         frappe.response["message"] = {
             "status": "success",
