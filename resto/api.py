@@ -23,6 +23,7 @@ def login_with_pin(pin):
 
         # 🧹 Hapus semua session lama user ini (device lama ketendang)
         frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
+        frappe.db.commit()
 
         # 🗝️ Hapus credential lama
         frappe.db.set_value("User", user.get("name"), "api_key", None)
