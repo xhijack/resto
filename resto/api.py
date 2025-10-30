@@ -17,24 +17,27 @@ def login_with_pin(pin):
             ["name", "email", "username", "full_name"],
             as_dict=True
         )
-
         if not user:
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user["name"])
+        # 🧹 Hapus semua session lama user ini (device lama ketendang)
+        frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
+
+        # 🗝️ Hapus credential lama
+        frappe.db.set_value("User", user.get("name"), "api_key", None)
+        frappe.db.set_value("User", user.get("name"), "api_secret", None)
+
+        # 💾 Commit dulu agar benar-benar terhapus sebelum generate key baru
         frappe.db.commit()
 
-        frappe.db.set_value("User", user["name"], "api_key", None)
-        frappe.db.set_value("User", user["name"], "api_secret", None)
-        frappe.db.commit()
-
-        from frappe.core.doctype.user.user import generate_keys
-        api_key, api_secret = generate_keys(user["name"])
-
+        # 🔐 Login baru
         login_manager = frappe.auth.LoginManager()
-        login_manager.user = user["name"]
+        login_manager.user = user.get("name")
         login_manager.post_login()
+
+        # 🔑 Generate API key baru
+        api_key, api_secret = generate_keys(user.get("name"))
 
         frappe.response["message"] = {
             "status": "success",
@@ -42,9 +45,9 @@ def login_with_pin(pin):
             "sid": frappe.session.sid,
             "api_key": api_key,
             "api_secret": api_secret,
-            "username": user["username"],
-            "full_name": user["full_name"],
-            "email": user["email"],
+            "username": user.get("username"),
+            "full_name": user.get("full_name"),
+            "email": user.get("email"),
         }
 
         frappe.db.commit()
@@ -54,6 +57,7 @@ def login_with_pin(pin):
         frappe.log_error(frappe.get_traceback(), "Login With PIN Failed")
         frappe.local.response["http_status_code"] = 500
         return {"status": "error", "message": frappe.utils.cstr(e)}
+
 
 def generate_keys(user):
     user_details = frappe.get_doc("User", user)
