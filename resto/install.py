@@ -127,3 +127,88 @@ def after_migrate():
             "options": "Dine In\nTake Away",
             "insert_after": "branch",
         }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "address", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "address",
+            "label": "Address",
+            "fieldtype": "Link",
+            "options": "Address",
+            "insert_after": "branch",
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "address_line1", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "address_line1",
+            "label": "Adress Line 1",
+            "fieldtype": "Data",
+            "insert_after": "address",
+            "fetch_from": "address.address_line1",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+    
+    if not frappe.db.exists("Custom Field", {'fieldname': "address_line2", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "address_line2",
+            "label": "Adress Line 2",
+            "fieldtype": "Data",
+            "insert_after": "address_line1",
+            "fetch_from": "address.address_line2",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "city", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "city",
+            "label": "City",
+            "fieldtype": "Data",
+            "insert_after": "address_line2",
+            "fetch_from": "address.city",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "state", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "state",
+            "label": "State/Province",
+            "fieldtype": "Data",
+            "insert_after": "city",
+            "fetch_from": "address.state",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "pincode", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "pincode",
+            "label": "Postal Code",
+            "fieldtype": "Data",
+            "insert_after": "state",
+            "fetch_from": "address.pincode",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': "phone", "dt": "Branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Branch",
+            "fieldname": "phone",
+            "label": "Phone",
+            "fieldtype": "Data",
+            "insert_after": "pincode",
+            "fetch_from": "address.phone",
+            "read_only": 1,
+        }).insert(ignore_permissions=True)
+
+

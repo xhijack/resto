@@ -12,7 +12,6 @@ def print_now():
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(pin):
     try:
-        # 🔍 Cari user berdasarkan PIN
         user = frappe.db.get_value(
             "User",
             {"pincode": pin},
@@ -24,27 +23,22 @@ def login_with_pin(pin):
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        # 🧹 Hapus semua session lama user ini (device lama akan logout otomatis)
         frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
 
-        # 🔐 Hapus API Key dan Secret lama
         frappe.db.set_value("User", user.get("name"), "api_key", None)
         frappe.db.set_value("User", user.get("name"), "api_secret", None)
-        frappe.db.commit()  # Commit dulu agar benar-benar bersih
+        frappe.db.commit()
 
-        # 🚪 Login baru pakai LoginManager
         login_manager = LoginManager()
         login_manager.user = user.get("name")
         login_manager.post_login()
 
-        # 🔑 Buat API Key & Secret baru
         api_key, api_secret = generate_keys(user.get("name"))
 
-        # 🧾 Response ke frontend
         frappe.response["message"] = {
             "status": "success",
             "message": "Authentication success",
-            "sid": frappe.session.sid,  # ← ini penting untuk session
+            "sid": frappe.session.sid,  
             "api_key": api_key,
             "api_secret": api_secret,
             "username": user.get("username"),

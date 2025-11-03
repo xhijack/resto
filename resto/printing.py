@@ -170,6 +170,15 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "amount": amt,
         })
 
+    branch_detail = {}
+    if doc.get("branch"):
+        try:
+            branch_doc = frappe.get_doc("Branch", doc.get("branch"))
+            branch_detail = branch_doc.as_dict()
+        except frappe.DoesNotExistError:
+            branch_detail = {}
+
+
     grand_total = float(doc.get("rounded_total") or doc.get("grand_total") or 0)
     change_amount = doc.get("change_amount")
     if change_amount is None:
@@ -179,6 +188,8 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "name": doc.get("name"),
         "posting_date": str(doc.get("posting_date") or ""),
         "posting_time": str(doc.get("posting_time") or ""),
+        "branch": doc.get("branch") or "",
+        "branch_detail": branch_detail, 
         "company": doc.get("company") or "",
         "customer": doc.get("customer") or "",
         "customer_name": doc.get("customer_name") or "",
@@ -627,7 +638,16 @@ def build_escpos_bill(name: str) -> bytes:
     grand_total = data.get("grand_total", 0)
     paid = data.get("paid_amount", 0)
     change = data.get("change_amount", 0)
+    queue_no = data.get("queue") or ""
+    branch = data.get("branch") or ""
+    branch_detail = data.get("branch_detail") or {}
 
+    address1 = branch_detail.get("address_line1") or ""
+    address2 = branch_detail.get("address_line2") or ""
+    city = branch_detail.get("city") or ""
+    pincode = branch_detail.get("pincode") or ""
+    phone = branch_detail.get("phone") or ""
+    
     # Hitung total qty semua items
     total_qty = sum(int(item.get("qty", 0)) for item in items)
 
@@ -641,10 +661,27 @@ def build_escpos_bill(name: str) -> bytes:
     out += _esc_font_a()
 
     # ===== HEADER =====
-    if company:
-        out += _esc_align_center() + _esc_bold(True)
-        out += (f"{company}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
+    out += _esc_align_center() + _esc_bold(True)
+    if company or branch:
+        header_line = f"{company}"
+        if branch:
+            header_line += f" - {branch}"
+        out += (header_line + "\n").encode("ascii", "ignore")
+
+    out += _esc_bold(False)
+
+    # Alamat branch
+    if address1 or address2 or city or pincode or phone:
+        out += _esc_align_center()
+        if address1:
+            out += (f"{address1}\n").encode("ascii", "ignore")
+        if address2:
+            out += (f"{address2}\n").encode("ascii", "ignore")
+        if city or pincode:
+            out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
+        if phone:
+            out += (f"Phone: {phone}\n").encode("ascii", "ignore")
+
 
     out += _esc_align_left()
     out += (separator + "\n").encode("ascii", "ignore")
@@ -742,6 +779,25 @@ def build_escpos_bill(name: str) -> bytes:
     out += _esc_align_center()
     out += b"Terima kasih!\n"
     out += b"Selamat menikmati hidangan Anda!\n"
+
+    # ===== QUEUE NUMBER (Take Away) =====
+    order_type_value = (order_type or "").lower()
+    if order_type_value in ["take away", "takeaway"]:
+        queue_no = data.get("queue_no") or ""
+        if queue_no:
+            out += _esc_feed(2)
+            out += _esc_align_center()
+            out += _esc_bold(True)
+            out += b"Your Queue Number:\n"
+            out += _esc_bold(False)
+
+            # --- Font besar + center untuk nomor antrian ---
+            out += _esc_align_center()          # pastikan tetap di tengah
+            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
+            out += f"{queue_no}\n".encode("ascii", "ignore")
+            out += b"\x1b!\x00"                 # reset font ke normal
+            out += _esc_feed(2)
+
 
     # Feed bawah + cut
     out += _esc_feed(8) + _esc_cut_full()
