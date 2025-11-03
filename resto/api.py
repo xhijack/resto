@@ -23,16 +23,23 @@ def login_with_pin(pin):
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.name)
+        frappe.db.sql("""
+            DELETE FROM `tabSessions`
+            WHERE user = %s
+              AND TIMESTAMPDIFF(HOUR, lastupdate, NOW()) > 1
+        """, user.name)
         frappe.db.commit()
 
+        # ✅ Login resmi
         login_manager = LoginManager()
         login_manager.login_as(user.name)
 
+        # ✅ Pastikan API Key/Secret ada
         api_key, api_secret = frappe.db.get_value("User", user.name, ["api_key", "api_secret"])
         if not api_key or not api_secret:
             api_key, api_secret = generate_keys(user.name)
 
+        # ✅ Kembalikan respons lengkap
         frappe.response["message"] = {
             "status": "success",
             "message": "Authentication success",
