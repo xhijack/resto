@@ -518,13 +518,21 @@ def get_all_tables_with_details():
     return result
 
 @frappe.whitelist()
-def print_bill_now(invoice_name: str, printer_name: str):
-    from resto.printing import _enqueue_bill_worker
-
+def print_bill_now(invoice_name: str, branch: str):
     try:
-        job_id = _enqueue_bill_worker(invoice_name, printer_name)
-        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer_name}")
+        printer = frappe.db.get_value(
+            "Printer Setting",
+            {"branch": branch},
+            "printer_name"
+        )
+
+        if not printer:
+            frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
+
+        job_id = _enqueue_bill_worker(invoice_name, printer)
+        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
         return {"ok": True, "job_id": job_id}
+
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Print Bill Error")
         frappe.throw(f"Gagal print bill {invoice_name}: {str(e)}")
