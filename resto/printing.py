@@ -194,6 +194,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "customer": doc.get("customer") or "",
         "customer_name": doc.get("customer_name") or "",
         "order_type": doc.get("order_type") or "",
+        "queue": doc.get("queue") or "",
         "currency": currency,
         "total": float(doc.get("total") or 0),
         "discount_amount": float(doc.get("discount_amount") or 0),
