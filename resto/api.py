@@ -23,21 +23,34 @@ def login_with_pin(pin):
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        # ✅ Cek / buat API Key dan Secret
+        # 🔒 Hapus sesi lama yang sudah lebih dari 1 jam
+        frappe.db.sql("""
+            DELETE FROM `tabSessions`
+            WHERE user = %s
+              AND TIMESTAMPDIFF(HOUR, lastupdate, NOW()) > 1
+        """, user.name)
+        frappe.db.commit()
+
+        # 🔐 Login dengan LoginManager
+        login_manager = frappe.auth.LoginManager()
+        login_manager.login_as(user.name)
+
+        # 🔑 Pastikan API key/secret ada
         api_key, api_secret = frappe.db.get_value("User", user.name, ["api_key", "api_secret"])
         if not api_key or not api_secret:
-            api_key, api_secret = generate_keys(user.name)
+            api_key, api_secret = frappe.core.doctype.user.user.generate_keys(user.name)
 
-        # ✅ Tidak buat session, langsung kirim API token
-        return {
+        frappe.response["message"] = {
             "status": "success",
             "message": "Authentication success",
+            "sid": frappe.session.sid,
             "api_key": api_key,
             "api_secret": api_secret,
             "username": user.username,
             "full_name": user.full_name,
             "email": user.email,
         }
+        return frappe.response["message"]
 
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Login With PIN Failed")
