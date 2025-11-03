@@ -784,7 +784,7 @@ def build_escpos_bill(name: str) -> bytes:
     # ===== QUEUE NUMBER (Take Away) =====
     order_type_value = (order_type or "").lower()
     if order_type_value in ["take away", "takeaway"]:
-        queue_no = data.get("queue_no") or ""
+        queue_no = data.get("queue") or ""
         if queue_no:
             out += _esc_feed(2)
             out += _esc_align_center()
