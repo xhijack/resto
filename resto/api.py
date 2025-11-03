@@ -186,6 +186,7 @@ def create_pos_invoice(payload):
 
     customer         = payload.get("customer")
     pos_profile      = payload.get("pos_profile")
+    branch      = payload.get("branch")
     items            = payload.get("items", [])
     payments         = payload.get("payments", [])
     queue            = payload.get("queue")
@@ -198,6 +199,7 @@ def create_pos_invoice(payload):
         "customer": customer,
         "pos_profile": pos_profile,
         "order_type": order_type,
+        "branch": branch,
         "company": frappe.db.get_single_value("Global Defaults", "default_company"),
         "items": [],
         "payments": [],
