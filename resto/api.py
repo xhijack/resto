@@ -524,7 +524,7 @@ def print_bill_now(invoice_name: str, branch: str):
 
     try:
         printer = frappe.db.get_value(
-            "Printer Setting",
+            "Printer Settings",
             {"branch": branch},
             "printer_name"
         )
