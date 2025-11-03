@@ -12,6 +12,7 @@ def print_now():
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(pin):
     try:
+        # 🔍 Cari user berdasarkan PIN
         user = frappe.db.get_value(
             "User",
             {"pincode": pin},
@@ -23,33 +24,35 @@ def login_with_pin(pin):
             frappe.local.response["http_status_code"] = 404
             return {"status": "error", "message": "PIN Code not found"}
 
-        # 🔒 Hapus sesi lama yang sudah lebih dari 1 jam
-        frappe.db.sql("""
-            DELETE FROM `tabSessions`
-            WHERE user = %s
-              AND TIMESTAMPDIFF(HOUR, lastupdate, NOW()) > 1
-        """, user.name)
-        frappe.db.commit()
+        # 🧹 Hapus semua session lama user ini (device lama akan logout otomatis)
+        frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
 
-        # 🔐 Login dengan LoginManager
-        login_manager = frappe.auth.LoginManager()
-        login_manager.login_as(user.name)
+        # 🔐 Hapus API Key dan Secret lama
+        frappe.db.set_value("User", user.get("name"), "api_key", None)
+        frappe.db.set_value("User", user.get("name"), "api_secret", None)
+        frappe.db.commit()  # Commit dulu agar benar-benar bersih
 
-        # 🔑 Pastikan API key/secret ada
-        api_key, api_secret = frappe.db.get_value("User", user.name, ["api_key", "api_secret"])
-        if not api_key or not api_secret:
-            api_key, api_secret = frappe.core.doctype.user.user.generate_keys(user.name)
+        # 🚪 Login baru pakai LoginManager
+        login_manager = LoginManager()
+        login_manager.user = user.get("name")
+        login_manager.post_login()
 
+        # 🔑 Buat API Key & Secret baru
+        api_key, api_secret = generate_keys(user.get("name"))
+
+        # 🧾 Response ke frontend
         frappe.response["message"] = {
             "status": "success",
             "message": "Authentication success",
-            "sid": frappe.session.sid,
+            "sid": frappe.session.sid,  # ← ini penting untuk session
             "api_key": api_key,
             "api_secret": api_secret,
-            "username": user.username,
-            "full_name": user.full_name,
-            "email": user.email,
+            "username": user.get("username"),
+            "full_name": user.get("full_name"),
+            "email": user.get("email"),
         }
+
+        frappe.db.commit()
         return frappe.response["message"]
 
     except Exception as e:
