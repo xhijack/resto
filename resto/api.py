@@ -24,16 +24,16 @@ def login_with_pin(pin):
             return {"status": "error", "message": "PIN Code not found"}
 
         frappe.db.sql("DELETE FROM `tabSessions` WHERE user = %s", user.get("name"))
-
-        frappe.db.set_value("User", user.get("name"), "api_key", None)
-        frappe.db.set_value("User", user.get("name"), "api_secret", None)
         frappe.db.commit()
 
         login_manager = LoginManager()
         login_manager.user = user.get("name")
         login_manager.post_login()
 
-        api_key, api_secret = generate_keys(user.get("name"))
+        api_key, api_secret = frappe.db.get_value("User", user.get("name"), ["api_key", "api_secret"])
+        if not api_key or not api_secret:
+            api_key, api_secret = generate_keys(user.get("name"))
+
 
         frappe.response["message"] = {
             "status": "success",
