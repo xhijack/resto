@@ -373,11 +373,39 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
     out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    if table_names:
+        out += _esc_bold(True)
+        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
+    out += (f"Purpose : {data['order_type']}\n").encode("ascii", "ignore")
+
     out += _line("-").encode() + b"\n"
 
     for it in items:
         qty = int(it["qty"]) if it["qty"].is_integer() else it["qty"]
         line = f"{qty} x {it['item_name']}"
+
+        add_ons_str = it.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            for add in add_ons_list:
+                name = add.strip()
+                qty_str = "1"  # default qty add-on = 1
+                space = LINE_WIDTH - 2 - len(name) - len(qty_str)
+                if space < 1:
+                    space = 1
+                add_line = f"  {name}{' ' * space}{qty_str}"
+                out += (add_line + "\n").encode("ascii", "ignore")
+
+
+        # Notes
+        notes = it.get("quick_notes", "")
+        if notes:
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
+
+
         for w in _wrap_text(line, LINE_WIDTH):
             out += (w + "\n").encode("ascii", "ignore")
 
