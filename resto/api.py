@@ -292,6 +292,7 @@ def get_branch_menu_by_resto_menu(pos_name):
 
     return branch_results
 
+@frappe.whitelist()
 def enqueue_checker_after_kitchen(pos_name: str, branch: str):
     from resto.printing import _enqueue_checker_worker
 
