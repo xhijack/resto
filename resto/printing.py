@@ -146,7 +146,8 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "discount_amount": float(it.get("discount_amount") or 0),
             "description": it.get("description") or "",
             "add_ons" : it.get("add_ons") or "",
-            "quick_notes": it.get("quick_notes") or ""
+            "quick_notes": it.get("quick_notes") or "",
+            "is_checked": it.get("is_checked") or ""
         })
 
     taxes = []

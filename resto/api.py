@@ -328,21 +328,12 @@ def send_to_kitchen(payload):
         result = create_pos_invoice(payload)
         pos_name = result["name"]
 
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-
-        branch = payload.get("branch")
-
         try:
             print_to_ks_now(pos_name)
             printing_status = "Printing berhasil"
         except Exception as print_err:
             frappe.log_error(frappe.get_traceback(), f"Printing Error for POS {pos_name}")
             printing_status = f"Printing gagal: {str(print_err)}"
-
-
-        enqueue_checker_after_kitchen(pos_name, branch)
-
 
         return {
             "status": "success",
