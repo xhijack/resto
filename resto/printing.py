@@ -1015,7 +1015,15 @@ def _enqueue_receipt_worker(name: str, printer_name: str):
 def build_escpos_checker(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
-    items = data.get("items", [])
+    items = [item for item in data.get("items", []) if not item.get("is_checked")]
+    
+    if not items:
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "message": "Semua item sudah di-print ke checker"
+        })
+        return b""
+
     payments = data.get("payments", [])
     taxes = data.get("taxes", [])
 
@@ -1052,7 +1060,7 @@ def build_escpos_checker(name: str) -> bytes:
 
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"Checker\n").encode("ascii", "ignore")
+    out += (f"CHECKER\n").encode("ascii", "ignore")
 
     if company or branch:
         header_line = f"{company}"
@@ -1114,7 +1122,8 @@ def build_escpos_checker(name: str) -> bytes:
         qty = item.get("qty", 1)
 
         left = item_name.strip()
-        right = str(qty)
+        right = str(int(qty)) if isinstance(qty, (int, float)) and qty == int(qty) else str(qty)
+
         space = LINE_WIDTH - len(left) - len(right)
         if space < 1:
             space = 1
@@ -1169,10 +1178,10 @@ def build_escpos_checker(name: str) -> bytes:
     #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_align_center()
-    out += b"Terima kasih!\n"
-    out += b"Selamat menikmati hidangan Anda!\n"
+    # out += (separator + "\n").encode("ascii", "ignore")
+    # out += _esc_align_center()
+    # out += b"Terima kasih!\n"
+    # out += b"Selamat menikmati hidangan Anda!\n"
 
     # ===== QUEUE NUMBER (Take Away) =====
     order_type_value = (order_type or "").lower()
@@ -1199,7 +1208,32 @@ def build_escpos_checker(name: str) -> bytes:
 
 def _enqueue_checker_worker(name: str, printer_name: str):
     raw = build_escpos_checker(name)
+
+    if not raw:
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "message": "Tidak ada item baru untuk di-print ke checker"
+        })
+        return None
+
     job_id = cups_print_raw(raw, printer_name)
+
+    items_to_update = frappe.db.get_all(
+        "POS Invoice Item",
+        filters={"parent": name, "is_checked": 0},
+        pluck="name"
+    )
+
+    if items_to_update:
+        for item_name in items_to_update:
+            frappe.db.set_value("POS Invoice Item", item_name, "is_checked", 1)
+
+        frappe.db.commit()
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "updated_items": len(items_to_update),
+            "message": "Update is_checked = 1 untuk item yang sudah di-print"
+        })
 
     frappe.logger("pos_print").info({
         "invoice": name,

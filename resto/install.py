@@ -48,6 +48,17 @@ def after_migrate():
             "insert_after": "quick_notes",
         }).insert(ignore_permissions=True)
 
+    if not frappe.db.exists("Custom Field", {'fieldname': "is_checked", "dt": "POS Invoice Item"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "is_checked",
+            "label": "Is Checked (Printed)",
+            "fieldtype": "Check",
+            "insert_after":"add_ons",
+            "default": 0,
+        }).insert(ignore_permissions=True)
+
     # if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
     #     frappe.get_doc({
     #         "doctype": "Custom Field",

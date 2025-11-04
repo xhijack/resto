@@ -292,6 +292,28 @@ def get_branch_menu_by_resto_menu(pos_name):
 
     return branch_results
 
+def enqueue_checker_after_kitchen(pos_name: str, branch: str):
+    from resto.printing import _enqueue_checker_worker
+
+    try:
+        printer = frappe.db.get_value(
+            "Printer Settings",
+            {"branch": branch},
+            "printer_checker_name"
+        )
+
+        if not printer:
+            frappe.throw(f"Tidak ditemukan printer checker default untuk branch {branch}")
+
+        job_id = _enqueue_checker_worker(pos_name, printer)
+        frappe.logger().info(f"✅ Enqueue Checker: {pos_name} (printer={printer}, job_id={job_id})")
+
+        return job_id
+
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
+        return None
+
 @frappe.whitelist()
 def send_to_kitchen(payload):
     """
@@ -309,14 +331,6 @@ def send_to_kitchen(payload):
             payload = json.loads(payload)
 
         branch = payload.get("branch")
-        printer = frappe.db.get_value(
-            "Printer Settings",
-            {"branch": branch},
-            "printer_checker_name"
-        )
-
-        if not printer:
-            frappe.throw(f"Tidak ditemukan printer checker default untuk branch {branch}")
 
         try:
             print_to_ks_now(pos_name)
@@ -326,11 +340,7 @@ def send_to_kitchen(payload):
             printing_status = f"Printing gagal: {str(print_err)}"
 
 
-        try:
-            job_id = _enqueue_checker_worker(pos_name, printer)
-            frappe.logger().info(f"✅ _enqueue_checker_worker dijalankan untuk {pos_name} (printer={printer}, job_id={job_id})")
-        except Exception:
-            frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
+        enqueue_checker_after_kitchen(pos_name, branch)
 
 
         return {
