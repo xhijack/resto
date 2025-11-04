@@ -526,7 +526,7 @@ def print_bill_now(invoice_name: str, branch: str):
         printer = frappe.db.get_value(
             "Printer Settings",
             {"branch": branch},
-            "printer_name"
+            "printer_bill_name"
         )
 
         if not printer:
@@ -540,3 +540,27 @@ def print_bill_now(invoice_name: str, branch: str):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Print Bill Error")
         frappe.throw(f"Gagal print bill {invoice_name}: {str(e)}")
+
+@frappe.whitelist()
+def print_receipt_now(invoice_name: str, branch: str):
+    from resto.printing import _enqueue_receipt_worker
+    import frappe
+
+    try:
+        printer = frappe.db.get_value(
+            "Printer Settings",
+            {"branch": branch},
+            "printer_receipt_name"
+        )
+
+        if not printer:
+            frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
+
+        # Enqueue print job
+        job_id = _enqueue_receipt_worker(invoice_name, printer)
+        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
+        return {"ok": True, "job_id": job_id}
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Print Receipt Error")
+        frappe.throw(f"Gagal print Receipt {invoice_name}: {str(e)}")

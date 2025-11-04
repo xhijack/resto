@@ -8,7 +8,12 @@
  "field_order": [
   "branch",
   "default_printer_bill",
-  "printer_name"
+  "printer_bill_name",
+  "default_printer_checker",
+  "printer_checker_name",
+  "column_break_newf",
+  "default_printer_receipt",
+  "printer_receipt_name"
  ],
  "fields": [
   {
@@ -28,15 +33,47 @@
    "unique": 1
   },
   {
-   "fetch_from": "default_printer_bill.printer_name",
-   "fieldname": "printer_name",
+   "fieldname": "default_printer_checker",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Default Printer Checker",
+   "options": "Kitchen Station",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "default_printer_checker.printer_name",
+   "fieldname": "printer_checker_name",
    "fieldtype": "Data",
-   "label": "Printer Name"
+   "label": "Printer Checker Name"
+  },
+  {
+   "fetch_from": "default_printer_bill.printer_name",
+   "fieldname": "printer_bill_name",
+   "fieldtype": "Data",
+   "label": "Printer Bill Name"
+  },
+  {
+   "fieldname": "column_break_newf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_printer_receipt",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Default Printer Receipt",
+   "options": "Kitchen Station",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "default_printer_receipt.printer_name",
+   "fieldname": "printer_receipt_name",
+   "fieldtype": "Data",
+   "label": "Printer Receipt Name"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-03 14:19:44.805645",
+ "modified": "2025-11-04 09:31:20.107044",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Printer Settings",
