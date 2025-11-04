@@ -305,6 +305,9 @@ def send_to_kitchen(payload):
         result = create_pos_invoice(payload)
         pos_name = result["name"]
 
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
         branch = payload.get("branch")
         printer = frappe.db.get_value(
             "Printer Settings",
@@ -342,8 +345,6 @@ def send_to_kitchen(payload):
             title="POS Invoice Creation Error",
             msg=str(e)
         )
-
-# def print_bill(pos_name, printer_name) :
 
 def grouping_items_to_kitchen_station(branch, pos_name):
     """
