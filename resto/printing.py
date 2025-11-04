@@ -6,6 +6,10 @@ import cups
 import frappe
 from typing import List, Dict, Any
 from frappe.utils import now_datetime
+from PIL import Image
+from io import BytesIO
+import requests
+
 
 
 # ========== Konstanta & Util ==========
@@ -116,6 +120,47 @@ def _pad_lr(left: str, right: str, width: int) -> str:
     if space < 1:
         return (left + " " + right)[0:width]
     return f"{left}{' ' * space}{right}"
+
+def _esc_print_image(image_path):
+    """
+    Convert logo ke ESC/POS format (bitmap)
+    """
+    # URL absolut jika path logo berupa /files/...
+    if image_path.startswith("/"):
+        image_url = frappe.utils.get_url(image_path)
+    else:
+        image_url = image_path
+
+    # Ambil file gambar
+    response = requests.get(image_url)
+    image = Image.open(BytesIO(response.content)).convert("L")  # ubah ke grayscale
+
+    # Resize agar muat di kertas 58mm (lebar sekitar 384 pixel)
+    max_width = 384
+    if image.width > max_width:
+        ratio = max_width / image.width
+        image = image.resize((max_width, int(image.height * ratio)))
+
+    # Convert ke hitam putih
+    image = image.point(lambda x: 0 if x < 128 else 255, '1')
+
+    # Konversi ke byte ESC/POS
+    bytes_out = b""
+    width_bytes = (image.width + 7) // 8
+
+    for y in range(image.height):
+        line = b""
+        for x in range(0, image.width, 8):
+            byte = 0
+            for bit in range(8):
+                if x + bit < image.width and image.getpixel((x + bit, y)) == 0:
+                    byte |= (1 << (7 - bit))
+            line += bytes([byte])
+        bytes_out += b"\x1b*\x21" + bytes([width_bytes % 256, width_bytes // 256]) + line + b"\n"
+
+    # Reset align ke tengah
+    return _esc_align_center() + bytes_out + b"\n"
+
 
 # ========== Normalisasi POS Invoice ==========
 def _collect_pos_invoice(name: str) -> Dict[str, Any]:
@@ -886,7 +931,18 @@ def build_escpos_receipt(name: str) -> bytes:
     out += _esc_font_a()
 
     # ===== HEADER =====
+    logo = frappe.db.get_value("Company", company, "custom_company_logo") or frappe.db.get_value("Company", company, "company_logo")
+
     out += _esc_align_center() + _esc_bold(True)
+
+    if logo:
+        try:
+            out += _esc_print_image(logo)  
+            out += b"\n"
+        except Exception as e:
+            frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
+
+
     if company or branch:
         header_line = f"{company}"
         if branch:

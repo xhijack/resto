@@ -222,4 +222,12 @@ def after_migrate():
             "read_only": 1,
         }).insert(ignore_permissions=True)
 
-
+    if not frappe.db.exists("Custom Field", {"dt": "Company", "fieldname": "custom_company_logo"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Company",
+            "fieldname": "custom_company_logo",
+            "label": "Company Logo",
+            "fieldtype": "Attach Image",
+            "insert_after": "company_name"
+        }).insert(ignore_permissions=True)
