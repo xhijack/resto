@@ -298,9 +298,22 @@ def send_to_kitchen(payload):
     1. Buat POS Invoice
     2. Print ke kitchen station (optional — error tidak batalkan invoice)
     """
+
+    from resto.printing import _enqueue_checker_worker
+
     try:
         result = create_pos_invoice(payload)
         pos_name = result["name"]
+
+        branch = payload.get("branch")
+        printer = frappe.db.get_value(
+            "Printer Settings",
+            {"branch": branch},
+            "printer_checker_name"
+        )
+
+        if not printer:
+            frappe.throw(f"Tidak ditemukan printer checker default untuk branch {branch}")
 
         try:
             print_to_ks_now(pos_name)
@@ -308,6 +321,14 @@ def send_to_kitchen(payload):
         except Exception as print_err:
             frappe.log_error(frappe.get_traceback(), f"Printing Error for POS {pos_name}")
             printing_status = f"Printing gagal: {str(print_err)}"
+
+
+        try:
+            job_id = _enqueue_checker_worker(pos_name, printer)
+            frappe.logger().info(f"✅ _enqueue_checker_worker dijalankan untuk {pos_name} (printer={printer}, job_id={job_id})")
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
+
 
         return {
             "status": "success",

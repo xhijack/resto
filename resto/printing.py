@@ -1011,3 +1011,201 @@ def _enqueue_receipt_worker(name: str, printer_name: str):
     })
 
     return job_id
+
+def build_escpos_checker(name: str) -> bytes:
+    data = _collect_pos_invoice(name)
+
+    items = data.get("items", [])
+    payments = data.get("payments", [])
+    taxes = data.get("taxes", [])
+
+    company = data.get("company") or ""
+    order_type = data.get("order_type") or ""
+    customer = data.get("customer_name") or data.get("customer") or ""
+    total = data.get("total", 0)
+    discount = data.get("discount_amount", 0)
+    tax_total = data.get("total_taxes_and_charges", 0)
+    grand_total = data.get("grand_total", 0)
+    paid = data.get("paid_amount", 0)
+    change = data.get("change_amount", 0)
+    queue_no = data.get("queue") or ""
+    branch = data.get("branch") or ""
+    branch_detail = data.get("branch_detail") or {}
+
+    address1 = branch_detail.get("address_line1") or ""
+    address2 = branch_detail.get("address_line2") or ""
+    city = branch_detail.get("city") or ""
+    pincode = branch_detail.get("pincode") or ""
+    phone = branch_detail.get("phone") or ""
+    
+    # Hitung total qty semua items
+    total_qty = sum(int(item.get("qty", 0)) for item in items)
+
+    # Format waktu cetak
+    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+
+    separator = "-" * LINE_WIDTH
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+
+    # ===== HEADER =====
+    out += _esc_align_center() + _esc_bold(True)
+    out += (f"Checker\n").encode("ascii", "ignore")
+
+    if company or branch:
+        header_line = f"{company}"
+        if branch:
+            header_line += f" - {branch}"
+        out += (header_line + "\n").encode("ascii", "ignore")
+
+    out += _esc_bold(False)
+
+    # Alamat branch
+    # if address1 or address2 or city or pincode or phone:
+    #     out += _esc_align_center()
+    #     if address1:
+    #         out += (f"{address1}\n").encode("ascii", "ignore")
+    #     if address2:
+    #         out += (f"{address2}\n").encode("ascii", "ignore")
+    #     if city or pincode:
+    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
+    #     if phone:
+    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
+
+
+    out += _esc_align_left()
+    out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== INFORMASI INVOICE =====
+    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+
+    # Nama table
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    if table_names:
+        out += _esc_bold(True)
+        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
+    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(data["name"])
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
+
+
+    # Nama kasir
+    # cashier_name = get_cashier_name(data["name"])
+    # out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
+
+    # Customer
+    # if customer:
+    #     out += (f"Customer: {customer}\n").encode("ascii", "ignore")
+
+    out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== ITEMS =====
+    for item in items:
+        item_name = item.get("item_name", "")
+        qty = item.get("qty", 1)
+
+        left = item_name.strip()
+        right = str(qty)
+        space = LINE_WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+        line = f"{left}{' ' * space}{right}"
+        out += (line + "\n").encode("ascii", "ignore")
+
+        add_ons_str = item.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            for add in add_ons_list:
+                name = add.strip()
+                qty_str = "1"  # default qty add-on = 1
+                space = LINE_WIDTH - 2 - len(name) - len(qty_str)
+                if space < 1:
+                    space = 1
+                add_line = f"  {name}{' ' * space}{qty_str}"
+                out += (add_line + "\n").encode("ascii", "ignore")
+
+
+        # Notes
+        notes = item.get("quick_notes", "")
+        if notes:
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
+
+    # ===== TOTAL QTY =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+
+    # ===== TOTALS =====
+    # out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
+
+    # Tambahan biaya seperti service charge, pajak, dll
+    # service_charge = next((t["amount"] for t in taxes if "service" in t["description"].lower()), 0)
+    # if service_charge:
+    #     out += (f"{'Service Charge:'.rjust(LINE_WIDTH - 12)}{format_number(service_charge).rjust(12)}\n").encode("ascii", "ignore")
+
+    # if tax_total:
+    #     out += (f"{'Tax:'.rjust(LINE_WIDTH - 12)}{format_number(tax_total).rjust(12)}\n").encode("ascii", "ignore")
+
+    # out += (separator + "\n").encode("ascii", "ignore")
+    # out += _esc_bold(True)
+    # out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
+    # out += _esc_bold(False)
+
+    # ===== PAYMENT =====
+    # for pay in payments:
+    #     mop = pay.get("mode_of_payment") or "-"
+    #     amt = pay.get("amount") or 0
+    #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+
+    # if change:
+    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+
+    # ===== FOOTER =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += _esc_align_center()
+    out += b"Terima kasih!\n"
+    out += b"Selamat menikmati hidangan Anda!\n"
+
+    # ===== QUEUE NUMBER (Take Away) =====
+    order_type_value = (order_type or "").lower()
+    if order_type_value in ["take away", "takeaway"]:
+        queue_no = data.get("queue") or ""
+        if queue_no:
+            out += _esc_feed(2)
+            out += _esc_align_center()
+            out += _esc_bold(True)
+            out += b"Your Queue Number:\n"
+            out += _esc_bold(False)
+
+            # --- Font besar + center untuk nomor antrian ---
+            out += _esc_align_center()          # pastikan tetap di tengah
+            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
+            out += f"{queue_no}\n".encode("ascii", "ignore")
+            out += b"\x1b!\x00"                 # reset font ke normal
+            out += _esc_feed(2)
+
+
+    # Feed bawah + cut
+    out += _esc_feed(8) + _esc_cut_full()
+    return out
+
+def _enqueue_checker_worker(name: str, printer_name: str):
+    raw = build_escpos_checker(name)
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "checker"
+    })
+
+    return job_id
