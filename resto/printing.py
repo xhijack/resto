@@ -935,12 +935,12 @@ def build_escpos_receipt(name: str) -> bytes:
 
     out += _esc_align_center() + _esc_bold(True)
 
-    if logo:
-        try:
-            out += _esc_print_image(logo)  
-            out += b"\n"
-        except Exception as e:
-            frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
+    # if logo:
+    #     try:
+    #         out += _esc_print_image(logo)  
+    #         out += b"\n"
+    #     except Exception as e:
+    #         frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
 
 
     if company or branch:
