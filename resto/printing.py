@@ -825,7 +825,7 @@ def build_escpos_bill(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
-        tax_amount = tax.get("tax_amount", 0)
+        tax_amount = tax.get("amount", 0)
 
         # potong nama pajak biar nggak terlalu panjang
         if len(tax_name) > 20:
@@ -1034,7 +1034,7 @@ def build_escpos_receipt(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
-        tax_amount = tax.get("tax_amount", 0)
+        tax_amount = tax.get("amount", 0)
 
         # potong nama pajak biar nggak terlalu panjang
         if len(tax_name) > 20:
