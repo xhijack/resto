@@ -436,13 +436,12 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
             for add in add_ons_list:
-                name = add.strip()
-                qty_str = "1"  # default qty add-on = 1
-                space = LINE_WIDTH - 2 - len(name) - len(qty_str)
-                if space < 1:
-                    space = 1
-                add_line = f"  {name}{' ' * space}{qty_str}"
-                out += (add_line + "\n").encode("ascii", "ignore")
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    price = price.replace(")", "").strip()
+                    name = name.strip()
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
+                    out += (add_line + "\n").encode("ascii", "ignore")
 
 
         # Notes
@@ -1219,15 +1218,13 @@ def build_escpos_checker(name: str) -> bytes:
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
             for add in add_ons_list:
-                name = add.strip()
-                qty_str = "1"  # default qty add-on = 1
-                space = LINE_WIDTH - 2 - len(name) - len(qty_str)
-                if space < 1:
-                    space = 1
-                add_line = f"  {name}{' ' * space}{qty_str}"
-                out += (add_line + "\n").encode("ascii", "ignore")
-
-
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    price = price.replace(")", "").strip()
+                    name = name.strip()
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
+                    out += (add_line + "\n").encode("ascii", "ignore")
+    
         # Notes
         notes = item.get("quick_notes", "")
         if notes:
