@@ -199,6 +199,30 @@ def create_pos_invoice(payload):
     additional_items = payload.get("additional_items", [])
     order_type       = payload.get("order_type")
 
+    company = frappe.db.get_single_value("Global Defaults", "default_company")
+
+    # 🔍 Ambil default Sales Taxes and Charges Template
+    tax_template = frappe.get_all(
+        "Sales Taxes and Charges Template",
+        filters={"is_default": 1, "company": company},
+        fields=["name"],
+        limit=1
+    )
+
+    taxes = []
+    if tax_template:
+        template = frappe.get_doc("Sales Taxes and Charges Template", tax_template[0].name)
+
+        for t in template.taxes:
+            # ✅ Ambil semua tax row yang dipakai template — TANPA hardcode
+            taxes.append({
+                "charge_type": t.charge_type,
+                "account_head": t.account_head,
+                "rate": t.rate,
+                "tax_amount": 0,          # auto dihitung Frappe
+                "description": t.description
+            })
+
     # Buat dokumen POS Invoice baru
     pos_invoice = frappe.get_doc({
         "doctype": "POS Invoice",
@@ -211,6 +235,8 @@ def create_pos_invoice(payload):
         "payments": [],
         "queue": queue,
         "additional_items": [],   # ✅ gunakan fieldname yang sesuai
+        "taxes": taxes,   # ⭐ masukkan auto pajak di sini
+        "taxes_and_charges": tax_template[0].name if tax_template else None
     })
 
     # Tambahkan item utama
@@ -321,8 +347,6 @@ def send_to_kitchen(payload):
     1. Buat POS Invoice
     2. Print ke kitchen station (optional — error tidak batalkan invoice)
     """
-
-    from resto.printing import _enqueue_checker_worker
 
     try:
         result = create_pos_invoice(payload)
