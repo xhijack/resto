@@ -348,8 +348,6 @@ def send_to_kitchen(payload):
     2. Print ke kitchen station (optional — error tidak batalkan invoice)
     """
 
-    from resto.printing import _enqueue_checker_worker
-
     try:
         result = create_pos_invoice(payload)
         pos_name = result["name"]
