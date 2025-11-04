@@ -114,6 +114,22 @@ def _fit(text: str, width: int) -> str:
 def _line(char: str = "-") -> str:
     return char * LINE_WIDTH  # tepat sepanjang kolom
 
+def _format_line(left: str, right: str, width: int = LINE_WIDTH):
+    """
+    Format satu baris agar teks kiri dan kanan rata sesuai lebar kertas printer.
+    Contoh hasil:
+    'Subtotal:                           50,000'
+    """
+    left = str(left)
+    right = str(right)
+
+    # Hitung jumlah spasi di tengah
+    space = width - len(left) - len(right)
+    if space < 1:
+        space = 1  # minimal 1 spasi biar gak nabrak
+
+    return f"{left}{' ' * space}{right}"
+
 def _pad_lr(left: str, right: str, width: int) -> str:
     # Satu baris: left ... right (rata kiri-kanan)
     space = width - len(left) - len(right)
@@ -833,23 +849,21 @@ def build_escpos_bill(name: str) -> bytes:
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
-    out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
+    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
         tax_amount = tax.get("amount", 0)
-
-        # potong nama pajak biar nggak terlalu panjang
+        # potong nama pajak agar tidak kepanjangan
         if len(tax_name) > 20:
             tax_name = tax_name[:20]
-
-        out += (f"{tax_name.ljust(LINE_WIDTH - 12)}{format_number(tax_amount).rjust(12)}\n").encode("ascii", "ignore")
-
+        out += (_format_line(tax_name, format_number(tax_amount)) + "\n").encode("ascii", "ignore")
 
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
-    out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
+    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
     out += _esc_bold(False)
+
 
     # ===== PAYMENT =====
     # for pay in payments:
@@ -1042,23 +1056,21 @@ def build_escpos_receipt(name: str) -> bytes:
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
-    out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
+    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
         tax_amount = tax.get("amount", 0)
-
-        # potong nama pajak biar nggak terlalu panjang
+        # potong nama pajak agar tidak kepanjangan
         if len(tax_name) > 20:
             tax_name = tax_name[:20]
-
-        out += (f"{tax_name.ljust(LINE_WIDTH - 12)}{format_number(tax_amount).rjust(12)}\n").encode("ascii", "ignore")
+        out += (_format_line(tax_name, format_number(tax_amount)) + "\n").encode("ascii", "ignore")
 
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
-    out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
+    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
     out += _esc_bold(False)
-
+    
     # ===== PAYMENT =====
     for pay in payments:
         mop = pay.get("mode_of_payment") or "-"
