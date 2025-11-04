@@ -555,10 +555,22 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         # Sub-informasi normal (opsional, 1 baris)
         if short_name and menu_name and menu_name != short_name:
             out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
-        if add_ons:
-            out += (f"  Add  : {_fit(add_ons, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
-        if qnotes:
-            out += (f"  Note : {_fit(qnotes, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
+        
+        add_ons_str = it.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    price = price.replace(")", "").strip()
+                    name = name.strip()
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
+                    out += (add_line + "\n").encode("ascii", "ignore")
+    
+        # Notes
+        notes = it.get("quick_notes", "")
+        if notes:
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
 
         out += b"\n"  # spacer
 
