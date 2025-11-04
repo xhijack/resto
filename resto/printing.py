@@ -1032,13 +1032,15 @@ def build_escpos_receipt(name: str) -> bytes:
     # ===== TOTALS =====
     out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
 
-    # Tambahan biaya seperti service charge, pajak, dll
-    service_charge = next((t["amount"] for t in taxes if "service" in t["description"].lower()), 0)
-    if service_charge:
-        out += (f"{'Service Charge:'.rjust(LINE_WIDTH - 12)}{format_number(service_charge).rjust(12)}\n").encode("ascii", "ignore")
+    for tax in taxes:
+        tax_name = tax.get("description", "Tax")
+        tax_amount = tax.get("tax_amount", 0)
 
-    if tax_total:
-        out += (f"{'Tax:'.rjust(LINE_WIDTH - 12)}{format_number(tax_total).rjust(12)}\n").encode("ascii", "ignore")
+        # potong nama pajak biar nggak terlalu panjang
+        if len(tax_name) > 20:
+            tax_name = tax_name[:20]
+
+        out += (f"{tax_name.ljust(LINE_WIDTH - 12)}{format_number(tax_amount).rjust(12)}\n").encode("ascii", "ignore")
 
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
