@@ -538,7 +538,7 @@ def get_all_tables_with_details():
             "type_customer",
             "floor",
             "taken_by",
-            "order",
+            # "order",
         ],
         order_by="table_name asc"
     )
@@ -557,7 +557,7 @@ def get_all_tables_with_details():
             "typeCustomer": t.type_customer or None,
             "floor": t.floor or "1",
             "takenBy": t.taken_by or None,
-            "order": t.order or None,
+            # "order": t.order or None,
             "orders": [
                 {"invoice_name": o.invoice_name} for o in doc.orders
             ],
