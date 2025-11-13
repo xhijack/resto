@@ -262,15 +262,24 @@ def create_pos_invoice(payload):
     # ✅ Tambahkan child table Additional Items
     if frappe.get_meta("POS Invoice").get_field("additional_items"):
         for add in additional_items:
+            resto_menu_name = add.get("resto_menu")
+
+            resto_menu_doc_name = frappe.db.get_value("Resto Menu", {"name": resto_menu_name}, "name")
+            if not resto_menu_doc_name:
+                resto_menu_doc_name = frappe.db.get_value("Resto Menu", {"title": resto_menu_name}, "name")
+            if not resto_menu_doc_name:
+                frappe.throw(f"Resto Menu {resto_menu_name} not found")
+
+            resto_menu_doc = frappe.get_doc("Resto Menu", resto_menu_doc_name)
+            combined_name = f"{resto_menu_doc.menu_code}-{resto_menu_doc.title}"
             pos_invoice.append("additional_items", {
-                "item_name": add.get("item_name"),
+                "item_name": combined_name,
                 "add_on": add.get("add_on"),
                 "price": add.get("price"),
                 "notes": add.get("notes"),
             })
     else:
-        frappe.log_error("Field 'additional_items' tidak ditemukan di POS Invoice",
-                         "Create POS Invoice Error")
+        frappe.log_error("Field 'additional_items' tidak ditemukan di POS Invoice", "Create POS Invoice Error")
 
     # Simpan dokumen
     pos_invoice.insert(ignore_permissions=True)
