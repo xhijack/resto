@@ -198,6 +198,8 @@ def create_pos_invoice(payload):
     queue            = payload.get("queue")
     additional_items = payload.get("additional_items", [])
     order_type       = payload.get("order_type")
+    additional_discount_percentage = payload.get("additional_discount_percentage")
+    discount_amount = payload.get("discount_amount")
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
 
@@ -236,7 +238,9 @@ def create_pos_invoice(payload):
         "queue": queue,
         "additional_items": [],   # ✅ gunakan fieldname yang sesuai
         "taxes": taxes,   # ⭐ masukkan auto pajak di sini
-        "taxes_and_charges": tax_template[0].name if tax_template else None
+        "taxes_and_charges": tax_template[0].name if tax_template else None,
+        "additional_discount_percentage": additional_discount_percentage,
+        "discount_amount": discount_amount
     })
 
     # Tambahkan item utama
