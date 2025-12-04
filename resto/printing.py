@@ -2,7 +2,6 @@
 from __future__ import annotations
 import math
 import tempfile
-import cups
 import frappe
 from typing import List, Dict, Any
 from frappe.utils import now_datetime
@@ -395,6 +394,7 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
 # ========== CUPS RAW PRINT ==========
 def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
     try:
+        import cups
         conn = cups.Connection()
         printers = conn.getPrinters()
         if printer_name not in printers:
@@ -609,6 +609,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> 
     payload: dict (single) / list (multi) / str (JSON)
     """
     import json
+    import cups
     try:
         if isinstance(payload, list):
             entries = payload
