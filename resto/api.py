@@ -570,6 +570,7 @@ def get_all_tables_with_details():
             "typeCustomer": t.type_customer or None,
             "floor": t.floor or "1",
             "takenBy": t.taken_by or None,
+            "checked": 0,
             # "order": t.order or None,
             "orders": [
                 {"invoice_name": o.invoice_name} for o in doc.orders
