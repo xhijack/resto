@@ -706,9 +706,7 @@ def get_end_day_report(posting_date, outlet):
             AND IFNULL(pii.status_kitchen,'') != 'Void Menu'
         GROUP BY
             pi.order_type, pii.item_group
-    """, {
-        "invoices": tuple(invoice_names)
-    }, as_dict=True)
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)
 
     dine_in, take_away = {}, {}
 
@@ -720,18 +718,16 @@ def get_end_day_report(posting_date, outlet):
         }
 
     # =====================================================
-    # 4. PAYMENTS
+    # 4. PAYMENTS (FIXED)
     # =====================================================
     payments = frappe.db.sql("""
         SELECT
-            mode_of_payment,
-            SUM(amount) amount
-        FROM `tabPOS Invoice Payment`
-        WHERE parent IN %(invoices)s
-        GROUP BY mode_of_payment
-    """, {
-        "invoices": tuple(invoice_names)
-    }, as_dict=True)
+            sip.mode_of_payment,
+            SUM(sip.amount) amount
+        FROM `tabSales Invoice Payment` sip
+        WHERE sip.parent IN %(invoices)s
+        GROUP BY sip.mode_of_payment
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)
 
     payment_summary = {p.mode_of_payment: flt(p.amount) for p in payments}
 
@@ -745,16 +741,14 @@ def get_end_day_report(posting_date, outlet):
         FROM `tabSales Taxes and Charges`
         WHERE parent IN %(invoices)s
         GROUP BY description
-    """, {
-        "invoices": tuple(invoice_names)
-    }, as_dict=True)
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)
 
     tax_summary = {t.description: flt(t.amount) for t in taxes}
 
     # =====================================================
     # 6. VOID ITEM
     # =====================================================
-    void_items = frappe.db.sql("""
+    void_items = frappe.db.sql(f"""
         SELECT
             pii.item_name,
             SUM(pii.qty) qty,
@@ -765,13 +759,9 @@ def get_end_day_report(posting_date, outlet):
             pi.posting_date = %(posting_date)s
             AND pi.docstatus = 1
             AND pii.status_kitchen = 'Void Menu'
-            AND {outlet_condition}
+            AND {" AND ".join([f"pi.{k} = %({k})s" for k in outlet_filter.keys()])}
         GROUP BY pii.item_name
-    """.format(
-        outlet_condition=" AND ".join(
-            [f"pi.{k} = %({k})s" for k in outlet_filter.keys()]
-        )
-    ), {
+    """, {
         "posting_date": posting_date,
         **outlet_filter
     }, as_dict=True)
