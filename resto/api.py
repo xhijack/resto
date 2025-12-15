@@ -649,8 +649,13 @@ def detect_outlet_filter(outlet_value):
 
 
 @frappe.whitelist()
-def get_end_day_report(posting_date, outlet):
+def get_end_day_report():
+    posting_date = frappe.form_dict.get("posting_date")
+    outlet = frappe.form_dict.get("outlet")
 
+    if not posting_date or not outlet:
+        frappe.throw("posting_date dan outlet wajib diisi")
+        
     outlet_filter = detect_outlet_filter(outlet)
 
     # =====================================================
