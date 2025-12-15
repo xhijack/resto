@@ -703,7 +703,7 @@ def get_end_day_report(posting_date, outlet):
         JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
         WHERE
             pi.name IN %(invoices)s
-            AND IFNULL(pii.status,'') != 'Void Menu'
+            AND IFNULL(pii.status_kitchen,'') != 'Void Menu'
         GROUP BY
             pi.order_type, pii.item_group
     """, {
@@ -764,7 +764,7 @@ def get_end_day_report(posting_date, outlet):
         WHERE
             pi.posting_date = %(posting_date)s
             AND pi.docstatus = 1
-            AND pii.status = 'Void Menu'
+            AND pii.status_kitchen = 'Void Menu'
             AND {outlet_condition}
         GROUP BY pii.item_name
     """.format(
