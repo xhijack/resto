@@ -3,6 +3,7 @@ from frappe import _
 import json
 from frappe.auth import LoginManager
 from frappe.core.doctype.user.user import generate_keys
+from frappe.utils import flt
 
 @frappe.whitelist()
 def print_now():
@@ -627,3 +628,191 @@ def print_receipt_now(invoice_name: str, branch: str):
     except Exception as e:
         frappe.log_error(frappe.get_traceback(), "Print Receipt Error")
         frappe.throw(f"Gagal print Receipt {invoice_name}: {str(e)}")
+
+# =====================================================
+# AUTO DETECT OUTLET FIELD
+# =====================================================
+def detect_outlet_filter(outlet_value):
+    meta = frappe.get_meta("POS Invoice")
+    fields = [f.fieldname for f in meta.fields]
+
+    if "branch" in fields:
+        return {"branch": outlet_value}
+
+    if "pos_profile" in fields:
+        return {"pos_profile": outlet_value}
+
+    if "set_warehouse" in fields:
+        return {"set_warehouse": outlet_value}
+
+    return {"company": outlet_value}
+
+
+@frappe.whitelist()
+def get_end_day_report(posting_date, outlet):
+
+    outlet_filter = detect_outlet_filter(outlet)
+
+    # =====================================================
+    # 1. POS INVOICE (SUBMITTED)
+    # =====================================================
+    invoice_filters = {
+        "posting_date": posting_date,
+        "docstatus": 1
+    }
+    invoice_filters.update(outlet_filter)
+
+    invoices = frappe.get_all(
+        "POS Invoice",
+        filters=invoice_filters,
+        fields=[
+            "name",
+            "net_total",
+            "grand_total",
+            "discount_amount",
+            "total_taxes_and_charges",
+            "order_type"
+        ]
+    )
+
+    invoice_names = [i.name for i in invoices]
+
+    if not invoice_names:
+        return {"message": "No POS Invoice found"}
+
+    # =====================================================
+    # 2. SUMMARY
+    # =====================================================
+    summary = {
+        "sub_total": sum(flt(i.net_total) for i in invoices),
+        "discount": sum(flt(i.discount_amount) for i in invoices),
+        "tax": sum(flt(i.total_taxes_and_charges) for i in invoices),
+        "grand_total": sum(flt(i.grand_total) for i in invoices)
+    }
+
+    # =====================================================
+    # 3. ITEMS (NON VOID)
+    # =====================================================
+    items = frappe.db.sql("""
+        SELECT
+            pi.order_type,
+            pii.item_group,
+            SUM(pii.qty) qty,
+            SUM(pii.amount) amount
+        FROM `tabPOS Invoice Item` pii
+        JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
+        WHERE
+            pi.name IN %(invoices)s
+            AND IFNULL(pii.status,'') != 'Void Menu'
+        GROUP BY
+            pi.order_type, pii.item_group
+    """, {
+        "invoices": tuple(invoice_names)
+    }, as_dict=True)
+
+    dine_in, take_away = {}, {}
+
+    for i in items:
+        target = dine_in if i.order_type == "Dine In" else take_away
+        target[i.item_group] = {
+            "qty": int(i.qty),
+            "amount": flt(i.amount)
+        }
+
+    # =====================================================
+    # 4. PAYMENTS
+    # =====================================================
+    payments = frappe.db.sql("""
+        SELECT
+            mode_of_payment,
+            SUM(amount) amount
+        FROM `tabPOS Invoice Payment`
+        WHERE parent IN %(invoices)s
+        GROUP BY mode_of_payment
+    """, {
+        "invoices": tuple(invoice_names)
+    }, as_dict=True)
+
+    payment_summary = {p.mode_of_payment: flt(p.amount) for p in payments}
+
+    # =====================================================
+    # 5. TAX
+    # =====================================================
+    taxes = frappe.db.sql("""
+        SELECT
+            description,
+            SUM(tax_amount) amount
+        FROM `tabSales Taxes and Charges`
+        WHERE parent IN %(invoices)s
+        GROUP BY description
+    """, {
+        "invoices": tuple(invoice_names)
+    }, as_dict=True)
+
+    tax_summary = {t.description: flt(t.amount) for t in taxes}
+
+    # =====================================================
+    # 6. VOID ITEM
+    # =====================================================
+    void_items = frappe.db.sql("""
+        SELECT
+            pii.item_name,
+            SUM(pii.qty) qty,
+            SUM(pii.amount) amount
+        FROM `tabPOS Invoice Item` pii
+        JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
+        WHERE
+            pi.posting_date = %(posting_date)s
+            AND pi.docstatus = 1
+            AND pii.status = 'Void Menu'
+            AND {outlet_condition}
+        GROUP BY pii.item_name
+    """.format(
+        outlet_condition=" AND ".join(
+            [f"pi.{k} = %({k})s" for k in outlet_filter.keys()]
+        )
+    ), {
+        "posting_date": posting_date,
+        **outlet_filter
+    }, as_dict=True)
+
+    void_item_summary = {
+        "total_qty": sum(int(v.qty) for v in void_items),
+        "total_amount": sum(flt(v.amount) for v in void_items),
+        "details": void_items
+    }
+
+    # =====================================================
+    # 7. VOID BILL (CANCELLED)
+    # =====================================================
+    void_bill_filters = {
+        "posting_date": posting_date,
+        "docstatus": 2
+    }
+    void_bill_filters.update(outlet_filter)
+
+    void_bills = frappe.get_all(
+        "POS Invoice",
+        filters=void_bill_filters,
+        fields=["name", "grand_total"]
+    )
+
+    void_bill_summary = {
+        "total_bill": len(void_bills),
+        "total_amount": sum(flt(v.grand_total) for v in void_bills)
+    }
+
+    # =====================================================
+    # 8. RESPONSE
+    # =====================================================
+    return {
+        "posting_date": posting_date,
+        "outlet_filter": outlet_filter,
+        "summary": summary,
+        "dine_in": dine_in,
+        "take_away": take_away,
+        "payments": payment_summary,
+        "taxes": tax_summary,
+        "void_item": void_item_summary,
+        "void_bill": void_bill_summary
+    }
