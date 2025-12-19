@@ -755,6 +755,55 @@ def get_end_day_report():
     tax_summary = {t.description: flt(t.amount) for t in taxes}
 
     # =====================================================
+    # DISCOUNT PER ORDER TYPE (DINE IN / TAKE AWAY)
+    # =====================================================
+    discount_order_type = frappe.db.sql("""
+        SELECT
+            pi.order_type,
+            COUNT(pi.name) AS total_bill,
+            SUM(pi.discount_amount) AS total_discount
+        FROM `tabPOS Invoice` pi
+        WHERE
+            pi.name IN %(invoices)s
+            AND IFNULL(pi.discount_amount, 0) > 0
+        GROUP BY pi.order_type
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)
+
+    discount_by_order_type = {}
+    for d in discount_order_type:
+        discount_by_order_type[d.order_type or "Unknown"] = {
+            "total_qty": int(d.total_bill),
+            "total_amount": flt(d.total_discount)
+        }
+
+    # =====================================================
+    # DISCOUNT PER BANK + DISCOUNT NAME
+    # =====================================================
+    discount_bank = frappe.db.sql("""
+        SELECT
+            pi.discount_for_bank,
+            pi.discount_name,
+            COUNT(pi.name) AS total_bill,
+            SUM(pi.discount_amount) AS total_discount
+        FROM `tabPOS Invoice` pi
+        WHERE
+            pi.name IN %(invoices)s
+            AND IFNULL(pi.discount_for_bank,'') != ''
+            AND IFNULL(pi.discount_amount,0) > 0
+        GROUP BY pi.discount_for_bank, pi.discount_name
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)
+
+    discount_by_bank = {}
+    for d in discount_bank:
+        key = d.discount_for_bank or "Unknown Bank"
+        discount_by_bank[key] = discount_by_bank.get(key, [])
+        discount_by_bank[key].append({
+            "discount_name": d.discount_name or "-",
+            "total_bill": int(d.total_bill),
+            "total_amount": flt(d.total_discount)
+        })
+
+    # =====================================================
     # 6. VOID ITEM
     # =====================================================
     void_items = frappe.db.sql(f"""
@@ -812,6 +861,8 @@ def get_end_day_report():
         "take_away": take_away,
         "payments": payment_summary,
         "taxes": tax_summary,
+        "discount_by_order_type": discount_by_order_type,
+        "discount_by_bank": discount_by_bank,
         "void_item": void_item_summary,
         "void_bill": void_bill_summary
     }
