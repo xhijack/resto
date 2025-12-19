@@ -231,3 +231,25 @@ def after_migrate():
             "fieldtype": "Attach Image",
             "insert_after": "company_name"
         }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "discount_for_bank"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "discount_for_bank",
+            "label": "Discount For Bank",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "insert_after": "base_discount_amount"
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "discount_name"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "discount_name",
+            "label": "Discount Name",
+            "fieldtype": "Data",
+            "read_only": 1,
+            "insert_after": "base_discount_amount"
+        }).insert(ignore_permissions=True)
