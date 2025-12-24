@@ -892,7 +892,7 @@ def end_shift():
     closing.posting_time = frappe.utils.nowtime()
 
     closing.insert()
-    closing.submit()
+    # closing.submit()
 
     return {
         "closing_entry": closing.name
