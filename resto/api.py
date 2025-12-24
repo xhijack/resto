@@ -866,3 +866,34 @@ def get_end_day_report():
         "void_item": void_item_summary,
         "void_bill": void_bill_summary
     }
+
+@frappe.whitelist()
+def end_shift():
+    user = frappe.session.user
+
+    opening = frappe.get_all(
+        "POS Opening Entry",
+        filters={
+            "user": user,
+            "status": "Open"
+        },
+        order_by="posting_date desc",
+        limit=1
+    )
+
+    if not opening:
+        frappe.throw("Tidak ada POS Opening Entry yang aktif")
+
+    opening_name = opening[0].name
+
+    closing = frappe.new_doc("POS Closing Entry")
+    closing.pos_opening_entry = opening_name
+    closing.posting_date = frappe.utils.today()
+    closing.posting_time = frappe.utils.nowtime()
+
+    closing.insert()
+    closing.submit()
+
+    return {
+        "closing_entry": closing.name
+    }
