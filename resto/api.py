@@ -3,7 +3,7 @@ from frappe import _
 import json
 from frappe.auth import LoginManager
 from frappe.core.doctype.user.user import generate_keys
-from frappe.utils import flt
+from frappe.utils import flt, get_datetime, now_datetime
 
 @frappe.whitelist()
 def print_now():
@@ -667,7 +667,8 @@ def get_end_day_report():
     # =====================================================
     invoice_filters = {
         "posting_date": posting_date,
-        "docstatus": 1
+        "docstatus": 1,
+        "status": "Consolidated"
     }
     invoice_filters.update(outlet_filter)
 
@@ -871,29 +872,163 @@ def get_end_day_report():
 def end_shift():
     user = frappe.session.user
 
-    opening = frappe.get_all(
+    # POS Opening Entry aktif
+    opening_rows = frappe.get_all(
         "POS Opening Entry",
         filters={
             "user": user,
-            "status": "Open"
+            "status": "Open",
+            "docstatus": 1
         },
-        order_by="posting_date desc",
         limit=1
     )
 
-    if not opening:
+    if not opening_rows:
         frappe.throw("Tidak ada POS Opening Entry yang aktif")
 
-    opening_name = opening[0].name
+    opening = frappe.get_doc("POS Opening Entry", opening_rows[0].name)
+    opening_dt = get_datetime(opening.period_start_date)
 
+    # Ambil POS Invoice valid
+    invoices = frappe.get_all(
+        "POS Invoice",
+        filters={
+            "docstatus": 1,
+            "is_pos": 1,
+            "status": "Paid",
+            "pos_profile": opening.pos_profile,
+            "owner": user
+        },
+        fields=[
+            "name",
+            "posting_date",
+            "posting_time"
+        ],
+        order_by="posting_date asc, posting_time asc"
+    )
+
+    if not invoices:
+        frappe.throw("Tidak ada POS Invoice")
+
+    # Buat POS Closing Entry
     closing = frappe.new_doc("POS Closing Entry")
-    closing.pos_opening_entry = opening_name
+    closing.pos_opening_entry = opening.name
+    closing.company = opening.company
+    closing.pos_profile = opening.pos_profile
+    closing.user = user
     closing.posting_date = frappe.utils.today()
     closing.posting_time = frappe.utils.nowtime()
+    closing.period_start_date = opening.period_start_date
+    closing.period_end_date = now_datetime()
 
-    closing.insert()
-    # closing.submit()
+    # Rekap Akumulasi
+    total_qty = 0
+    net_total = 0
+    tax_total = 0
+    grand_total = 0
 
+    payment_map = {}
+    tax_map = {}
+
+    for row in invoices:
+        inv_dt = get_datetime(f"{row.posting_date} {row.posting_time}")
+        if inv_dt < opening_dt:
+            continue
+
+        doc = frappe.get_doc("POS Invoice", row.name)
+
+        # ---------------- POS Transactions ----------------
+        closing.append("pos_transactions", {
+            "pos_invoice": doc.name,
+            "posting_date": doc.posting_date,
+            "customer": doc.customer,
+            "grand_total": doc.grand_total,
+            "is_return": doc.is_return or 0,
+            "return_against": doc.return_against
+        })
+
+        # ---------------- Header Totals ----------------
+        total_qty += flt(doc.total_qty)
+        net_total += flt(doc.net_total)
+        tax_total += flt(doc.total_taxes_and_charges)
+        grand_total += flt(doc.grand_total)
+
+        # ---------------- Taxes (Sales Taxes and Charges) ----------------
+        for t in doc.taxes:
+            if not t.tax_amount:
+                continue
+
+            key = (
+                t.account_head,
+                t.charge_type,
+                flt(t.rate)
+            )
+
+            if key not in tax_map:
+                tax_map[key] = {
+                    "account_head": t.account_head,
+                    "charge_type": t.charge_type,
+                    "rate": flt(t.rate),
+                    "tax_amount": 0,
+                    "total": 0
+                }
+
+            tax_map[key]["tax_amount"] += flt(t.tax_amount)
+            tax_map[key]["total"] += flt(t.tax_amount)
+
+        # ---------------- Payment Scaling ----------------
+        payment_rows = doc.payments or []
+        original_payment_total = sum(flt(p.amount) for p in payment_rows) or 1
+
+        scale = flt(doc.grand_total) / original_payment_total
+
+        for p in payment_rows:
+            payment_map.setdefault(p.mode_of_payment, 0)
+            payment_map[p.mode_of_payment] += flt(p.amount) * scale
+
+    if not closing.pos_transactions:
+        frappe.throw("Tidak ada transaksi POS valid setelah opening")
+
+    # Header Summary (SALES SUMMARY)
+    closing.total_quantity = total_qty
+    closing.net_total = net_total
+    closing.total_taxes_and_charges = tax_total
+    closing.grand_total = grand_total
+
+    # Child Table: TAXES
+    for tax in tax_map.values():
+        closing.append("taxes", {
+            "charge_type": tax["charge_type"],
+            "account_head": tax["account_head"],
+            "rate": tax["rate"],
+            "amount": tax["tax_amount"],
+            "total": tax["total"]
+        })
+
+    # Child Table: PAYMENT RECONCILIATION
+    for mop, amount in payment_map.items():
+        closing.append("payment_reconciliation", {
+            "mode_of_payment": mop,
+            "opening_amount": 0,
+            "expected_amount": amount,
+            "closing_amount": amount,
+            "difference": 0
+        })
+
+    # Validasi ERPNext
+    closing.validate_pos_invoices()
+    closing.validate_duplicate_pos_invoices()
+
+    # Save & Submit
+    closing.insert(ignore_permissions=True)
+    closing.submit()
+
+    # Response
     return {
-        "closing_entry": closing.name
+        "closing_entry": closing.name,
+        "total_invoice": len(closing.pos_transactions),
+        "grand_total": closing.grand_total,
+        "total_quantity": closing.total_quantity,
+        "tax_total": closing.total_taxes_and_charges,
+        "payments": payment_map
     }

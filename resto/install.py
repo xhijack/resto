@@ -253,3 +253,16 @@ def after_migrate():
             "read_only": 1,
             "insert_after": "base_discount_amount"
         }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {"dt": "POS Closing Entry", "fieldname": "end_day_processed"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Closing Entry",
+            "fieldname": "end_day_processed",
+            "label": "End Day Processed",
+            "fieldtype": "Check",
+            "default": 0,
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "insert_after": "period_end_date"
+        }).insert(ignore_permissions=True)
