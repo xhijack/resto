@@ -8,7 +8,11 @@
  "field_order": [
   "label",
   "discount_type",
-  "value"
+  "value",
+  "min_sales_price",
+  "max_discount",
+  "start_date",
+  "end_date"
  ],
  "fields": [
   {
@@ -32,13 +36,41 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Value"
+  },
+  {
+   "fieldname": "min_sales_price",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Min Sales Price"
+  },
+  {
+   "fieldname": "max_discount",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Max Discount"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Start Date"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "End Date"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-11-20 11:00:40.252397",
+ "modified": "2025-12-30 14:48:06.195323",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Discount Options",

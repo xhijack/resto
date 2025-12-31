@@ -7,15 +7,10 @@
  "engine": "InnoDB",
  "field_order": [
   "bank_name",
-  "min_sales_price",
-  "max_discount",
   "description",
-  "column_break_ovnm",
-  "start_date",
-  "end_date",
-  "menu_category",
   "section_break_dmua",
-  "discount_options"
+  "discount_options",
+  "menu_category"
  ],
  "fields": [
   {
@@ -31,33 +26,9 @@
    "options": "Discount Options"
   },
   {
-   "fieldname": "min_sales_price",
-   "fieldtype": "Float",
-   "label": "Min Sales Price"
-  },
-  {
-   "fieldname": "max_discount",
-   "fieldtype": "Float",
-   "label": "Max Discount"
-  },
-  {
    "fieldname": "description",
    "fieldtype": "Data",
    "label": "Description"
-  },
-  {
-   "fieldname": "column_break_ovnm",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "start_date",
-   "fieldtype": "Date",
-   "label": "Start Date"
-  },
-  {
-   "fieldname": "end_date",
-   "fieldtype": "Date",
-   "label": "End Date"
   },
   {
    "fieldname": "menu_category",
@@ -73,7 +44,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-21 10:27:19.213841",
+ "modified": "2025-12-30 14:49:32.416281",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Discount",
