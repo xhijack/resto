@@ -3,84 +3,121 @@ from frappe.utils import flt
 
 def exclude_void_items_from_total(doc, method):
     """
-    - Void Menu dikeluarkan dari perhitungan
-    - TAX dihitung ulang dari net_total baru
-    - Payment POS disinkronkan ke grand_total
+    FINAL – HARD LOCK VERSION
+    - Void Menu tidak masuk accounting
+    - Rate asli disimpan ke void_*
+    - Diskon hanya di header
+    - Item NON-VOID tidak berubah net_amount
+    - Tax tetap benar
+    - POS anti partial payment
     """
 
-    # HITUNG ITEM (NON VOID)
-    total = net_total = base_total = base_net_total = 0
+    has_void = False
 
+    # =====================
+    # VOID ITEM LOCK
+    # =====================
+    for item in doc.items:
+        if item.status_kitchen == "Void Menu":
+            has_void = True
+
+            if not item.get("voided"):
+                item.void_qty = item.qty
+                item.void_rate = item.rate
+                item.void_amount = item.amount
+                item.void_net_amount = item.net_amount
+                item.voided = 1
+
+            # KUNCI TOTAL VOID
+            item.price_list_rate = 0
+            item.rate = 0
+            item.net_rate = 0
+            item.amount = 0
+            item.net_amount = 0
+
+            item.base_price_list_rate = 0
+            item.base_rate = 0
+            item.base_net_rate = 0
+            item.base_amount = 0
+            item.base_net_amount = 0
+
+            item.discount_percentage = 0
+            item.discount_amount = 0
+            item.distributed_discount_amount = 0
+            item.pricing_rules = ""
+
+    # =====================
+    # HEADER SAFETY
+    # =====================
+    if has_void:
+        doc.ignore_pricing_rule = 1
+        doc.apply_discount_on = "Grand Total"
+
+    # =====================
+    # TAX ENGINE (ERPNext)
+    # =====================
+    for tax in doc.taxes:
+        tax.dont_recompute_tax = 0
+
+    doc.calculate_taxes_and_totals()
+
+    # =====================
+    # 🔒 HARD OVERRIDE ITEM NON-VOID
+    # =====================
     for item in doc.items:
         if item.status_kitchen != "Void Menu":
-            total += flt(item.amount)
-            net_total += flt(item.net_amount)
-            base_total += flt(item.base_amount)
-            base_net_total += flt(item.base_net_amount)
+            # 🚫 diskon TIDAK boleh masuk item
+            item.distributed_discount_amount = 0
+            item.discount_amount = 0
+            item.discount_percentage = 0
 
-    doc.total = total
-    doc.base_total = base_total
-    doc.net_total = net_total
-    doc.base_net_total = base_net_total
+            # 🔒 kembalikan nilai asli
+            item.net_rate = item.rate
+            item.net_amount = item.amount
+            item.base_net_rate = item.base_rate
+            item.base_net_amount = item.base_amount
 
-    # HITUNG ULANG TAX
-    total_taxes = base_total_taxes = 0
+    # =====================
+    # RECALC TOTAL MANUAL (AMAN)
+    # =====================
+    doc.net_total = sum(flt(i.net_amount) for i in doc.items)
+    doc.base_net_total = sum(flt(i.base_net_amount) for i in doc.items)
+
+    # TAX dihitung dari net_total
+    total_tax = 0
+    base_total_tax = 0
 
     for tax in doc.taxes:
-        # reset nilai lama
-        tax.tax_amount = 0
-        tax.tax_amount_after_discount_amount = 0
-        tax.base_tax_amount = 0
-        tax.base_tax_amount_after_discount_amount = 0
-
         if tax.charge_type == "On Net Total":
-            tax.tax_amount = flt(net_total * tax.rate / 100)
-            tax.tax_amount_after_discount_amount = tax.tax_amount
-            tax.base_tax_amount = flt(base_net_total * tax.rate / 100)
-            tax.base_tax_amount_after_discount_amount = tax.base_tax_amount
+            tax.tax_amount = flt(doc.net_total * tax.rate / 100)
+            tax.base_tax_amount = flt(doc.base_net_total * tax.rate / 100)
 
-        total_taxes += tax.tax_amount
-        base_total_taxes += tax.base_tax_amount
+        tax.total = doc.net_total + tax.tax_amount
+        tax.base_total = doc.base_net_total + tax.base_tax_amount
 
-        # update running total (penting untuk print format ERPNext)
-        tax.total = net_total + total_taxes
-        tax.base_total = base_net_total + base_total_taxes
+        total_tax += tax.tax_amount
+        base_total_tax += tax.base_tax_amount
 
-    doc.total_taxes_and_charges = total_taxes
-    doc.base_total_taxes_and_charges = base_total_taxes
+    doc.total_taxes_and_charges = total_tax
+    doc.base_total_taxes_and_charges = base_total_tax
 
-    # GRAND TOTAL
-    doc.grand_total = net_total + total_taxes
-    doc.base_grand_total = base_net_total + base_total_taxes
+    doc.grand_total = doc.net_total + total_tax - flt(doc.discount_amount)
+    doc.base_grand_total = doc.base_net_total + base_total_tax - flt(doc.base_discount_amount)
 
-    doc.rounded_total = flt(
-        doc.grand_total, doc.precision("rounded_total")
-    )
-    doc.base_rounded_total = flt(
-        doc.base_grand_total, doc.precision("base_rounded_total")
-    )
+    doc.rounded_total = flt(doc.grand_total, doc.precision("rounded_total"))
+    doc.base_rounded_total = flt(doc.base_grand_total, doc.precision("base_rounded_total"))
 
-    # POS PAYMENT SYNC
-    if doc.is_pos and doc.payments:
-        total_paid = 0
+    # =====================
+    # PAYMENT SYNC (ANTI PARTIAL)
+    # =====================
+    if doc.is_pos:
+        gt = flt(doc.rounded_total or doc.grand_total)
 
-        if len(doc.payments) == 1:
-            doc.payments[0].amount = doc.rounded_total
-            doc.payments[0].base_amount = doc.base_rounded_total
-            total_paid = doc.rounded_total
-        else:
-            current_total = sum(flt(p.amount) for p in doc.payments)
-            if current_total:
-                ratio = doc.rounded_total / current_total
-                for p in doc.payments:
-                    p.amount = flt(p.amount * ratio, 2)
-                    p.base_amount = flt(p.base_amount * ratio, 2)
-                    total_paid += p.amount
+        doc.paid_amount = gt
+        doc.base_paid_amount = gt
 
-        doc.paid_amount = total_paid
-        doc.base_paid_amount = total_paid
+        for p in doc.payments:
+            p.amount = gt
+            p.base_amount = gt
 
-    # OUTSTANDING
-    doc.outstanding_amount = flt(doc.grand_total - doc.paid_amount)
-    if doc.outstanding_amount < 0:
         doc.outstanding_amount = 0

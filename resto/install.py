@@ -95,6 +95,45 @@ def after_migrate():
             "insert_after": "item_code",
             "options": "\nNot Send\nAlready Send To Kitchen\nVoid Menu",
         }).insert(ignore_permissions=True)
+    
+    if not frappe.db.exists("Custom Field", {'fieldname': 'void_qty', 'dt': 'POS Invoice Item'}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "void_qty",
+            "label": "Void QTY",
+            "fieldtype": "Float",
+            "insert_after": "stock_uom",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': 'void_rate', 'dt': 'POS Invoice Item'}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "void_rate",
+            "label": "Void Rate",
+            "fieldtype": "Currency",
+            "insert_after": "item_tax_template",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+        }).insert(ignore_permissions=True)
+
+    if not frappe.db.exists("Custom Field", {'fieldname': 'void_amount', 'dt': 'POS Invoice Item'}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "void_amount",
+            "label": "Void Amount",
+            "fieldtype": "Currency",
+            "insert_after": "void_rate",
+            "read_only": 1,
+            "allow_on_submit": 1,
+            "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+        }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': 'queue', 'dt': 'POS Invoice'}):
         frappe.get_doc({

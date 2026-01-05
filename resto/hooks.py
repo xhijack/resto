@@ -141,7 +141,7 @@ doctype_list_js = {
 
 doc_events = {
     "POS Invoice": {
-        "before_validate": "resto.events.pos_invoice.exclude_void_items_from_total"
+        "before_save": "resto.events.pos_invoice.exclude_void_items_from_total",
     }
 }
 
