@@ -21,12 +21,11 @@ def exclude_void_items_from_total(doc, method):
         if item.status_kitchen == "Void Menu":
             has_void = True
 
-            if not item.get("voided"):
+            if not flt(item.void_amount) and not flt(item.void_rate):
                 item.void_qty = item.qty
                 item.void_rate = item.rate
                 item.void_amount = item.amount
                 item.void_net_amount = item.net_amount
-                item.voided = 1
 
             # KUNCI TOTAL VOID
             item.price_list_rate = 0
@@ -121,3 +120,10 @@ def exclude_void_items_from_total(doc, method):
             p.base_amount = gt
 
         doc.outstanding_amount = 0
+
+def lock_void_value_after_submit(doc, method):
+    for item in doc.items:
+        if item.status_kitchen == "Void Menu":
+            # kalau masih 0, restore dari snapshot terakhir
+            if not flt(item.void_amount) and flt(item.void_rate) and flt(item.void_qty):
+                item.db_set("void_amount", item.void_rate * item.void_qty)

@@ -693,11 +693,43 @@ def get_end_day_report():
     # =====================================================
     # 2. SUMMARY
     # =====================================================
+    sub_total_row = frappe.db.sql("""
+        SELECT
+            SUM(pii.amount) AS sub_total
+        FROM `tabPOS Invoice Item` pii
+        JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
+        WHERE
+            pi.name IN %(invoices)s
+            AND IFNULL(pii.status_kitchen,'') != 'Void Menu'
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)[0]
+
+    sub_total = int(sub_total_row.sub_total or 0)
+
+    discount_row = frappe.db.sql("""
+        SELECT
+            SUM(discount_amount) AS discount
+        FROM `tabPOS Invoice`
+        WHERE name IN %(invoices)s
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)[0]
+
+    discount = int(discount_row.discount or 0)
+
+    tax_row = frappe.db.sql("""
+        SELECT
+            SUM(tax_amount) AS tax
+        FROM `tabSales Taxes and Charges`
+        WHERE parent IN %(invoices)s
+    """, {"invoices": tuple(invoice_names)}, as_dict=True)[0]
+
+    tax = int(tax_row.tax or 0)
+
+    grand_total = sub_total + tax - discount
+
     summary = {
-        "sub_total": sum(flt(i.net_total) for i in invoices),
-        "discount": sum(flt(i.discount_amount) for i in invoices),
-        "tax": sum(flt(i.total_taxes_and_charges) for i in invoices),
-        "grand_total": sum(flt(i.grand_total) for i in invoices)
+        "sub_total": sub_total,
+        "discount": discount,
+        "tax": tax,
+        "grand_total": grand_total
     }
 
     # =====================================================
@@ -807,28 +839,44 @@ def get_end_day_report():
     # =====================================================
     # 6. VOID ITEM
     # =====================================================
-    void_items = frappe.db.sql(f"""
+    void_items = frappe.db.sql("""
         SELECT
             pii.item_name,
-            SUM(pii.qty) qty,
-            SUM(pii.amount) amount
+            SUM(pii.void_qty) AS qty,
+            SUM(
+                CASE
+                    WHEN IFNULL(pii.void_amount,0) > 0 THEN pii.void_amount
+                    ELSE pii.void_rate * pii.void_qty
+                END
+            ) AS amount
         FROM `tabPOS Invoice Item` pii
         JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
         WHERE
             pi.posting_date = %(posting_date)s
             AND pi.docstatus = 1
             AND pii.status_kitchen = 'Void Menu'
-            AND {" AND ".join([f"pi.{k} = %({k})s" for k in outlet_filter.keys()])}
+            {outlet_condition}
         GROUP BY pii.item_name
-    """, {
+    """.format(
+        outlet_condition="".join(
+            [f" AND pi.{k} = %({k})s" for k in outlet_filter.keys()]
+        )
+    ), {
         "posting_date": posting_date,
         **outlet_filter
     }, as_dict=True)
 
     void_item_summary = {
-        "total_qty": sum(int(v.qty) for v in void_items),
-        "total_amount": sum(flt(v.amount) for v in void_items),
-        "details": void_items
+        "total_qty": sum(int(v.qty or 0) for v in void_items),
+        "total_amount": sum(flt(v.amount or 0) for v in void_items),
+        "details": [
+            {
+                "item_name": v.item_name,
+                "qty": int(v.qty),
+                "amount": flt(v.amount)
+            }
+            for v in void_items
+        ]
     }
 
     # =====================================================
