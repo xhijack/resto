@@ -206,27 +206,35 @@ def create_pos_invoice(payload):
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
 
-    # 🔍 Ambil default Sales Taxes and Charges Template
-    tax_template = frappe.get_all(
-        "Sales Taxes and Charges Template",
-        filters={"is_default": 1, "company": company},
-        fields=["name"],
-        limit=1
-    )
+    # Tentukan title template berdasarkan order_type
+    if order_type == "Dine In":
+        template_title = "Dengan Service"
+    elif order_type == "Take Away":
+        template_title = "Tanpa Service"
+    else:
+        template_title = None
 
+    tax_template_name = None
     taxes = []
-    if tax_template:
-        template = frappe.get_doc("Sales Taxes and Charges Template", tax_template[0].name)
 
-        for t in template.taxes:
-            # ✅ Ambil semua tax row yang dipakai template — TANPA hardcode
-            taxes.append({
-                "charge_type": t.charge_type,
-                "account_head": t.account_head,
-                "rate": t.rate,
-                "tax_amount": 0,          # auto dihitung Frappe
-                "description": t.description
-            })
+    if template_title:
+        tax_template_name = frappe.db.get_value(
+            "Sales Taxes and Charges Template",
+            {"title": template_title},
+            "name"
+        )
+        if tax_template_name:
+            template = frappe.get_doc("Sales Taxes and Charges Template", tax_template_name)
+            for t in template.taxes:
+                taxes.append({
+                    "charge_type": t.charge_type,
+                    "account_head": t.account_head,
+                    "rate": t.rate,
+                    "tax_amount": 0,
+                    "description": t.description
+                })
+        else:
+            frappe.throw(f"Sales Taxes and Charges Template dengan title '{template_title}' tidak ditemukan")
 
     # Buat dokumen POS Invoice baru
     pos_invoice = frappe.get_doc({
@@ -241,7 +249,7 @@ def create_pos_invoice(payload):
         "queue": queue,
         "additional_items": [],   # ✅ gunakan fieldname yang sesuai
         "taxes": taxes,   # ⭐ masukkan auto pajak di sini
-        "taxes_and_charges": tax_template[0].name if tax_template else None,
+        "taxes_and_charges": tax_template_name,
         "additional_discount_percentage": additional_discount_percentage,
         "discount_amount": discount_amount,
         "discount_for_bank": discount_for_bank,
