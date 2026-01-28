@@ -1,5 +1,9 @@
 import frappe
 from frappe.utils import flt
+from resto.resto_sopwer.doctype.resto_menu.resto_menu import (
+    consume_resto_menu_stock,
+    rollback_resto_menu_stock
+)
 
 def exclude_void_items_from_total(doc, method):
     """
@@ -127,3 +131,36 @@ def lock_void_value_after_submit(doc, method):
             # kalau masih 0, restore dari snapshot terakhir
             if not flt(item.void_amount) and flt(item.void_rate) and flt(item.void_qty):
                 item.db_set("void_amount", item.void_rate * item.void_qty)
+
+def handle_kitchen_stock(doc, method):
+    if not doc.is_pos:
+        return
+
+    for row in doc.items:
+        if not row.resto_menu:
+            continue
+
+        # 🚚 SEND TO KITCHEN → CONSUME
+        if (
+            row.status_kitchen == "Already Send To Kitchen"
+            and not row.kitchen_stock_consumed
+        ):
+            consume_resto_menu_stock(row.resto_menu, row.qty)
+            row.kitchen_stock_consumed = 1
+
+        # ❌ VOID MENU → ROLLBACK
+        elif (
+            row.status_kitchen == "Void Menu"
+            and row.kitchen_stock_consumed
+        ):
+            rollback_resto_menu_stock(row.resto_menu, row.qty)
+            row.kitchen_stock_consumed = 0
+
+def rollback_kitchen_stock_on_cancel(doc, method):
+    if not doc.is_pos:
+        return
+
+    for row in doc.items:
+        if row.kitchen_stock_consumed and row.resto_menu:
+            rollback_resto_menu_stock(row.resto_menu, row.qty)
+            row.kitchen_stock_consumed = 0

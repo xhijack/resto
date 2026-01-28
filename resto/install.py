@@ -134,6 +134,19 @@ def after_migrate():
             "allow_on_submit": 1,
             "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
         }).insert(ignore_permissions=True)
+    
+    if not frappe.db.exists("Custom Field", {'fieldname': 'kitchen_stock_consumed', 'dt': 'POS Invoice Item'}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "kitchen_stock_consumed",
+            "label": "Kitchen Stock Consumed",
+            "fieldtype": "Check",
+            "insert_after": "stock_uom",
+            "read_only": 1,
+            "hidden": 1,
+            "default": 0
+        }).insert(ignore_permissions=True)
 
     if not frappe.db.exists("Custom Field", {'fieldname': 'queue', 'dt': 'POS Invoice'}):
         frappe.get_doc({

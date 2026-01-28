@@ -17,6 +17,14 @@
   "brand",
   "enabled",
   "short_name",
+  "stock_section",
+  "use_stock",
+  "stock_limit",
+  "column_break_cegy",
+  "is_sold_out",
+  "stock_used",
+  "column_break_omqv",
+  "column_break_dzyg",
   "section_break_sham",
   "printers",
   "add_ons",
@@ -109,13 +117,51 @@
    "fieldtype": "Table",
    "label": "Printers",
    "options": "Branch Kitchen Station"
+  },
+  {
+   "fieldname": "stock_section",
+   "fieldtype": "Section Break",
+   "label": "Stock"
+  },
+  {
+   "default": "0",
+   "fieldname": "use_stock",
+   "fieldtype": "Check",
+   "label": "Use Stock"
+  },
+  {
+   "fieldname": "stock_limit",
+   "fieldtype": "Int",
+   "label": "Stock Limit"
+  },
+  {
+   "fieldname": "column_break_cegy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stock_used",
+   "fieldtype": "Int",
+   "label": "Stock Used"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_sold_out",
+   "fieldtype": "Check",
+   "label": "Is Sold Out"
+  },
+  {
+   "fieldname": "column_break_omqv",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_dzyg",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "make_attachments_public": 1,
- "modified": "2026-01-17 17:00:50.529053",
- "modified_by": "utomo2@gmail.com",
+ "modified": "2026-01-28 09:23:08.204049",
+ "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
  "naming_rule": "Expression",
