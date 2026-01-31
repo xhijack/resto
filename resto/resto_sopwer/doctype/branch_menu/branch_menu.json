@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
  "autoname": "format:{branch}-{menu_item}",
  "creation": "2025-09-27 16:21:00.838800",
@@ -133,7 +134,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-18 11:58:34.619222",
+ "modified": "2026-01-31 17:04:57.704426",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Branch Menu",
@@ -156,5 +157,6 @@
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": []
+ "states": [],
+ "track_changes": 1
 }
