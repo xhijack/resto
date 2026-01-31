@@ -7,7 +7,64 @@ from frappe.model.mapper import get_mapped_doc
 
 
 class RestoMenu(Document):
-	pass
+    pass
+	
+
+def consume_resto_menu_stock(resto_menu, qty):
+    menu = frappe.get_doc("Resto Menu", resto_menu)
+
+    if not menu.use_stock:
+        return
+
+    used = menu.stock_used or 0
+    limit = menu.stock_limit or 0
+
+    if used + qty > limit:
+        frappe.throw(
+            f"Menu {menu.title} sudah SOLD OUT",
+            frappe.ValidationError
+        )
+
+    menu.stock_used = used + qty
+
+    if menu.stock_used >= limit:
+        menu.is_sold_out = 1
+
+    menu.save(ignore_permissions=True)
+    
+def rollback_resto_menu_stock(resto_menu, qty):
+    menu = frappe.get_doc("Resto Menu", resto_menu)
+
+    if not menu.use_stock:
+        return
+
+    menu.stock_used = max((menu.stock_used or 0) - qty, 0)
+
+    if menu.stock_used < menu.stock_limit:
+        menu.is_sold_out = 0
+
+    menu.save(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def get_resto_menu_stock(resto_menu):
+    menu = frappe.get_doc("Resto Menu", resto_menu)
+
+    if menu.use_stock and menu.is_sold_out:
+        return {
+            "qty": -1,
+            "sold_out": True
+        }
+
+    remaining = (
+        (menu.stock_limit or 0) - (menu.stock_used or 0)
+        if menu.use_stock else None
+    )
+
+    return {
+        "sold_out": False,
+        "remaining": remaining
+    }
 
 @frappe.whitelist()
 def make_branch_menu(source_name, branch=None, price_list=None, rate=0):
