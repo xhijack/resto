@@ -26,10 +26,30 @@ def exclude_void_items_from_total(doc, method):
             has_void = True
 
             if not flt(item.void_amount) and not flt(item.void_rate):
+                # 🔥 PAKSA AMBIL RATE DARI BRANCH MENU (KHUSUS VOID)
+                branch_rate = frappe.db.get_value(
+                    "Branch Menu",
+                    {
+                        "branch": doc.branch,
+                        "sell_item": item.item_code,
+                        "enabled": 1
+                    },
+                    "rate"
+                )
+
+                if branch_rate is None:
+                    frappe.throw(
+                        f"Harga Branch Menu tidak ditemukan untuk item {item.item_code}"
+                    )
+
+                branch_rate = flt(branch_rate)
+                amount = branch_rate * flt(item.qty)
+
+                # 🔒 SNAPSHOT VOID (PASTI RATE BRANCH MENU)
                 item.void_qty = item.qty
-                item.void_rate = item.rate
-                item.void_amount = item.amount
-                item.void_net_amount = item.net_amount
+                item.void_rate = branch_rate
+                item.void_amount = amount
+                item.void_net_amount = amount
 
             # KUNCI TOTAL VOID
             item.price_list_rate = 0
