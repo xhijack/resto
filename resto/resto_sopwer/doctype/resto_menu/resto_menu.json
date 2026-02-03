@@ -1,6 +1,5 @@
 {
  "actions": [],
- "allow_import": 1,
  "allow_rename": 1,
  "autoname": "format:{menu_code}-{title}",
  "creation": "2025-08-09 23:13:45.630211",
@@ -15,8 +14,9 @@
   "column_break_rzjd",
   "menu_category",
   "brand",
-  "enabled",
   "short_name",
+  "description",
+  "enabled",
   "stock_section",
   "stock_limit",
   "use_stock",
@@ -156,11 +156,16 @@
   {
    "fieldname": "column_break_dzyg",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Data",
+   "label": "Description"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-02 10:37:35.173535",
+ "modified": "2026-02-03 13:02:48.545218",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
@@ -178,24 +183,10 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
-  },
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "Item Manager",
-   "select": 1,
-   "share": 1,
-   "write": 1
   }
  ],
  "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "track_changes": 1
+ "states": []
 }

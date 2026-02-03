@@ -83,8 +83,28 @@ def get_branch_list():
     data = frappe.get_all("Branch", fields=["name", "branch"])
     return data
 
+@frappe.whitelist()
+def get_all_branch_menu_with_children(branch=None):
+    filters = {}
+    if branch:
+        filters["branch"] = branch
+
+    names = frappe.get_all(
+        "Branch Menu",
+        filters=filters,
+        pluck="name",
+        limit_page_length=0
+    )
+
+    docs = []
+    for name in names:
+        doc = frappe.get_doc("Branch Menu", name)
+        docs.append(doc.as_dict())
+
+    return docs
+
 @frappe.whitelist(allow_guest=False)
-def create_customer(name, mobile_no):
+def create_customer(name, mobile_no=None):
     doc = frappe.get_doc({
         "doctype": "Customer",
         "customer_name": name,
@@ -93,7 +113,6 @@ def create_customer(name, mobile_no):
         "mobile_number": mobile_no
     })
     doc.insert(ignore_permissions=True)
-    frappe.db.commit()
     return doc.as_dict()
 
 @frappe.whitelist()
