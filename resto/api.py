@@ -89,17 +89,39 @@ def get_all_branch_menu_with_children(branch=None):
     if branch:
         filters["branch"] = branch
 
-    names = frappe.get_all(
+    branch_menus = frappe.get_all(
         "Branch Menu",
         filters=filters,
-        pluck="name",
+        fields=["name", "menu_item"],
         limit_page_length=0
     )
 
     docs = []
-    for name in names:
-        doc = frappe.get_doc("Branch Menu", name)
-        docs.append(doc.as_dict())
+
+    for bm in branch_menus:
+        branch_doc = frappe.get_doc("Branch Menu", bm.name)
+        branch_dict = branch_doc.as_dict()
+
+        stock_data = {
+            "use_stock": 0,
+            "stock_limit": 0,
+            "stock_used": 0,
+            "is_sold_out": 0
+        }
+
+        if bm.menu_item and frappe.db.exists("Resto Menu", bm.menu_item):
+            resto_menu = frappe.get_doc("Resto Menu", bm.menu_item)
+
+            stock_data = {
+                "use_stock": resto_menu.use_stock,
+                "stock_limit": resto_menu.stock_limit,
+                "stock_used": resto_menu.stock_used,
+                "is_sold_out": resto_menu.is_sold_out
+            }
+
+        branch_dict["stock"] = stock_data
+
+        docs.append(branch_dict)
 
     return docs
 
