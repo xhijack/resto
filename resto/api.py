@@ -1380,3 +1380,24 @@ def get_discounts_with_options():
         })
 
     return result
+
+@frappe.whitelist()
+def get_select_options(doctype, fieldname):
+    """
+    Mengambil pilihan dari field Select
+    """
+    if not doctype or not fieldname:
+        frappe.throw(_("doctype dan fieldname wajib diisi"))
+
+    meta = frappe.get_meta(doctype)
+    field = meta.get_field(fieldname)
+    if not field:
+        frappe.throw(_("Field {0} tidak ditemukan di {1}").format(fieldname, doctype))
+
+    options = field.options
+    if options:
+        options_list = [o.strip() for o in options.split("\n") if o.strip()]
+    else:
+        options_list = []
+
+    return options_list
