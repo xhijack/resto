@@ -1440,3 +1440,87 @@ def get_active_pos_profile_for_user(user):
         frappe.throw("POS belum dibuka")
 
     return opening[0]
+
+@frappe.whitelist()
+def check_pos_status_for_user(user=None):
+    """
+    Mengecek apakah user:
+    1. Belum melakukan End Day kemarin
+    2. Belum membuka POS hari ini
+    """
+    import frappe
+    from frappe.utils import getdate, now_datetime, add_days
+
+    user = user or frappe.session.user
+    today = getdate()
+    yesterday = add_days(today, -1)
+
+    # Ambil POS Profile user
+    pos_profiles = frappe.get_all(
+        "POS Profile User",
+        filters={"user": user},
+        pluck="parent"
+    )
+    if not pos_profiles:
+        frappe.throw("User tidak punya POS Profile")
+
+    # 1. Cek End Day kemarin
+    end_day_pending = frappe.db.exists(
+        "POS Opening Entry",
+        {
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open",
+            "period_start_date": ["<", today]
+        }
+    )
+
+    # 2. Cek Opening POS hari ini
+    today_opening = frappe.db.exists(
+        "POS Opening Entry",
+        {
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open",
+            "period_start_date": today
+        }
+    )
+
+    return {
+        "end_day_pending": bool(end_day_pending),
+        "today_opening": bool(today_opening)
+    }
+
+@frappe.whitelist()
+def open_pos(user=None, pos_profile=None, opening_balance=0):
+    import frappe
+    user = user or frappe.session.user
+
+    if not pos_profile:
+        pos_profile_list = frappe.get_all(
+            "POS Profile User",
+            filters={"user": user},
+            pluck="parent",
+            limit=1
+        )
+        if not pos_profile_list:
+            frappe.throw("POS Profile untuk user ini tidak ditemukan")
+        pos_profile = pos_profile_list[0]
+
+    opening = frappe.get_doc({
+        "doctype": "POS Opening Entry",
+        "pos_profile": pos_profile,
+        "user": user,
+        "status": "Open",
+        "period_start_date": frappe.utils.today(),
+        "opening_balance": opening_balance
+    })
+
+    opening.append("balance_details", {
+        "mode_of_payment": "Cash",
+        "opening_amount": opening_balance
+    })
+
+    opening.insert(ignore_permissions=True)
+    opening.submit()
+    frappe.db.commit()
+
+    return opening.name

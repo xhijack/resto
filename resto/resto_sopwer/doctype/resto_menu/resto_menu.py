@@ -109,3 +109,19 @@ def make_branch_menu(source_name, branch=None, price_list=None, rate=0):
     frappe.db.commit()
     return doc.name
 
+def reset_daily_resto_stock():
+    """
+    Reset stock_used, is_sold_out, stock_limit, dan uncheck use_stock untuk semua Resto Menu yang pakai stok.
+    """
+    menus = frappe.get_all("Resto Menu", filters={"use_stock": 1}, fields=["name"])
+    
+    for m in menus:
+        menu_doc = frappe.get_doc("Resto Menu", m.name)
+        menu_doc.use_stock = 0
+        menu_doc.stock_limit = 0
+        menu_doc.stock_used = 0
+        menu_doc.is_sold_out = 0
+        menu_doc.save(ignore_permissions=True)
+    
+    frappe.clear_cache(doctype="Resto Menu")
+    frappe.log_error("Daily stock reset executed", "Resto Menu Stock Reset")

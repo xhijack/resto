@@ -3,6 +3,23 @@
 
 frappe.ui.form.on('Resto Menu', {
   refresh(frm) {
+    frappe.call({
+      method: "frappe.client.get_value",
+      args: {
+        doctype: "Resto Menu",
+        filters: { name: frm.doc.name },
+        fieldname: ["stock_used", "is_sold_out"]
+      },
+      callback: function(r) {
+        if (r.message) {
+          frm.set_value("stock_used", r.message.stock_used);
+          frm.set_value("is_sold_out", r.message.is_sold_out);
+          frm.refresh_field("stock_used");
+          frm.refresh_field("is_sold_out");
+        }
+      }
+    });
+    
     frm.add_custom_button('Buat Branch Menu', () => {
       const d = new frappe.ui.Dialog({
         title: 'Buat Branch Menu',

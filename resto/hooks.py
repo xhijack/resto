@@ -153,23 +153,23 @@ doc_events = {
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"resto.tasks.all"
-# 	],
-# 	"daily": [
-# 		"resto.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"resto.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"resto.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"resto.tasks.monthly"
-# 	],
-# }
+scheduler_events = {
+	# "all": [
+	# 	"resto.tasks.all"
+	# ],
+	"daily": [
+		"resto.resto_sopwer.doctype.resto_menu.resto_menu.reset_daily_resto_stock"
+	],
+	# "hourly": [
+	# 	"resto.tasks.hourly"
+	# ],
+	# "weekly": [
+	# 	"resto.tasks.weekly"
+	# ],
+	# "monthly": [
+	# 	"resto.tasks.monthly"
+	# ],
+}
 
 # Testing
 # -------
