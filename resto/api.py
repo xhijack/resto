@@ -85,45 +85,69 @@ def get_branch_list():
 
 @frappe.whitelist()
 def get_all_branch_menu_with_children(branch=None):
-    filters = {}
+    filters = {"enabled": 1}
     if branch:
         filters["branch"] = branch
 
     branch_menus = frappe.get_all(
         "Branch Menu",
         filters=filters,
-        fields=["name", "menu_item"],
+        fields=["name", "menu_item", "rate"],
         limit_page_length=0
     )
 
-    docs = []
+    if not branch_menus:
+        return []
+
+    menu_items = [bm.menu_item for bm in branch_menus if bm.menu_item]
+
+    resto_menus = {
+        rm.name: rm
+        for rm in frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", menu_items]},
+            fields=[
+                "name",
+                "title",
+                "menu_category",
+                "sell_item",
+                "use_stock",
+                "stock_limit",
+                "stock_used",
+                "is_sold_out",
+                "description"
+            ]
+        )
+    }
+
+    files = frappe.get_all(
+        "File",
+        filters={
+            "attached_to_doctype": "Resto Menu",
+            "attached_to_name": ["in", menu_items]
+        },
+        fields=["attached_to_name", "file_url"]
+    )
+    image_map = {f.attached_to_name: f.file_url for f in files}
+
+    result = []
 
     for bm in branch_menus:
+        if bm.menu_item not in resto_menus:
+            continue
+
         branch_doc = frappe.get_doc("Branch Menu", bm.name)
         branch_dict = branch_doc.as_dict()
 
-        stock_data = {
-            "use_stock": 0,
-            "stock_limit": 0,
-            "stock_used": 0,
-            "is_sold_out": 0
-        }
+        branch_dict.update({
+            "rate": bm.rate,
+            "resto_menu": resto_menus.get(bm.menu_item),
+            "image": image_map.get(bm.menu_item)
+        })
 
-        if bm.menu_item and frappe.db.exists("Resto Menu", bm.menu_item):
-            resto_menu = frappe.get_doc("Resto Menu", bm.menu_item)
+        result.append(branch_dict)
 
-            stock_data = {
-                "use_stock": resto_menu.use_stock,
-                "stock_limit": resto_menu.stock_limit,
-                "stock_used": resto_menu.stock_used,
-                "is_sold_out": resto_menu.is_sold_out
-            }
-
-        branch_dict["stock"] = stock_data
-
-        docs.append(branch_dict)
-
-    return docs
+    return result
 
 @frappe.whitelist(allow_guest=False)
 def create_customer(name, mobile_no=None):
@@ -1184,20 +1208,8 @@ def end_shift():
     user = frappe.session.user
 
     # POS Opening Entry aktif
-    opening_rows = frappe.get_all(
-        "POS Opening Entry",
-        filters={
-            "user": user,
-            "status": "Open",
-            "docstatus": 1
-        },
-        limit=1
-    )
-
-    if not opening_rows:
-        frappe.throw("Tidak ada POS Opening Entry yang aktif")
-
-    opening = frappe.get_doc("POS Opening Entry", opening_rows[0].name)
+    opening_info = get_active_pos_profile_for_user(user)
+    opening = frappe.get_doc("POS Opening Entry", opening_info.name)
     opening_dt = get_datetime(opening.period_start_date)
 
     # Ambil POS Invoice valid
@@ -1208,7 +1220,7 @@ def end_shift():
             "is_pos": 1,
             "status": "Paid",
             "pos_profile": opening.pos_profile,
-            "owner": user
+            "owner": opening.user
         },
         fields=[
             "name",
@@ -1226,7 +1238,7 @@ def end_shift():
     closing.pos_opening_entry = opening.name
     closing.company = opening.company
     closing.pos_profile = opening.pos_profile
-    closing.user = user
+    closing.user = opening.user
     closing.posting_date = frappe.utils.today()
     closing.posting_time = frappe.utils.nowtime()
     closing.period_start_date = opening.period_start_date
@@ -1401,3 +1413,30 @@ def get_select_options(doctype, fieldname):
         options_list = []
 
     return options_list
+
+@frappe.whitelist()
+def get_active_pos_profile_for_user(user):
+    pos_profiles = frappe.get_all(
+        "POS Profile User",
+        filters={"user": user},
+        pluck="parent"
+    )
+
+    if not pos_profiles:
+        frappe.throw("User tidak punya POS Profile")
+
+    opening = frappe.get_all(
+        "POS Opening Entry",
+        filters={
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open"
+        },
+        fields=["name", "pos_profile", "user"],
+        order_by="creation desc",
+        limit=1
+    )
+
+    if not opening:
+        frappe.throw("POS belum dibuka")
+
+    return opening[0]
