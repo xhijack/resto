@@ -318,3 +318,15 @@ def after_migrate():
             "allow_on_submit": 1,
             "insert_after": "period_end_date"
         }).insert(ignore_permissions=True)
+        
+    if not frappe.db.exists("Custom Field", {"dt": "POS Opening Entry", "fieldname": "branch"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Opening Entry",
+            "fieldname": "branch",
+            "label": "Branch",
+            "fieldtype": "Link",
+            "options": "Branch",
+            "reqd": 1,
+            "insert_after": "user"
+        }).insert(ignore_permissions=True)

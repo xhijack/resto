@@ -1431,13 +1431,50 @@ def get_active_pos_profile_for_user(user):
             "pos_profile": ["in", pos_profiles],
             "status": "Open"
         },
-        fields=["name", "pos_profile", "user"],
+        fields=["name", "pos_profile", "user", "branch"],
         order_by="creation desc",
         limit=1
     )
 
     if not opening:
         frappe.throw("POS belum dibuka")
+
+    return opening[0]
+
+import frappe
+
+@frappe.whitelist()
+def get_active_pos_opening():
+    user = frappe.session.user
+
+    pos_profiles = frappe.get_all(
+        "POS Profile User",
+        filters={"user": user},
+        pluck="parent"
+    )
+
+    if not pos_profiles:
+        frappe.throw("User tidak memiliki POS Profile")
+
+    opening = frappe.get_all(
+        "POS Opening Entry",
+        filters={
+            "pos_profile": ["in", pos_profiles],
+            "docstatus": 1,
+            "status": "Open"
+        },
+        fields=[
+            "name",
+            "pos_profile",
+            "branch",
+            "period_start_date"
+        ],
+        order_by="period_start_date desc",
+        limit=1
+    )
+
+    if not opening:
+        frappe.throw("POS belum dibuka hari ini")
 
     return opening[0]
 
@@ -1490,10 +1527,13 @@ def check_pos_status_for_user(user=None):
     }
 
 @frappe.whitelist()
-def open_pos(user=None, pos_profile=None, opening_balance=0):
+def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
     import frappe
+    from frappe.utils import today
+
     user = user or frappe.session.user
 
+    # Ambil POS Profile
     if not pos_profile:
         pos_profile_list = frappe.get_all(
             "POS Profile User",
@@ -1505,12 +1545,20 @@ def open_pos(user=None, pos_profile=None, opening_balance=0):
             frappe.throw("POS Profile untuk user ini tidak ditemukan")
         pos_profile = pos_profile_list[0]
 
+    # Ambil branch
+    if not branch:
+        branch = frappe.db.get_value("POS Profile", pos_profile, "branch")
+
+    if not branch:
+        frappe.throw("Branch tidak ditemukan untuk POS Profile ini")
+
     opening = frappe.get_doc({
         "doctype": "POS Opening Entry",
         "pos_profile": pos_profile,
         "user": user,
+        "branch": branch,
         "status": "Open",
-        "period_start_date": frappe.utils.today(),
+        "period_start_date": today(),
         "opening_balance": opening_balance
     })
 
@@ -1521,6 +1569,9 @@ def open_pos(user=None, pos_profile=None, opening_balance=0):
 
     opening.insert(ignore_permissions=True)
     opening.submit()
-    frappe.db.commit()
 
-    return opening.name
+    return {
+        "name": opening.name,
+        "pos_profile": pos_profile,
+        "branch": branch
+    }
