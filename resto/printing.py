@@ -545,6 +545,14 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         ]
       }
     """
+    current_user = frappe.session.user
+
+    full_name = frappe.db.get_value(
+        "User",
+        current_user,
+        "full_name"
+    )
+
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
@@ -561,6 +569,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
+    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
