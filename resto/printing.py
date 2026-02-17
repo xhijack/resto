@@ -421,7 +421,7 @@ def get_item_printers(item: Dict) -> List[str]:
             printers.append(ks["printer_name"])
     return printers
 
-def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict]) -> bytes:
+def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
     out = b""
     out += _esc_init()
     out += _esc_font_a()
@@ -431,6 +431,8 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
     out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
+    out += (f"Petugas: {created_by}\n").encode("ascii", "ignore")
+
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
@@ -474,7 +476,16 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 @frappe.whitelist()
 def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
     try:
+        
         data = _collect_pos_invoice(name)
+        doc = frappe.get_doc("POS Invoice", name)
+
+        full_name = frappe.db.get_value(
+            "User",
+            doc.owner,
+            "full_name"
+        )
+
         results = []
 
         raw = build_escpos_from_pos_invoice(name, bool(int(add_qr)), qr_data)
@@ -487,7 +498,7 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
-            raw_kitchen = build_kitchen_receipt(data, kprinter, items)
+            raw_kitchen = build_kitchen_receipt(data, kprinter, items,created_by=full_name)
             kitchen_job = cups_print_raw(raw_kitchen, kprinter)
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
