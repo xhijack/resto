@@ -8,7 +8,7 @@ from frappe.utils import now_datetime
 from PIL import Image
 from io import BytesIO
 import requests
-
+import re
 
 
 # ========== Konstanta & Util ==========
@@ -769,6 +769,25 @@ def build_escpos_bill(name: str) -> bytes:
     pincode = branch_detail.get("pincode") or ""
     phone = branch_detail.get("phone") or ""
     
+    # Ambil alamat utama Company
+    address1 = address2 = city = pincode = phone = ""
+
+    if company:
+        addr_links = frappe.get_all(
+            "Dynamic Link",
+            filters={"link_doctype": "Company", "link_name": company},
+            fields=["parent"],
+            order_by="creation asc"
+        )
+
+        if addr_links:
+            address_doc = frappe.get_doc("Address", addr_links[0].parent)
+            address1 = address_doc.address_line1 or ""
+            address2 = address_doc.address_line2 or ""
+            city = address_doc.city or ""
+            pincode = address_doc.pincode or ""
+            phone = address_doc.phone or ""
+
     # Hitung total qty semua items
     total_qty = sum(int(item.get("qty", 0)) for item in items)
 
@@ -783,6 +802,20 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
+
+    # Nama company + city
+    company_city_line = f"{company} {city}".strip()
+    if company_city_line:
+        out += (company_city_line + "\n").encode("ascii", "ignore")
+
+    # Alamat lengkap
+    if address1:
+        out += (address1 + "\n").encode("ascii", "ignore")
+    if address2:
+        out += (address2 + "\n").encode("ascii", "ignore")
+    if phone:
+        out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
+
     if company or branch:
         header_line = f"{company}"
         if branch:
@@ -875,6 +908,10 @@ def build_escpos_bill(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
+        if "Pendapatan Service" in tax_name:
+            tax_name = "Sc"
+        elif "VAT" in tax_name:
+            tax_name = "Tax"
         tax_amount = tax.get("amount", 0)
         # potong nama pajak agar tidak kepanjangan
         if len(tax_name) > 20:
@@ -965,6 +1002,25 @@ def build_escpos_receipt(name: str) -> bytes:
     pincode = branch_detail.get("pincode") or ""
     phone = branch_detail.get("phone") or ""
     
+    # Ambil alamat utama Company
+    address1 = address2 = city = pincode = phone = ""
+
+    if company:
+        addr_links = frappe.get_all(
+            "Dynamic Link",
+            filters={"link_doctype": "Company", "link_name": company},
+            fields=["parent"],
+            order_by="creation asc"
+        )
+
+        if addr_links:
+            address_doc = frappe.get_doc("Address", addr_links[0].parent)
+            address1 = address_doc.address_line1 or ""
+            address2 = address_doc.address_line2 or ""
+            city = address_doc.city or ""
+            pincode = address_doc.pincode or ""
+            phone = address_doc.phone or ""
+
     # Hitung total qty semua items
     total_qty = sum(int(item.get("qty", 0)) for item in items)
 
@@ -989,6 +1045,21 @@ def build_escpos_receipt(name: str) -> bytes:
     #     except Exception as e:
     #         frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
 
+    # ===== HEADER =====
+    out += _esc_align_center() + _esc_bold(True)
+
+    # Nama company + city
+    company_city_line = f"{company} {city}".strip()
+    if company_city_line:
+        out += (company_city_line + "\n").encode("ascii", "ignore")
+
+    # Alamat lengkap
+    if address1:
+        out += (address1 + "\n").encode("ascii", "ignore")
+    if address2:
+        out += (address2 + "\n").encode("ascii", "ignore")
+    if phone:
+        out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
 
     if company or branch:
         header_line = f"{company}"
@@ -999,16 +1070,16 @@ def build_escpos_receipt(name: str) -> bytes:
     out += _esc_bold(False)
 
     # Alamat branch
-    if address1 or address2 or city or pincode or phone:
-        out += _esc_align_center()
-        if address1:
-            out += (f"{address1}\n").encode("ascii", "ignore")
-        if address2:
-            out += (f"{address2}\n").encode("ascii", "ignore")
-        if city or pincode:
-            out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-        if phone:
-            out += (f"Phone: {phone}\n").encode("ascii", "ignore")
+    # if address1 or address2 or city or pincode or phone:
+    #     out += _esc_align_center()
+    #     if address1:
+    #         out += (f"{address1}\n").encode("ascii", "ignore")
+    #     if address2:
+    #         out += (f"{address2}\n").encode("ascii", "ignore")
+    #     if city or pincode:
+    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
+    #     if phone:
+    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
 
 
     out += _esc_align_left()
@@ -1082,6 +1153,10 @@ def build_escpos_receipt(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "Tax")
+        if "Pendapatan Service" in tax_name:
+            tax_name = "Sc"
+        elif "VAT" in tax_name:
+            tax_name = "Tax"
         tax_amount = tax.get("amount", 0)
         # potong nama pajak agar tidak kepanjangan
         if len(tax_name) > 20:
@@ -1373,3 +1448,69 @@ def _enqueue_checker_worker(name: str, printer_name: str):
     })
 
     return job_id
+
+@frappe.whitelist(allow_guest=True)
+def preview_receipt(name: str):
+    """
+    API untuk preview receipt POS tanpa printer
+    """
+    # 1. Cek apakah POS Invoice ada
+    if not frappe.db.exists("POS Invoice", name):
+        return {"error": f"POS Invoice {name} tidak ditemukan"}
+
+    # 2. Build receipt dalam format ESC/POS (bytes)
+    receipt_bytes = build_escpos_bill(name)
+
+    # 3. Konversi bytes ke teks agar bisa dibaca
+    # Hilangkan karakter non-printable ESC/POS
+    text = receipt_bytes.decode("ascii", "ignore")
+    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)  # hapus control chars
+    text = re.sub(r'\n\s*\n', '\n', text)  # hapus line kosong ganda
+
+    # 4. Kembalikan hasil preview
+    return {
+        "preview": text,
+        "invoice": name,
+        "timestamp": now_datetime()
+    }
+
+@frappe.whitelist(allow_guest=True)
+def preview_kitchen_receipt_simple(invoice_name: str):
+    """
+    Preview kitchen receipt via GET hanya dengan invoice_name.
+    """
+    # Ambil data invoice
+    if not frappe.db.exists("POS Invoice", invoice_name):
+        return {"error": f"POS Invoice {invoice_name} tidak ditemukan"}
+
+    data = frappe.get_doc("POS Invoice", invoice_name).as_dict()
+
+    # Ambil items dan user (created_by)
+    items = data.get("items", [])
+    created_by = data.get("owner")  # atau siapa pun yang membuat POS Invoice
+    station_name = data.get("branch") or "Kitchen"
+
+    # Build receipt
+    receipt_bytes = build_kitchen_receipt(data, station_name, items, created_by)
+
+    # Decode bytes → teks
+    text = receipt_bytes.decode("ascii", "ignore")
+    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)
+    text = re.sub(r'\n\s*\n', '\n', text)
+
+    # Center header
+    lines = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if line.startswith("KITCHEN ORDER") or line.startswith("Table:"):
+            lines.append(center_line(line))
+        else:
+            lines.append(line)
+
+    preview_text = "\n".join(lines)
+
+    return {
+        "preview": preview_text,
+        "invoice": invoice_name,
+        "timestamp": now_datetime()
+    }
