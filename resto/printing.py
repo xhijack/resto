@@ -737,11 +737,41 @@ def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
     return total_pax
 
 
-def get_cashier_name(pos_invoice_name: str) -> str:
+def get_waiter_name(pos_invoice_name: str) -> str:
     invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
     owner = invoice.owner
     user = frappe.get_doc("User", owner)
     return user.full_name or owner  
+
+def get_cashier_name(pos_invoice_name: str) -> str:
+    # Ambil POS Invoice
+    invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
+    
+    # Ambil POS Profile dari invoice
+    pos_profile_name = invoice.pos_profile
+    pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
+
+    # Cari POS Opening Entry yang masih "Open" untuk POS Profile ini
+    opening_entries = frappe.get_all(
+        "POS Opening Entry",
+        filters={
+            "pos_profile": pos_profile.name,
+            "status": "Open",  # Hanya yang sedang aktif
+            "docstatus": 1
+        },
+        fields=["user", "name"],
+        order_by="creation desc",
+        limit_page_length=1
+    )
+
+    if opening_entries:
+        opening_user = opening_entries[0].user
+        user_doc = frappe.get_doc("User", opening_user)
+        return user_doc.full_name or opening_user
+
+    # fallback: jika tidak ada POS Opening Entry aktif, pakai owner invoice
+    owner_user_doc = frappe.get_doc("User", invoice.owner)
+    return owner_user_doc.full_name or invoice.owner
 
 def build_escpos_bill(name: str) -> bytes:
     data = _collect_pos_invoice(name)
@@ -1305,6 +1335,7 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    out += (f"Waiter : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
