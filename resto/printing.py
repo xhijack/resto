@@ -425,8 +425,9 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out = b""
     out += _esc_init()
     out += _esc_font_a()
+    out += _esc_char_size(0, 3)
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"KITCHEN ORDER - {station_name}\n").encode("ascii", "ignore")
+    out += (f"{station_name}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
     out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
@@ -469,6 +470,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
             out += (w + "\n").encode("ascii", "ignore")
 
     out += _line("-").encode() + b"\n"
+    out += _esc_char_size(0, 0)
     out += _esc_feed(3) + _esc_cut_full()
     return out
 
@@ -934,20 +936,29 @@ def build_escpos_bill(name: str) -> bytes:
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    sc_amount = 0
+    tax_amount = 0
 
     for tax in taxes:
-        tax_name = tax.get("description", "Tax")
-        if "Pendapatan Service" in tax_name:
-            tax_name = "Sc"
-        elif "VAT" in tax_name:
-            tax_name = "Tax"
-        tax_amount = tax.get("amount", 0)
-        # potong nama pajak agar tidak kepanjangan
-        if len(tax_name) > 20:
-            tax_name = tax_name[:20]
-        out += (_format_line(tax_name, format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+        tax_name = tax.get("description", "")
+        amount = tax.get("amount", 0)
 
+        if "Pendapatan Service" in tax_name:
+            sc_amount += amount
+        elif "VAT" in tax_name:
+            tax_amount += amount
+
+    # 1️⃣ Print SC dulu
+    if sc_amount:
+        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
+
+    # 2️⃣ Lalu Subtotal
+    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+
+    # 3️⃣ Lalu Tax
+    if tax_amount:
+        out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+    
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
     out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
@@ -1179,20 +1190,29 @@ def build_escpos_receipt(name: str) -> bytes:
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    sc_amount = 0
+    tax_amount = 0
 
     for tax in taxes:
-        tax_name = tax.get("description", "Tax")
-        if "Pendapatan Service" in tax_name:
-            tax_name = "Sc"
-        elif "VAT" in tax_name:
-            tax_name = "Tax"
-        tax_amount = tax.get("amount", 0)
-        # potong nama pajak agar tidak kepanjangan
-        if len(tax_name) > 20:
-            tax_name = tax_name[:20]
-        out += (_format_line(tax_name, format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+        tax_name = tax.get("description", "")
+        amount = tax.get("amount", 0)
 
+        if "Pendapatan Service" in tax_name:
+            sc_amount += amount
+        elif "VAT" in tax_name:
+            tax_amount += amount
+
+    # 1️⃣ Print SC dulu
+    if sc_amount:
+        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
+
+    # 2️⃣ Lalu Subtotal
+    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+
+    # 3️⃣ Lalu Tax
+    if tax_amount:
+        out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+    
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
     out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
