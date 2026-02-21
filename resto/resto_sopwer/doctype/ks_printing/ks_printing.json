@@ -13,6 +13,10 @@
   "column_break_xjsr",
   "pos_invoice",
   "status",
+  "retry_count",
+  "column_break_qsdx",
+  "last_print_time",
+  "error_message",
   "section_break_wxad",
   "items"
  ],
@@ -43,7 +47,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Pending\nPrinting"
+   "options": "Pending\nPrinting\nDone\nError"
   },
   {
    "fieldname": "section_break_wxad",
@@ -75,12 +79,32 @@
    "in_standard_filter": 1,
    "label": "Printer Name",
    "read_only": 1
+  },
+  {
+   "fieldname": "column_break_qsdx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "retry_count",
+   "fieldtype": "Int",
+   "label": "Retry Count"
+  },
+  {
+   "fieldname": "last_print_time",
+   "fieldtype": "Datetime",
+   "label": "Last Print Time"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-10-04 15:31:40.976805",
+ "modified": "2026-02-21 11:47:36.242040",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "KS Printing",
