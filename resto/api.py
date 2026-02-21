@@ -487,12 +487,10 @@ def grouping_items_to_kitchen_station(branch, pos_name):
     return grouped
         
 
-def send_to_ks_printing(kitchen_station, pos_invoice, items, is_reprint=0):
+def send_to_ks_printing(kitchen_station, pos_invoice, items):
     doc = frappe.new_doc("KS Printing")
     doc.kitchen_station = kitchen_station
     doc.pos_invoice = pos_invoice
-    doc.status = "Pending"
-    doc.is_reprint = is_reprint
     for item in items:
         doc.append("items", {
             "menu_item": item.get("resto_menu"),
@@ -500,9 +498,7 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items, is_reprint=0):
             "add_ons": item.get("add_ons"),
             "quick_notes": item.get("quick_notes")
         })
-    doc.insert(ignore_permissions=True)
-    frappe.db.commit()
-    return
+    return doc.insert(ignore_permissions=True)
 
 def print_to_ks_now(pos_invoice):
     from resto.printing import kitchen_print_from_payload
@@ -1579,56 +1575,3 @@ def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
         "pos_profile": pos_profile,
         "branch": branch
     }
-
-@frappe.whitelist()
-def reprint_ks_printing(log_name):
-
-    log = frappe.get_doc("KS Printing", log_name)
-
-    if not log.retry_count:
-        log.retry_count = 0
-
-    if log.retry_count > 5:
-        frappe.throw("Retry limit exceeded")
-
-    printer_name = frappe.db.get_value(
-        "Branch Menu Printer",
-        {"kitchen_station": log.kitchen_station},
-        "printer_name"
-    )
-
-    payload = {
-        "kitchen_station": log.kitchen_station,
-        "printer_name": printer_name,
-        "pos_invoice": log.pos_invoice,
-        "items": [i.as_dict() for i in log.items]
-    }
-
-    try:
-        from resto.printing import kitchen_print_from_payload
-
-        log.status = "Printing"
-        log.retry_count += 1
-        log.save(ignore_permissions=True)
-
-        kitchen_print_from_payload(payload)
-
-        log.status = "Done"
-        log.last_print_time = now_datetime()
-        log.save(ignore_permissions=True)
-
-        frappe.db.commit()
-
-        return {"ok": True}
-
-    except Exception as e:
-
-        log.status = "Error"
-        log.error_message = str(e)
-        log.save(ignore_permissions=True)
-
-        frappe.db.commit()
-
-        frappe.log_error(frappe.get_traceback(), "KS Reprint Error")
-
-        frappe.throw(str(e))
