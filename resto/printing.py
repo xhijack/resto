@@ -198,6 +198,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         items.append({
             "item_code": it.get("item_code"),
             "item_name": it.get("item_name") or it.get("item_code"),
+            "resto_menu": it.get("resto_menu"),
             "qty": float(it.get("qty") or 0),
             "rate": float(standard_price or 0),
             "amount": float(it.get("amount") or 0),
@@ -427,6 +428,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += _esc_font_a()
     out += _esc_char_size(0, 3)
     out += _esc_align_center() + _esc_bold(True)
+    # KITCHEN ORDER
     out += (f"{station_name}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
@@ -443,31 +445,74 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += (f"Purpose : {data['order_type']}\n").encode("ascii", "ignore")
 
     out += _line("-").encode() + b"\n"
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+            if d.custom_mandarin_name
+        }
 
     for it in items:
-        qty = int(it["qty"]) if it["qty"].is_integer() else it["qty"]
-        line = f"{qty} x {it['item_name']}"
+        qty_val = it.get("qty", 0)
 
-        add_ons_str = it.get("add_ons", "")
-        if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
-            for add in add_ons_list:
-                if "(" in add and ")" in add:
-                    name, price = add.rsplit("(", 1)
-                    price = price.replace(")", "").strip()
-                    name = name.strip()
-                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
-                    out += (add_line + "\n").encode("ascii", "ignore")
+        if isinstance(qty_val, float) and qty_val.is_integer():
+            qty = int(qty_val)
+        else:
+            qty = qty_val
 
+        item_name = it.get("item_name", "")
+        resto_menu = it.get("resto_menu")
+        mandarin_name = mandarin_map.get(resto_menu) or ""
+        print(f"Item: {item_name}, Mandarin: {mandarin_name}")
 
-        # Notes
-        notes = it.get("quick_notes", "")
-        if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
-
+        # ===== ITEM UTAMA + MANDARIN =====
+        if mandarin_name:
+            line = f"{qty} x {item_name} ({mandarin_name})"
+        else:
+            line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
-            out += (w + "\n").encode("ascii", "ignore")
+            out += (w + "\n").encode("utf-8")
+
+        # ===== ADD ONS =====
+        add_ons_str = it.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, _ = add.rsplit("(", 1)
+                    name = name.strip()
+                else:
+                    name = add
+
+                add_line = f"  {name}"
+                for w in _wrap_text(add_line, LINE_WIDTH):
+                    out += (w + "\n").encode("utf-8")
+
+        # ===== NOTES =====
+        notes = it.get("quick_notes", "")
+        if notes:
+            note_line = f"  # {notes}"
+            for w in _wrap_text(note_line, LINE_WIDTH):
+                out += (w + "\n").encode("utf-8")
+
+        # Spasi antar item
+        out += b"\n"
 
     out += _line("-").encode() + b"\n"
     out += _esc_char_size(0, 0)
@@ -592,8 +637,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         out += _esc_bold(False) + _esc_char_size(0, 0)
 
         # Sub-informasi normal (opsional, 1 baris)
-        if short_name and menu_name and menu_name != short_name:
-            out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
+        # if short_name and menu_name and menu_name != short_name:
+        #     out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
         
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
@@ -825,6 +870,26 @@ def build_escpos_bill(name: str) -> bytes:
 
     # Format waktu cetak
     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+    
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+        }
 
     separator = "-" * LINE_WIDTH
 
@@ -904,32 +969,48 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
-        item_name = item.get("item_name", "")
-        qty = int(item.get("qty", 0))
-        rate = item.get("rate", 0)
-        amount = rate * qty
+        item_name = (item.get("item_name") or "").strip()
+        qty = int(item.get("qty") or 0)
+        rate = float(item.get("rate") or 0)
+        amount = qty * rate
+        resto_menu = item.get("resto_menu")
 
-        # Item utama
-        out += (f"{item_name}\n").encode("ascii", "ignore")
-        line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount).rjust(12)}"
+        mandarin_name = mandarin_map.get(resto_menu) or ""
+
+        # ===== NAMA ITEM =====
+        if mandarin_name:
+            display_name = f"{item_name} ({mandarin_name})"
+        else:
+            display_name = item_name
+
+        out += (display_name + "\n").encode("utf-8")
+
+        # ===== BARIS HARGA =====
+        left_part = f"{qty}x @{format_number(rate)}"
+        right_part = format_number(amount)
+
+        line = left_part.ljust(LINE_WIDTH - 12) + right_part.rjust(12)
         out += (line + "\n").encode("ascii", "ignore")
 
-        # Add-ons
-        add_ons_str = item.get("add_ons", "")
+        # ===== ADD ONS =====
+        add_ons_str = item.get("add_ons") or ""
         if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
             for add in add_ons_list:
                 if "(" in add and ")" in add:
                     name, price = add.rsplit("(", 1)
                     price = price.replace(")", "").strip()
                     name = name.strip()
-                    add_line = f"  {name}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price)).rjust(12)}"
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12) + \
+                            f"{format_number(float(price)).rjust(12)}"
                     out += (add_line + "\n").encode("ascii", "ignore")
+                else:
+                    out += (f"  {add}\n").encode("utf-8")
 
-        # Notes
-        notes = item.get("quick_notes", "")
+        # ===== NOTES =====
+        notes = (item.get("quick_notes") or "").strip()
         if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+            out += (f"  # {notes}\n").encode("utf-8")
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1308,6 +1389,26 @@ def build_escpos_checker(name: str) -> bytes:
 
     # Format waktu cetak
     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+    
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+        }
 
     separator = "-" * LINE_WIDTH
 
@@ -1376,33 +1477,39 @@ def build_escpos_checker(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
-        item_name = item.get("item_name", "")
-        qty = item.get("qty", 1)
+        item_name = (item.get("item_name") or "").strip()
+        qty = item.get("qty") or 1
+        resto_menu = item.get("resto_menu")
+        print("MANDARIN MAP:", mandarin_map)
+        # Ambil dari mandarin_map (SUDAH di-query di atas)
+        mandarin_name = mandarin_map.get(resto_menu) or ""
 
-        left = item_name.strip()
-        right = str(int(qty)) if isinstance(qty, (int, float)) and qty == int(qty) else str(qty)
+        # Format qty
+        if isinstance(qty, (int, float)):
+            qty_str = f"{int(qty)}x"
+        else:
+            qty_str = f"{qty}x"
 
-        space = LINE_WIDTH - len(left) - len(right)
-        if space < 1:
-            space = 1
-        line = f"{left}{' ' * space}{right}"
-        out += (line + "\n").encode("ascii", "ignore")
+        # Gabungkan dalam 1 baris
+        if mandarin_name:
+            full_item_name = f"{item_name} ({mandarin_name})"
+        else:
+            full_item_name = item_name
 
-        add_ons_str = item.get("add_ons", "")
+        line = f"{qty_str.ljust(5)}{full_item_name}"
+        out += (line + "\n").encode("utf-8")
+
+        # ===== ADD ONS =====
+        add_ons_str = item.get("add_ons") or ""
         if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
             for add in add_ons_list:
-                if "(" in add and ")" in add:
-                    name, price = add.rsplit("(", 1)
-                    price = price.replace(")", "").strip()
-                    name = name.strip()
-                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
-                    out += (add_line + "\n").encode("ascii", "ignore")
-    
-        # Notes
-        notes = item.get("quick_notes", "")
+                out += (" " * 7 + add + "\n").encode("utf-8")
+
+        # ===== QUICK NOTES =====
+        notes = (item.get("quick_notes") or "").strip()
         if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+            out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1502,23 +1609,36 @@ def _enqueue_checker_worker(name: str, printer_name: str):
 
 @frappe.whitelist(allow_guest=True)
 def preview_receipt(name: str):
-    """
-    API untuk preview receipt POS tanpa printer
-    """
-    # 1. Cek apakah POS Invoice ada
+
     if not frappe.db.exists("POS Invoice", name):
         return {"error": f"POS Invoice {name} tidak ditemukan"}
 
-    # 2. Build receipt dalam format ESC/POS (bytes)
     receipt_bytes = build_escpos_bill(name)
 
-    # 3. Konversi bytes ke teks agar bisa dibaca
-    # Hilangkan karakter non-printable ESC/POS
-    text = receipt_bytes.decode("ascii", "ignore")
-    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)  # hapus control chars
-    text = re.sub(r'\n\s*\n', '\n', text)  # hapus line kosong ganda
+    text = receipt_bytes.decode("utf-8", "ignore")
 
-    # 4. Kembalikan hasil preview
+    # Hapus control ESC/POS TANPA hapus newline
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
+
+    return {
+        "preview": text,
+        "invoice": name,
+        "timestamp": now_datetime()
+    }
+    
+@frappe.whitelist(allow_guest=True)
+def preview_checker(name: str):
+
+    if not frappe.db.exists("POS Invoice", name):
+        return {"error": f"POS Invoice {name} tidak ditemukan"}
+
+    receipt_bytes = build_escpos_checker(name)
+
+    text = receipt_bytes.decode("utf-8", "ignore")
+
+    # Hapus control ESC/POS TANPA hapus newline
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
+
     return {
         "preview": text,
         "invoice": name,
@@ -1545,7 +1665,7 @@ def preview_kitchen_receipt_simple(invoice_name: str):
     receipt_bytes = build_kitchen_receipt(data, station_name, items, created_by)
 
     # Decode bytes → teks
-    text = receipt_bytes.decode("ascii", "ignore")
+    text = receipt_bytes.decode("utf-8", "ignore")
     text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)
     text = re.sub(r'\n\s*\n', '\n', text)
 
