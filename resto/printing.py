@@ -573,7 +573,7 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
         out += (pad + w + "\n").encode("ascii", "ignore")
     return out
 
-def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "KITCHEN ORDER") -> bytes:
+def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
     """
     entry:
       {
@@ -604,6 +604,24 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
     items   = entry.get("items") or []
+    
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+            if d.custom_mandarin_name
+        }
 
     out = b""
     out += _esc_init()
@@ -611,7 +629,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     # HEADER (tanpa garis/feed di atas)
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"{title_prefix} - {station}\n").encode("ascii", "ignore")
+    out += (f"{station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
     out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
@@ -627,13 +645,18 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         menu_name  = _safe_str(it.get("resto_menu"))
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
-
+        
         title = short_name or menu_name or "-"
+        mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
+        if mandarin_name:
+            display_line = f"{qty_s} x {title} ({mandarin_name})"
+        else:
+            display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
         out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
-        big_line = _fit(f"{qty_s} x {title}", LINE_WIDTH)
-        out += (big_line + "\n").encode("ascii", "ignore")
+        big_line = _fit(display_line, LINE_WIDTH)
+        out += (big_line + "\n").encode("utf-8", "ignore")
         out += _esc_bold(False) + _esc_char_size(0, 0)
 
         # Sub-informasi normal (opsional, 1 baris)
@@ -672,7 +695,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
-def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> dict:
+def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
     """
     payload: dict (single) / list (multi) / str (JSON)
     """
@@ -711,7 +734,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "KITCHEN ORDER") -> 
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
 
-            raw = build_kitchen_receipt_from_payload(entry, title_prefix=title_prefix)
+            raw = build_kitchen_receipt_from_payload(entry)
 
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
@@ -913,11 +936,11 @@ def build_escpos_bill(name: str) -> bytes:
     if phone:
         out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
 
-    if company or branch:
-        header_line = f"{company}"
-        if branch:
-            header_line += f" - {branch}"
-        out += (header_line + "\n").encode("ascii", "ignore")
+    # if company or branch:
+    #     header_line = f"{company}"
+    #     if branch:
+    #         header_line += f" - {branch}"
+    #     out += (header_line + "\n").encode("ascii", "ignore")
 
     out += _esc_bold(False)
 
@@ -1650,38 +1673,42 @@ def preview_kitchen_receipt_simple(invoice_name: str):
     """
     Preview kitchen receipt via GET hanya dengan invoice_name.
     """
-    # Ambil data invoice
+
+    import re
+    from frappe.utils import now_datetime
+
+    # ===== VALIDASI =====
     if not frappe.db.exists("POS Invoice", invoice_name):
         return {"error": f"POS Invoice {invoice_name} tidak ditemukan"}
 
-    data = frappe.get_doc("POS Invoice", invoice_name).as_dict()
+    doc = frappe.get_doc("POS Invoice", invoice_name)
 
-    # Ambil items dan user (created_by)
-    items = data.get("items", [])
-    created_by = data.get("owner")  # atau siapa pun yang membuat POS Invoice
-    station_name = data.get("branch") or "Kitchen"
+    # ===== SIAPKAN ENTRY SESUAI FORMAT build_kitchen_receipt_from_payload =====
+    entry = {
+        "kitchen_station": doc.branch or "Kitchen",
+        "pos_invoice": doc.name,
+        "transaction_date": f"{doc.posting_date} {doc.posting_time}",
+        "items": []
+    }
 
-    # Build receipt
-    receipt_bytes = build_kitchen_receipt(data, station_name, items, created_by)
+    for it in doc.items:
+        entry["items"].append({
+            "resto_menu": it.get("resto_menu") or it.get("item_name"),
+            "short_name": it.get("item_name"),
+            "qty": it.get("qty"),
+            "add_ons": it.get("add_ons"),
+            "quick_notes": it.get("quick_notes")
+        })
 
-    # Decode bytes → teks
+    # ===== BUILD RECEIPT (TANPA KITCHEN ORDER) =====
+    receipt_bytes = build_kitchen_receipt_from_payload(entry)
+
+    # ===== CONVERT KE TEXT =====
     text = receipt_bytes.decode("utf-8", "ignore")
-    text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)
-    text = re.sub(r'\n\s*\n', '\n', text)
-
-    # Center header
-    lines = []
-    for line in text.split("\n"):
-        line = line.strip()
-        if line.startswith("KITCHEN ORDER") or line.startswith("Table:"):
-            lines.append(center_line(line))
-        else:
-            lines.append(line)
-
-    preview_text = "\n".join(lines)
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
 
     return {
-        "preview": preview_text,
+        "preview": text.strip(),
         "invoice": invoice_name,
         "timestamp": now_datetime()
     }
