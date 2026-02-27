@@ -641,12 +641,14 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
     for it in items:
         qty_s      = _fmt_qty(it.get("qty") or 0)
+        item_name  = _safe_str(it.get("item_name"))
         short_name = _safe_str(it.get("short_name"))
         menu_name  = _safe_str(it.get("resto_menu"))
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
         
-        title = short_name or menu_name or "-"
+        # title = short_name or menu_name or "-"
+        title = item_name or short_name or menu_name or "-"
         mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
         if mandarin_name:
             display_line = f"{qty_s} x {title} ({mandarin_name})"
