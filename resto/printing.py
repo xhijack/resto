@@ -1,4 +1,3 @@
-# apps/your_app/your_app/pos_receipt.py
 from __future__ import annotations
 import math
 import tempfile
@@ -17,9 +16,48 @@ ITEM_HEIGHT_MULT = 2      # 2 = aman di banyak printer; coba 3 kalau masih kecil
 
 ESC = b"\x1b"
 GS  = b"\x1d"
+FS  = b"\x1c"             # File Separator untuk CJK commands
+
+# ===== KONFIGURASI MULTILINGUAL =====
+ENCODING_UTF8 = True      # Set True untuk support Mandarin/CJK
 
 def _esc_init() -> bytes:
     return ESC + b'@'
+
+def _esc_set_utf8() -> bytes:
+    """
+    Set printer ke UTF-8/CJK mode.
+    Untuk printer Epson TM-series: FS W 1 (enable Kanji mode)
+    Untuk printer lain: mungkin perlu ESC t atau tidak perlu command khusus
+    """
+    if ENCODING_UTF8:
+        # FS W 1 - Enable Kanji/UTF-8 mode (Epson standard)
+        # ESC t 0 - Select code table 0 (PC437) lalu encode UTF-8 manual
+        return FS + b'W' + b'\x01'
+    return b""
+
+def _esc_disable_utf8() -> bytes:
+    """Disable UTF-8/Kanji mode"""
+    return FS + b'W' + b'\x00'
+
+def _encode_text(text: str, encoding: str = 'utf-8') -> bytes:
+    """
+    Encode teks dengan support Mandarin (UTF-8) dan Latin.
+    Fallback ke ascii jika UTF-8 gagal.
+    """
+    if not text:
+        return b"\n"
+    
+    try:
+        # Primary: UTF-8 untuk CJK + Latin
+        return text.encode(encoding)
+    except UnicodeEncodeError:
+        try:
+            # Secondary: GB18030 untuk CJK (printer China lama)
+            return text.encode('gb18030')
+        except:
+            # Fallback: ASCII dengan ignore
+            return text.encode('ascii', 'ignore')
 
 def _esc_align_left() -> bytes:
     return ESC + b'a' + b'\x00'
@@ -88,27 +126,69 @@ def _fmt_money(val: float, currency: str = "IDR") -> str:
     return prefix + s
 
 def _wrap_text(text: str, width: int) -> List[str]:
+    """
+    Wrap text dengan awareness CJK (karakter CJK dihitung sebagai 2 width)
+    """
+    if not text:
+        return [""]
+    
+    # CJK detection: karakter CJK memiliki width 2 di terminal thermal
+    def char_width(c):
+        code = ord(c)
+        if (0x4E00 <= code <= 0x9FFF) or \
+           (0x3400 <= code <= 0x4DBF) or \
+           (0x20000 <= code <= 0x2A6DF) or \
+           (0xAC00 <= code <= 0xD7AF):  # Korean
+            return 2
+        return 1
+    
     words = text.split()
     if not words:
         return [""]
-    lines, cur = [], ""
+    
+    lines, cur, cur_width = [], "", 0
+    
     for w in words:
-        if len(cur) + (1 if cur else 0) + len(w) <= width:
+        w_width = sum(char_width(c) for c in w)
+        space_width = 1 if cur else 0
+        
+        if cur_width + space_width + w_width <= width:
             cur = (cur + " " + w) if cur else w
+            cur_width += space_width + w_width
         else:
             lines.append(cur)
             cur = w
+            cur_width = w_width
+    
     if cur:
         lines.append(cur)
+    
     return lines
 
 def _fit(text: str, width: int) -> str:
-    """Potong ke 1 baris tepat (no wrap)."""
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return text[:width]
-    return text[: width - 1] + "…"
+    """Potong ke 1 baris tepat (no wrap) dengan CJK awareness."""
+    # CJK width calculation
+    def char_width(c):
+        code = ord(c)
+        if (0x4E00 <= code <= 0x9FFF) or \
+           (0x3400 <= code <= 0x4DBF) or \
+           (0x20000 <= code <= 0x2A6DF):
+            return 2
+        return 1
+    
+    total_width = 0
+    result = []
+    
+    for c in text:
+        w = char_width(c)
+        if total_width + w > width:
+            if width - total_width >= 1:
+                result.append("…")
+            break
+        result.append(c)
+        total_width += w
+    
+    return "".join(result)
 
 def _line(char: str = "-") -> str:
     return char * LINE_WIDTH  # tepat sepanjang kolom
@@ -116,24 +196,53 @@ def _line(char: str = "-") -> str:
 def _format_line(left: str, right: str, width: int = LINE_WIDTH):
     """
     Format satu baris agar teks kiri dan kanan rata sesuai lebar kertas printer.
-    Contoh hasil:
-    'Subtotal:                           50,000'
+    Dengan CJK awareness.
     """
     left = str(left)
     right = str(right)
 
-    # Hitung jumlah spasi di tengah
-    space = width - len(left) - len(right)
+    # Hitung visual width (CJK = 2 chars)
+    def visual_width(s):
+        w = 0
+        for c in s:
+            code = ord(c)
+            if (0x4E00 <= code <= 0x9FFF) or \
+               (0x3400 <= code <= 0x4DBF):
+                w += 2
+            else:
+                w += 1
+        return w
+
+    left_w = visual_width(left)
+    right_w = visual_width(right)
+    
+    space = width - left_w - right_w
     if space < 1:
-        space = 1  # minimal 1 spasi biar gak nabrak
+        space = 1
 
     return f"{left}{' ' * space}{right}"
 
 def _pad_lr(left: str, right: str, width: int) -> str:
-    # Satu baris: left ... right (rata kiri-kanan)
-    space = width - len(left) - len(right)
+    # Satu baris: left ... right (rata kiri-kanan) dengan CJK awareness
+    def visual_width(s):
+        w = 0
+        for c in s:
+            code = ord(c)
+            if (0x4E00 <= code <= 0x9FFF) or \
+               (0x3400 <= code <= 0x4DBF):
+                w += 2
+            else:
+                w += 1
+        return w
+
+    left_w = visual_width(left)
+    right_w = visual_width(right)
+    space = width - left_w - right_w
+    
     if space < 1:
+        # Truncate left jika terlalu panjang
         return (left + " " + right)[0:width]
+    
     return f"{left}{' ' * space}{right}"
 
 def _esc_print_image(image_path):
@@ -379,6 +488,7 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
 
     out = b""
     out += _esc_init()
+    out += _esc_set_utf8()  # ENABLE UTF-8/CJK MODE
     out += _esc_font_a()
     out += _esc_align_left()
     out += _esc_bold(False)
@@ -387,15 +497,15 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
     if data["company"]:
         out += _esc_align_center() + _esc_bold(True)
         for h in _wrap_text(data["company"], LINE_WIDTH):
-            out += (h + "\n").encode("ascii", "ignore")
+            out += _encode_text(h + "\n")
         out += _esc_bold(False)
 
     title = f"POS INVOICE {data['name'] or ''}".strip()
-    out += _esc_align_center() + _esc_bold(True) + (title + "\n").encode("ascii", "ignore") + _esc_bold(False)
+    out += _esc_align_center() + _esc_bold(True) + _encode_text(title + "\n") + _esc_bold(False)
     out += _esc_align_left()
 
     for ln in lines:
-        out += (ln + "\n").encode("ascii", "ignore")
+        out += _encode_text(ln + "\n")
 
     # Tambah QR (opsional)
     if add_qr and qr_data:
@@ -441,26 +551,27 @@ def get_item_printers(item: Dict) -> List[str]:
 def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
     out = b""
     out += _esc_init()
+    out += _esc_set_utf8()  # ENABLE UTF-8/CJK MODE
     out += _esc_font_a()
     out += _esc_char_size(0, 3)
     out += _esc_align_center() + _esc_bold(True)
     # KITCHEN ORDER
-    out += (f"{station_name}\n").encode("ascii", "ignore")
+    out += _encode_text(f"{station_name}\n")
     out += _esc_bold(False) + _esc_align_left()
 
-    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
-    out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
-    out += (f"Petugas: {created_by}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Invoice: {data['name']}\n")
+    out += _encode_text(f"Tanggal: {data['posting_date']} {data['posting_time']}\n")
+    out += _encode_text(f"Petugas: {created_by}\n")
 
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Table: {table_names}\n")
         out += _esc_bold(False)
 
-    out += (f"Purpose : {data['order_type']}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Purpose : {data['order_type']}\n")
 
-    out += _line("-").encode() + b"\n"
+    out += _encode_text(_line("-") + "\n")
     
     # ===== PREPARE MANDARIN MAP =====
     resto_menus = list(set([
@@ -494,7 +605,6 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         item_name = it.get("item_name", "")
         resto_menu = it.get("resto_menu")
         mandarin_name = mandarin_map.get(resto_menu) or ""
-        print(f"Item: {item_name}, Mandarin: {mandarin_name}")
 
         # ===== ITEM UTAMA + MANDARIN =====
         if mandarin_name:
@@ -503,7 +613,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
             line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
-            out += (w + "\n").encode("utf-8")
+            out += _encode_text(w + "\n")
 
         # ===== ADD ONS =====
         add_ons_str = it.get("add_ons", "")
@@ -518,19 +628,19 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
                 add_line = f"  {name}"
                 for w in _wrap_text(add_line, LINE_WIDTH):
-                    out += (w + "\n").encode("utf-8")
+                    out += _encode_text(w + "\n")
 
         # ===== NOTES =====
         notes = it.get("quick_notes", "")
         if notes:
             note_line = f"  # {notes}"
             for w in _wrap_text(note_line, LINE_WIDTH):
-                out += (w + "\n").encode("utf-8")
+                out += _encode_text(w + "\n")
 
         # Spasi antar item
         out += b"\n"
 
-    out += _line("-").encode() + b"\n"
+    out += _encode_text(_line("-") + "\n")
     out += _esc_char_size(0, 0)
     out += _esc_feed(3) + _esc_cut_full()
     return out
@@ -561,7 +671,7 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
-            raw_kitchen = build_kitchen_receipt(data, kprinter, items,created_by=full_name)
+            raw_kitchen = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
             kitchen_job = cups_print_raw(raw_kitchen, kprinter)
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
@@ -584,9 +694,11 @@ def _safe_str(v) -> str:
     return (v or "").strip()
 
 def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
+    """Append text dengan UTF-8 encoding support untuk CJK"""
     pad = " " * indent if indent > 0 else ""
     for w in _wrap_text(text, LINE_WIDTH - indent):
-        out += (pad + w + "\n").encode("ascii", "ignore")
+        line = pad + w
+        out += _encode_text(line + "\n")
     return out
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
@@ -641,18 +753,19 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     out = b""
     out += _esc_init()
+    out += _esc_set_utf8()  # ENABLE UTF-8/CJK MODE
     out += _esc_font_a()
 
     # HEADER (tanpa garis/feed di atas)
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"{station}\n").encode("ascii", "ignore")
+    out += _encode_text(f"{station}\n")
     out += _esc_bold(False) + _esc_align_left()
 
-    out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
-    out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
-    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Invoice : {inv}\n")
+    out += _encode_text(f"Tanggal : {tdate}\n")
+    out += _encode_text(f"Petugas : {full_name}\n")
     
-    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _encode_text(_line("-") + "\n")
 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
     for it in items:
@@ -663,7 +776,6 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
         
-        # title = short_name or menu_name or "-"
         title = item_name or short_name or menu_name or "-"
         mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
         if mandarin_name:
@@ -674,12 +786,10 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         # Besarkan tinggi saja agar tidak pecah kolom
         out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
         big_line = _fit(display_line, LINE_WIDTH)
-        out += (big_line + "\n").encode("utf-8", "ignore")
+        out += _encode_text(big_line + "\n")
         out += _esc_bold(False) + _esc_char_size(0, 0)
 
         # Sub-informasi normal (opsional, 1 baris)
-        # if short_name and menu_name and menu_name != short_name:
-        #     out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
         
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
@@ -690,24 +800,22 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
                     price = price.replace(")", "").strip()
                     name = name.strip()
                     add_line = f"  {name}".ljust(LINE_WIDTH - 12)
-                    out += (add_line + "\n").encode("ascii", "ignore")
+                    out += _encode_text(add_line + "\n")
     
         # Notes
         notes = it.get("quick_notes", "")
         if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+            out += _encode_text(f"  # {notes}\n")
 
         out += b"\n"  # spacer
 
-    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _encode_text(_line("-") + "\n")
 
     # ==== FEED TAMBAHAN sebelum cut supaya tidak "kepotong cepat" ====
-    out += _esc_feed(5)        # atur 4-7 sesuai perilaku printermu
+    out += _esc_feed(5)
 
     # Cut: pilih salah satu—kebanyakan _esc_cut_full() sudah cukup
     out += _esc_cut_full()
-    # Kalau printer mendukung cut-with-feed, ini alternatif yang rapi:
-    # out += _esc_cut_full_with_feed()
 
     return out
 
@@ -860,283 +968,6 @@ def get_cashier_name(pos_invoice_name: str) -> str:
     # fallback: jika tidak ada POS Opening Entry aktif, pakai owner invoice
     owner_user_doc = frappe.get_doc("User", invoice.owner)
     return owner_user_doc.full_name or invoice.owner
-
-# def build_escpos_bill(name: str) -> bytes:
-#     data = _collect_pos_invoice(name)
-
-#     items = data.get("items", [])
-#     payments = data.get("payments", [])
-#     taxes = data.get("taxes", [])
-
-#     company = data.get("company") or ""
-#     order_type = data.get("order_type") or ""
-#     customer = data.get("customer_name") or data.get("customer") or ""
-#     total = data.get("total", 0)
-#     discount = data.get("discount_amount", 0)
-#     tax_total = data.get("total_taxes_and_charges", 0)
-#     grand_total = data.get("grand_total", 0)
-#     paid = data.get("paid_amount", 0)
-#     change = data.get("change_amount", 0)
-#     queue_no = data.get("queue") or ""
-#     branch = data.get("branch") or ""
-#     branch_detail = data.get("branch_detail") or {}
-
-#     address1 = branch_detail.get("address_line1") or ""
-#     address2 = branch_detail.get("address_line2") or ""
-#     city = branch_detail.get("city") or ""
-#     pincode = branch_detail.get("pincode") or ""
-#     phone = branch_detail.get("phone") or ""
-    
-#     # Ambil alamat utama Company
-#     address1 = address2 = city = pincode = phone = ""
-
-#     if company:
-#         addr_links = frappe.get_all(
-#             "Dynamic Link",
-#             filters={"link_doctype": "Company", "link_name": company},
-#             fields=["parent"],
-#             order_by="creation asc"
-#         )
-
-#         if addr_links:
-#             address_doc = frappe.get_doc("Address", addr_links[0].parent)
-#             address1 = address_doc.address_line1 or ""
-#             address2 = address_doc.address_line2 or ""
-#             city = address_doc.city or ""
-#             pincode = address_doc.pincode or ""
-#             phone = address_doc.phone or ""
-
-#     # Hitung total qty semua items
-#     total_qty = sum(int(item.get("qty", 0)) for item in items)
-
-#     # Format waktu cetak
-#     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-    
-#     # ===== PREPARE MANDARIN MAP =====
-#     resto_menus = list(set([
-#         i.get("resto_menu")
-#         for i in items
-#         if i.get("resto_menu")
-#     ]))
-
-#     mandarin_map = {}
-    
-#     if resto_menus:
-#         menu_data = frappe.get_all(
-#             "Resto Menu",
-#             filters={"name": ["in", resto_menus]},
-#             fields=["name", "custom_mandarin_name"]
-#         )
-#         mandarin_map = {
-#             d.name: d.custom_mandarin_name
-#             for d in menu_data
-#         }
-
-#     separator = "-" * LINE_WIDTH
-
-#     out = b""
-#     out += _esc_init()
-#     out += _esc_font_a()
-
-#     # ===== HEADER =====
-#     out += _esc_align_center() + _esc_bold(True)
-
-#     # Nama company + city
-#     company_city_line = f"{company} {city}".strip()
-#     if company_city_line:
-#         out += (company_city_line + "\n").encode("ascii", "ignore")
-
-#     # Alamat lengkap
-#     if address1:
-#         out += (address1 + "\n").encode("ascii", "ignore")
-#     if address2:
-#         out += (address2 + "\n").encode("ascii", "ignore")
-#     if phone:
-#         out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
-
-#     # if company or branch:
-#     #     header_line = f"{company}"
-#     #     if branch:
-#     #         header_line += f" - {branch}"
-#     #     out += (header_line + "\n").encode("ascii", "ignore")
-
-#     out += _esc_bold(False)
-
-#     # Alamat branch
-#     # if address1 or address2 or city or pincode or phone:
-#     #     out += _esc_align_center()
-#     #     if address1:
-#     #         out += (f"{address1}\n").encode("ascii", "ignore")
-#     #     if address2:
-#     #         out += (f"{address2}\n").encode("ascii", "ignore")
-#     #     if city or pincode:
-#     #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-#     #     if phone:
-#     #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
-#     out += _esc_align_left()
-#     out += (separator + "\n").encode("ascii", "ignore")
-
-#     # ===== INFORMASI INVOICE =====
-#     out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-#     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
-
-#     # Nama table
-#     table_names = get_table_names_from_pos_invoice(data["name"])
-#     if table_names:
-#         out += _esc_bold(True)
-#         out += (f"Table: {table_names}\n").encode("ascii", "ignore")
-#         out += _esc_bold(False)
-
-#     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
-#     pax = get_total_pax_from_pos_invoice(data["name"])
-#     if pax:
-#         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
-#         out += _esc_bold(True)
-#         out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
-#         out += _esc_bold(False)
-
-
-#     # Nama kasir
-#     cashier_name = get_cashier_name(data["name"])
-#     out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
-
-#     # Customer
-#     if customer:
-#         out += (f"Customer: {customer}\n").encode("ascii", "ignore")
-
-#     out += (separator + "\n").encode("ascii", "ignore")
-
-#     # ===== ITEMS =====
-#     for item in items:
-#         item_name = (item.get("item_name") or "").strip()
-#         qty = int(item.get("qty") or 0)
-#         rate = float(item.get("rate") or 0)
-#         amount = qty * rate
-#         resto_menu = item.get("resto_menu")
-
-#         mandarin_name = mandarin_map.get(resto_menu) or ""
-
-#         # ===== NAMA ITEM =====
-#         if mandarin_name:
-#             display_name = f"{item_name} ({mandarin_name})"
-#         else:
-#             display_name = item_name
-
-#         out += (display_name + "\n").encode("utf-8")
-
-#         # ===== BARIS HARGA =====
-#         left_part = f"{qty}x @{format_number(rate)}"
-#         right_part = format_number(amount)
-
-#         line = left_part.ljust(LINE_WIDTH - 12) + right_part.rjust(12)
-#         out += (line + "\n").encode("ascii", "ignore")
-
-#         # ===== ADD ONS =====
-#         add_ons_str = item.get("add_ons") or ""
-#         if add_ons_str:
-#             add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
-#             for add in add_ons_list:
-#                 if "(" in add and ")" in add:
-#                     name, price = add.rsplit("(", 1)
-#                     price = price.replace(")", "").strip()
-#                     name = name.strip()
-#                     add_line = f"  {name}".ljust(LINE_WIDTH - 12) + \
-#                             f"{format_number(float(price)).rjust(12)}"
-#                     out += (add_line + "\n").encode("ascii", "ignore")
-#                 else:
-#                     out += (f"  {add}\n").encode("utf-8")
-
-#         # ===== NOTES =====
-#         notes = (item.get("quick_notes") or "").strip()
-#         if notes:
-#             out += (f"  # {notes}\n").encode("utf-8")
-
-#     # ===== TOTAL QTY =====
-#     out += (separator + "\n").encode("ascii", "ignore")
-#     out += (f"{total_qty} items\n").encode("ascii", "ignore")
-
-#     # ===== TOTALS =====
-#     sc_amount = 0
-#     tax_amount = 0
-
-#     for tax in taxes:
-#         tax_name = tax.get("description", "")
-#         amount = tax.get("amount", 0)
-
-#         if "Pendapatan Service" in tax_name:
-#             sc_amount += amount
-#         elif "VAT" in tax_name:
-#             tax_amount += amount
-
-#     # 1️⃣ Print SC dulu
-#     if sc_amount:
-#         out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
-
-#     # 2️⃣ Lalu Subtotal
-#     out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
-
-#     # 3️⃣ Lalu Tax
-#     if tax_amount:
-#         out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
-    
-#     out += (separator + "\n").encode("ascii", "ignore")
-#     out += _esc_bold(True)
-#     out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
-#     out += _esc_bold(False)
-
-
-#     # ===== PAYMENT =====
-#     # for pay in payments:
-#     #     mop = pay.get("mode_of_payment") or "-"
-#     #     amt = pay.get("amount") or 0
-#     #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
-
-#     # if change:
-#     #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
-
-#     # ===== FOOTER =====
-#     out += (separator + "\n").encode("ascii", "ignore")
-#     out += _esc_align_center()
-#     out += b"Terima kasih!\n"
-#     out += b"Selamat menikmati hidangan Anda!\n"
-
-#     # ===== QUEUE NUMBER (Take Away) =====
-#     order_type_value = (order_type or "").lower()
-#     if order_type_value in ["take away", "takeaway"]:
-#         queue_no = data.get("queue") or ""
-#         if queue_no:
-#             out += _esc_feed(2)
-#             out += _esc_align_center()
-#             out += _esc_bold(True)
-#             out += b"Your Queue Number:\n"
-#             out += _esc_bold(False)
-
-#             # --- Font besar + center untuk nomor antrian ---
-#             out += _esc_align_center()          # pastikan tetap di tengah
-#             out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
-#             out += f"{queue_no}\n".encode("ascii", "ignore")
-#             out += b"\x1b!\x00"                 # reset font ke normal
-#             out += _esc_feed(2)
-
-
-#     # Feed bawah + cut
-#     out += _esc_feed(8) + _esc_cut_full()
-#     return out
-
-# def _enqueue_bill_worker(name: str, printer_name: str):
-#     raw = build_escpos_bill(name)
-#     job_id = cups_print_raw(raw, printer_name)
-
-#     frappe.logger("pos_print").info({
-#         "invoice": name,
-#         "printer": printer_name,
-#         "job_id": job_id,
-#         "type": "bill"
-#     })
-
-#     return job_id
 
 def build_escpos_bill(name: str) -> bytes:
     """
@@ -1352,6 +1183,7 @@ def build_escpos_receipt(name: str) -> bytes:
 
     out = b""
     out += _esc_init()
+    out += _esc_set_utf8()  # ENABLE UTF-8/CJK MODE
     out += _esc_font_a()
 
     # ===== HEADER =====
@@ -1359,82 +1191,62 @@ def build_escpos_receipt(name: str) -> bytes:
 
     out += _esc_align_center() + _esc_bold(True)
 
-    # if logo:
-    #     try:
-    #         out += _esc_print_image(logo)  
-    #         out += b"\n"
-    #     except Exception as e:
-    #         frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
-
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
 
     # Nama company + city
     company_city_line = f"{company} {city}".strip()
     if company_city_line:
-        out += (company_city_line + "\n").encode("ascii", "ignore")
+        out += _encode_text(company_city_line + "\n")
 
     # Alamat lengkap
     if address1:
-        out += (address1 + "\n").encode("ascii", "ignore")
+        out += _encode_text(address1 + "\n")
     if address2:
-        out += (address2 + "\n").encode("ascii", "ignore")
+        out += _encode_text(address2 + "\n")
     if phone:
-        out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Tlp. {phone}\n")
 
     if company or branch:
         header_line = f"{company}"
         if branch:
             header_line += f" - {branch}"
-        out += (header_line + "\n").encode("ascii", "ignore")
+        out += _encode_text(header_line + "\n")
 
     out += _esc_bold(False)
 
-    # Alamat branch
-    # if address1 or address2 or city or pincode or phone:
-    #     out += _esc_align_center()
-    #     if address1:
-    #         out += (f"{address1}\n").encode("ascii", "ignore")
-    #     if address2:
-    #         out += (f"{address2}\n").encode("ascii", "ignore")
-    #     if city or pincode:
-    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-    #     if phone:
-    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
     out += _esc_align_left()
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
 
     # ===== INFORMASI INVOICE =====
-    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+    out += _encode_text(f"No : {data['name']}\n")
+    out += _encode_text(f"Date : {print_time}\n")
 
     # Nama table
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Table: {table_names}\n")
         out += _esc_bold(False)
 
-    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Purpose : {order_type}\n")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
         out += _esc_bold(True)
-        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Pax : {pax_int}\n")
         out += _esc_bold(False)
 
 
     # Nama kasir
     cashier_name = get_cashier_name(data["name"])
-    out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Cashier : {cashier_name}\n")
 
     # Customer
     if customer:
-        out += (f"Customer: {customer}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Customer: {customer}\n")
 
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
 
     # ===== ITEMS =====
     for item in items:
@@ -1444,9 +1256,9 @@ def build_escpos_receipt(name: str) -> bytes:
         amount = rate * qty
 
         # Item utama
-        out += (f"{item_name}\n").encode("ascii", "ignore")
+        out += _encode_text(f"{item_name}\n")
         line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount).rjust(12)}"
-        out += (line + "\n").encode("ascii", "ignore")
+        out += _encode_text(line + "\n")
 
         # Add-ons
         add_ons_str = item.get("add_ons", "")
@@ -1458,16 +1270,16 @@ def build_escpos_receipt(name: str) -> bytes:
                     price = price.replace(")", "").strip()
                     name = name.strip()
                     add_line = f"  {name}".ljust(LINE_WIDTH - 12) + f"{format_number(float(price)).rjust(12)}"
-                    out += (add_line + "\n").encode("ascii", "ignore")
+                    out += _encode_text(add_line + "\n")
 
         # Notes
         notes = item.get("quick_notes", "")
         if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+            out += _encode_text(f"  # {notes}\n")
 
     # ===== TOTAL QTY =====
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
+    out += _encode_text(f"{total_qty} items\n")
 
     # ===== TOTALS =====
     sc_amount = 0
@@ -1484,34 +1296,34 @@ def build_escpos_receipt(name: str) -> bytes:
 
     # 1️⃣ Print SC dulu
     if sc_amount:
-        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
+        out += _encode_text(_format_line("Sc:", format_number(sc_amount)) + "\n")
 
     # 2️⃣ Lalu Subtotal
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    out += _encode_text(_format_line("Subtotal:", format_number(total)) + "\n")
 
     # 3️⃣ Lalu Tax
     if tax_amount:
-        out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+        out += _encode_text(_format_line("Tax:", format_number(tax_amount)) + "\n")
     
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
     out += _esc_bold(True)
-    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
+    out += _encode_text(_format_line("Grand Total:", format_number(grand_total)) + "\n")
     out += _esc_bold(False)
     
     # ===== PAYMENT =====
     for pay in payments:
         mop = pay.get("mode_of_payment") or "-"
         amt = pay.get("amount") or 0
-        out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+        out += _encode_text(f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n")
 
     if change:
-        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n")
 
     # ===== FOOTER =====
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
     out += _esc_align_center()
-    out += b"Terima kasih!\n"
-    out += b"Selamat menikmati hidangan Anda!\n"
+    out += _encode_text("Terima kasih!\n")
+    out += _encode_text("Selamat menikmati hidangan Anda!\n")
 
     # ===== QUEUE NUMBER (Take Away) =====
     order_type_value = (order_type or "").lower()
@@ -1521,14 +1333,14 @@ def build_escpos_receipt(name: str) -> bytes:
             out += _esc_feed(2)
             out += _esc_align_center()
             out += _esc_bold(True)
-            out += b"Your Queue Number:\n"
+            out += _encode_text("Your Queue Number:\n")
             out += _esc_bold(False)
 
             # --- Font besar + center untuk nomor antrian ---
-            out += _esc_align_center()          # pastikan tetap di tengah
-            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
-            out += f"{queue_no}\n".encode("ascii", "ignore")
-            out += b"\x1b!\x00"                 # reset font ke normal
+            out += _esc_align_center()
+            out += b"\x1b!\x38"
+            out += _encode_text(f"{queue_no}\n")
+            out += b"\x1b!\x00"
             out += _esc_feed(2)
 
 
@@ -1613,73 +1425,52 @@ def build_escpos_checker(name: str) -> bytes:
 
     out = b""
     out += _esc_init()
+    out += _esc_set_utf8()  # ENABLE UTF-8/CJK MODE
     out += _esc_font_a()
 
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"CHECKER\n").encode("ascii", "ignore")
+    out += _encode_text(f"CHECKER\n")
 
     if company or branch:
         header_line = f"{company}"
         if branch:
             header_line += f" - {branch}"
-        out += (header_line + "\n").encode("ascii", "ignore")
+        out += _encode_text(header_line + "\n")
 
     out += _esc_bold(False)
 
-    # Alamat branch
-    # if address1 or address2 or city or pincode or phone:
-    #     out += _esc_align_center()
-    #     if address1:
-    #         out += (f"{address1}\n").encode("ascii", "ignore")
-    #     if address2:
-    #         out += (f"{address2}\n").encode("ascii", "ignore")
-    #     if city or pincode:
-    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-    #     if phone:
-    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
     out += _esc_align_left()
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
 
     # ===== INFORMASI INVOICE =====
-    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+    out += _encode_text(f"No : {data['name']}\n")
+    out += _encode_text(f"Date : {print_time}\n")
 
     # Nama table
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Table: {table_names}\n")
         out += _esc_bold(False)
 
-    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
-    out += (f"Waiter : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
+    out += _encode_text(f"Purpose : {order_type}\n")
+    out += _encode_text(f"Waiter : {get_waiter_name(data['name'])}\n")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
         out += _esc_bold(True)
-        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+        out += _encode_text(f"Pax : {pax_int}\n")
         out += _esc_bold(False)
 
-
-    # Nama kasir
-    # cashier_name = get_cashier_name(data["name"])
-    # out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
-
-    # Customer
-    # if customer:
-    #     out += (f"Customer: {customer}\n").encode("ascii", "ignore")
-
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += _encode_text(separator + "\n")
 
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
         qty = item.get("qty") or 1
         resto_menu = item.get("resto_menu")
-        print("MANDARIN MAP:", mandarin_map)
+        
         # Ambil dari mandarin_map (SUDAH di-query di atas)
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
@@ -1696,54 +1487,23 @@ def build_escpos_checker(name: str) -> bytes:
             full_item_name = item_name
 
         line = f"{qty_str.ljust(5)}{full_item_name}"
-        out += (line + "\n").encode("utf-8")
+        out += _encode_text(line + "\n")
 
         # ===== ADD ONS =====
         add_ons_str = item.get("add_ons") or ""
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
             for add in add_ons_list:
-                out += (" " * 7 + add + "\n").encode("utf-8")
+                out += _encode_text(" " * 7 + add + "\n")
 
         # ===== QUICK NOTES =====
         notes = (item.get("quick_notes") or "").strip()
         if notes:
-            out += (" " * 7 + f"# {notes}\n").encode("utf-8")
+            out += _encode_text(" " * 7 + f"# {notes}\n")
 
     # ===== TOTAL QTY =====
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += (f"{total_qty} items\n").encode("ascii", "ignore")
-
-    # ===== TOTALS =====
-    # out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
-
-    # Tambahan biaya seperti service charge, pajak, dll
-    # service_charge = next((t["amount"] for t in taxes if "service" in t["description"].lower()), 0)
-    # if service_charge:
-    #     out += (f"{'Service Charge:'.rjust(LINE_WIDTH - 12)}{format_number(service_charge).rjust(12)}\n").encode("ascii", "ignore")
-
-    # if tax_total:
-    #     out += (f"{'Tax:'.rjust(LINE_WIDTH - 12)}{format_number(tax_total).rjust(12)}\n").encode("ascii", "ignore")
-
-    # out += (separator + "\n").encode("ascii", "ignore")
-    # out += _esc_bold(True)
-    # out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
-    # out += _esc_bold(False)
-
-    # ===== PAYMENT =====
-    # for pay in payments:
-    #     mop = pay.get("mode_of_payment") or "-"
-    #     amt = pay.get("amount") or 0
-    #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
-
-    # if change:
-    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
-
-    # ===== FOOTER =====
-    # out += (separator + "\n").encode("ascii", "ignore")
-    # out += _esc_align_center()
-    # out += b"Terima kasih!\n"
-    # out += b"Selamat menikmati hidangan Anda!\n"
+    out += _encode_text(separator + "\n")
+    out += _encode_text(f"{total_qty} items\n")
 
     # ===== QUEUE NUMBER (Take Away) =====
     order_type_value = (order_type or "").lower()
@@ -1753,16 +1513,15 @@ def build_escpos_checker(name: str) -> bytes:
             out += _esc_feed(2)
             out += _esc_align_center()
             out += _esc_bold(True)
-            out += b"Your Queue Number:\n"
+            out += _encode_text("Your Queue Number:\n")
             out += _esc_bold(False)
 
             # --- Font besar + center untuk nomor antrian ---
-            out += _esc_align_center()          # pastikan tetap di tengah
-            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
-            out += f"{queue_no}\n".encode("ascii", "ignore")
-            out += b"\x1b!\x00"                 # reset font ke normal
+            out += _esc_align_center()
+            out += b"\x1b!\x38"
+            out += _encode_text(f"{queue_no}\n")
+            out += b"\x1b!\x00"
             out += _esc_feed(2)
-
 
     # Feed bawah + cut
     out += _esc_feed(8) + _esc_cut_full()
