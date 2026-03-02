@@ -313,7 +313,7 @@ def create_pos_invoice(payload):
         "payments": [],
         "queue": queue,
         "additional_items": [],   # ✅ gunakan fieldname yang sesuai
-        "taxes": taxes,   # ⭐ masukkan auto pajak di sini
+        # "taxes": taxes,   # ⭐ masukkan auto pajak di sini
         "taxes_and_charges": tax_template_name,
         "additional_discount_percentage": additional_discount_percentage,
         "discount_amount": discount_amount,
@@ -332,6 +332,7 @@ def create_pos_invoice(payload):
             "status_kitchen": item.get("status_kitchen"),
             "add_ons": item.get("add_ons"),  # tetap string field di item
             "quick_notes": item.get("quick_notes"),
+            "waiter": item.get("waiter")
         })
 
     # Tambahkan pembayaran

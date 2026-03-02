@@ -330,3 +330,25 @@ def after_migrate():
             "reqd": 1,
             "insert_after": "user"
         }).insert(ignore_permissions=True)
+        
+    if not frappe.db.exists("Custom Field", {"dt": "POS Invoice Item", "fieldname": "waiter"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "waiter",
+            "label": "Waiter",
+            "fieldtype": "Link",
+            "options": "User",
+            "insert_after": "status_kitchen"
+        }).insert(ignore_permissions=True)
+        
+    if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "paid_by"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice",
+            "fieldname": "paid_by",
+            "label": "Paid By",
+            "fieldtype": "Link",
+            "options": "User",
+            "insert_after": "is_return"
+        }).insert(ignore_permissions=True)
