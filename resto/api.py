@@ -1576,3 +1576,14 @@ def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
         "pos_profile": pos_profile,
         "branch": branch
     }
+
+@frappe.whitelist(allow_guest=True)
+def get_company_name():
+    company = frappe.get_all(
+        "Company",
+        fields=["company_name"],
+        limit_page_length=1,
+        order_by="creation asc"
+    )
+
+    return company
