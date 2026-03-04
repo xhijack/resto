@@ -224,7 +224,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "description": it.get("description") or "",
             "add_ons" : it.get("add_ons") or "",
             "quick_notes": it.get("quick_notes") or "",
-            "is_checked": it.get("is_checked") or ""
+            "is_checked": int(it.get("is_checked") or 0)
         })
 
     taxes = []
@@ -1552,7 +1552,11 @@ def _enqueue_receipt_worker(name: str, printer_name: str):
 def build_escpos_checker(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
-    items = [item for item in data.get("items", []) if not item.get("is_checked")]
+    items = [
+        item for item in data.get("items", [])
+        if int(item.get("is_checked") or 0) == 0
+        and item.get("status_kitchen") == "Already Send To Kitchen"
+    ]
     
     if not items:
         frappe.logger("pos_print").info({

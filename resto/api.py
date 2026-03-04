@@ -332,7 +332,8 @@ def create_pos_invoice(payload):
             "status_kitchen": item.get("status_kitchen"),
             "add_ons": item.get("add_ons"),  # tetap string field di item
             "quick_notes": item.get("quick_notes"),
-            "waiter": item.get("waiter")
+            "waiter": item.get("waiter"),
+            "is_checked": item.get("is_checked")
         })
 
     # Tambahkan pembayaran
