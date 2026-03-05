@@ -193,6 +193,21 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
     job_id = conn.printFile(printer_name, tmp_path, "POS_Invoice", {})
     return job_id
 
+def sanitize_kitchen_payload(items):
+    blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
+    clean_items = []
+
+    for it in items:
+        for field in ["add_ons", "quick_notes", "item_name"]:
+            if it.get(field):
+                val = it[field]
+                for b in blacklist:
+                    val = val.replace(b, "").strip()
+                it[field] = val
+        clean_items.append(it)
+
+    return clean_items
+
 # ========== Normalisasi POS Invoice ==========
 def _collect_pos_invoice(name: str) -> Dict[str, Any]:
     """Ambil POS Invoice + items/payments/taxes lewat frappe.get_doc."""
@@ -804,14 +819,13 @@ def format_number(val) -> str:
 
 def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
     tables = frappe.get_all(
-        "Table",
-        filters={
-            "invoice_name": pos_invoice_name
-        },
-        pluck="name"
+        "Table Order",
+        filters={"invoice_name": pos_invoice_name},
+        fields=["parent"],
+        distinct=True
     )
 
-    return ", ".join(tables)
+    return ", ".join([t["parent"] for t in tables])
 
 def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
     table_orders = frappe.get_all(
@@ -1523,11 +1537,11 @@ def _enqueue_receipt_worker(name: str, printer_name: str):
 def build_escpos_checker(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
-    items = [
+    items = sanitize_kitchen_payload([
         item for item in data.get("items", [])
         if int(item.get("is_checked") or 0) == 0
         and item.get("status_kitchen") == "Already Send To Kitchen"
-    ]
+    ])
     
     if not items:
         frappe.logger("pos_print").info({
@@ -1613,7 +1627,7 @@ def build_escpos_checker(name: str) -> bytes:
     out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
-    out += (f"Waiter : {get_waiter_name(data['name'])}").encode("ascii", "ignore")
+    out += (f"Waiter : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
