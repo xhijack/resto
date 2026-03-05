@@ -196,7 +196,7 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
 # ========== Normalisasi POS Invoice ==========
 def _collect_pos_invoice(name: str) -> Dict[str, Any]:
     """Ambil POS Invoice + items/payments/taxes lewat frappe.get_doc."""
-    doc = frappe.get_doc("POS Invoice", name)
+    doc = frappe.get_doc("POS Invoice", name).reload()
 
     currency = doc.get("currency") or "IDR"
     items = []
@@ -224,6 +224,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "description": it.get("description") or "",
             "add_ons" : it.get("add_ons") or "",
             "quick_notes": it.get("quick_notes") or "",
+            "status_kitchen": it.get("status_kitchen") or "",
             "is_checked": int(it.get("is_checked") or 0)
         })
 
@@ -802,14 +803,15 @@ def format_number(val) -> str:
 # function print bill
 
 def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
-    table_orders = frappe.get_all(
-        "Table Order",
-        filters={"invoice_name": pos_invoice_name},
-        fields=["parent"] 
+    tables = frappe.get_all(
+        "Table",
+        filters={
+            "invoice_name": pos_invoice_name
+        },
+        pluck="name"
     )
 
-    table_names = ", ".join([t["parent"] for t in table_orders])
-    return table_names
+    return ", ".join(tables)
 
 def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
     table_orders = frappe.get_all(
@@ -1356,17 +1358,6 @@ def build_escpos_receipt(name: str) -> bytes:
 
     # ===== HEADER =====
     logo = frappe.db.get_value("Company", company, "custom_company_logo") or frappe.db.get_value("Company", company, "company_logo")
-
-    out += _esc_align_center() + _esc_bold(True)
-
-    # if logo:
-    #     try:
-    #         out += _esc_print_image(logo)  
-    #         out += b"\n"
-    #     except Exception as e:
-    #         frappe.log_error(f"❌ Gagal cetak logo company {company}: {str(e)}", "Print Receipt Error")
-
-    # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
 
     # Nama company + city
@@ -1382,27 +1373,7 @@ def build_escpos_receipt(name: str) -> bytes:
     if phone:
         out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
 
-    if company or branch:
-        header_line = f"{company}"
-        if branch:
-            header_line += f" - {branch}"
-        out += (header_line + "\n").encode("ascii", "ignore")
-
     out += _esc_bold(False)
-
-    # Alamat branch
-    # if address1 or address2 or city or pincode or phone:
-    #     out += _esc_align_center()
-    #     if address1:
-    #         out += (f"{address1}\n").encode("ascii", "ignore")
-    #     if address2:
-    #         out += (f"{address2}\n").encode("ascii", "ignore")
-    #     if city or pincode:
-    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-    #     if phone:
-    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
     out += _esc_align_left()
     out += (separator + "\n").encode("ascii", "ignore")
 
@@ -1631,50 +1602,24 @@ def build_escpos_checker(name: str) -> bytes:
 
     out += _esc_bold(False)
 
-    # Alamat branch
-    # if address1 or address2 or city or pincode or phone:
-    #     out += _esc_align_center()
-    #     if address1:
-    #         out += (f"{address1}\n").encode("ascii", "ignore")
-    #     if address2:
-    #         out += (f"{address2}\n").encode("ascii", "ignore")
-    #     if city or pincode:
-    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-    #     if phone:
-    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
     out += _esc_align_left()
     out += (separator + "\n").encode("ascii", "ignore")
-
-    # ===== INFORMASI INVOICE =====
-    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
-
+    
     # Nama table
     table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
 
+    # ===== INFORMASI INVOICE =====
+    # out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+    out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
+    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
-    out += (f"Waiter : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
+    out += (f"Waiter : {get_waiter_name(data['name'])}").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
         out += _esc_bold(True)
-        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+        out += (f"Pax : {pax_int}").encode("ascii", "ignore")
         out += _esc_bold(False)
-
-
-    # Nama kasir
-    # cashier_name = get_cashier_name(data["name"])
-    # out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
-
-    # Customer
-    # if customer:
-    #     out += (f"Customer: {customer}\n").encode("ascii", "ignore")
 
     out += (separator + "\n").encode("ascii", "ignore")
 
@@ -1683,7 +1628,7 @@ def build_escpos_checker(name: str) -> bytes:
         item_name = (item.get("item_name") or "").strip()
         qty = item.get("qty") or 1
         resto_menu = item.get("resto_menu")
-        print("MANDARIN MAP:", mandarin_map)
+        # print("MANDARIN MAP:", mandarin_map)
         # Ambil dari mandarin_map (SUDAH di-query di atas)
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
@@ -1717,37 +1662,6 @@ def build_escpos_checker(name: str) -> bytes:
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
-
-    # ===== TOTALS =====
-    # out += (f"{'Subtotal:'.rjust(LINE_WIDTH - 12)}{format_number(total).rjust(12)}\n").encode("ascii", "ignore")
-
-    # Tambahan biaya seperti service charge, pajak, dll
-    # service_charge = next((t["amount"] for t in taxes if "service" in t["description"].lower()), 0)
-    # if service_charge:
-    #     out += (f"{'Service Charge:'.rjust(LINE_WIDTH - 12)}{format_number(service_charge).rjust(12)}\n").encode("ascii", "ignore")
-
-    # if tax_total:
-    #     out += (f"{'Tax:'.rjust(LINE_WIDTH - 12)}{format_number(tax_total).rjust(12)}\n").encode("ascii", "ignore")
-
-    # out += (separator + "\n").encode("ascii", "ignore")
-    # out += _esc_bold(True)
-    # out += (f"{'Grand Total:'.rjust(LINE_WIDTH - 12)}{format_number(grand_total).rjust(12)}\n").encode("ascii", "ignore")
-    # out += _esc_bold(False)
-
-    # ===== PAYMENT =====
-    # for pay in payments:
-    #     mop = pay.get("mode_of_payment") or "-"
-    #     amt = pay.get("amount") or 0
-    #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
-
-    # if change:
-    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
-
-    # ===== FOOTER =====
-    # out += (separator + "\n").encode("ascii", "ignore")
-    # out += _esc_align_center()
-    # out += b"Terima kasih!\n"
-    # out += b"Selamat menikmati hidangan Anda!\n"
 
     # ===== QUEUE NUMBER (Take Away) =====
     order_type_value = (order_type or "").lower()
