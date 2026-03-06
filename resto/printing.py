@@ -1630,12 +1630,10 @@ def build_escpos_checker(name: str) -> bytes:
     out += (separator + "\n").encode("ascii", "ignore")
     
     # Nama table
-    table_name = get_table_names_from_pos_invoice(data["name"])
-    nomor_order = data["name"]
+    table_name = get_table_names_from_pos_invoice(name)
 
     # ===== INFORMASI INVOICE =====
     # out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"No Order : {nomor_order}\n").encode("ascii", "ignore")
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
     out += (f"Tgl : {print_time}\n").encode("ascii", "ignore")
     out += (f"Tujuan : {order_type}\n").encode("ascii", "ignore")
