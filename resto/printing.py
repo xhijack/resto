@@ -36,7 +36,8 @@ def _esc_font_a() -> bytes:
     return ESC + b'M' + b'\x00'
 
 def _esc_cut_full() -> bytes:
-    return GS + b'V' + b'\x00'
+    # Kombinasi beberapa perintah potong untuk kompatibilitas maksimal
+    return GS + b'V' + b'\x00' + b'\x1B\x69'   # GS V 0 dan ESC i
 
 def _esc_feed(n: int) -> bytes:
     n = max(0, min(n, 255))
@@ -214,8 +215,8 @@ def cups_print_pdf_with_cut(pdf_bytes: bytes, printer_name: str) -> int:
     
     job_id = conn.printFile(printer_name, tmp_path, "Kitchen_Order", options)
 
-    # Kirim perintah potong terpisah
-    cut_cmd = _esc_cut_full()
+    # Kirim perintah potong terpisah (gunakan fungsi yang sudah ditingkatkan)
+    cut_cmd = _esc_cut_full()  # sekarang mengembalikan GS V + ESC i
     with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
         tmp_cut.write(cut_cmd)
         cut_path = tmp_cut.name
@@ -328,7 +329,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "doc": doc,
     }
 
-# ========== KITCHEN PDF GENERATOR - COMPACT & PROPER CUT ==========
+# ========== KITCHEN PDF GENERATOR - UKURAN FONT DIKECILKAN ==========
 class KitchenPDFGenerator:
     """
     Generator PDF untuk Kitchen Receipt - compact dengan proper height calculation.
@@ -396,13 +397,13 @@ class KitchenPDFGenerator:
         x = self.margin_mm * mm
         usable_width_pt = self.usable_width * mm   # lebar berguna dalam points
         
-        # STATION NAME - Center, Bold, Large
-        c.setFont(self.latin_font, 16)
+        # STATION NAME - Center, Bold, Sedang (tidak terlalu besar)
+        c.setFont(self.latin_font, 14)               # dikurangi dari 16
         c.drawCentredString(self.width_mm * mm / 2, y, station)
-        y -= 6 * mm
+        y -= 5 * mm                                   # kurangi jarak
         
-        # INFO - Compact tapi lebih besar
-        c.setFont(self.latin_font, 10)
+        # INFO - Compact tapi lebih kecil dari sebelumnya
+        c.setFont(self.latin_font, 9)                 # dari 10
         info_lines = [
             f"Tbl:{table}",
             f"{date_str}",
@@ -411,12 +412,12 @@ class KitchenPDFGenerator:
         ]
         for line in info_lines:
             c.drawString(x, y, line)
-            y -= 3.5 * mm
+            y -= 3 * mm                                # kurangi spasi
         
         # Separator
         y -= 1 * mm
         c.line(x, y, (self.width_mm - self.margin_mm) * mm, y)
-        y -= 3.5 * mm
+        y -= 3 * mm
         
         # ITEMS
         for item in items:
@@ -426,18 +427,18 @@ class KitchenPDFGenerator:
             addons = item.get('addons', [])
             notes = item.get('notes', '')
             
-            # Qty + Name (Bold, larger, dengan wrapping sederhana)
-            c.setFont(self.latin_font, 14)
+            # Qty + Name (Bold, ukuran 12)
+            c.setFont(self.latin_font, 12)             # dari 14
             main_text = f"{qty}x {name}"
             
             # Wrapping manual jika terlalu panjang
-            if c.stringWidth(main_text, self.latin_font, 14) > usable_width_pt:
+            if c.stringWidth(main_text, self.latin_font, 12) > usable_width_pt:
                 words = main_text.split()
                 line_parts = []
                 current_line = ""
                 for w in words:
                     test_line = (current_line + " " + w).strip()
-                    if c.stringWidth(test_line, self.latin_font, 14) <= usable_width_pt:
+                    if c.stringWidth(test_line, self.latin_font, 12) <= usable_width_pt:
                         current_line = test_line
                     else:
                         if current_line:
@@ -448,32 +449,32 @@ class KitchenPDFGenerator:
                 
                 for part in line_parts:
                     c.drawString(x, y, part)
-                    y -= 4.5 * mm
+                    y -= 4 * mm                         # kurangi sedikit
             else:
                 c.drawString(x, y, main_text)
-                y -= 4.5 * mm
+                y -= 4 * mm
             
-            # Chinese name (if exists)
+            # Chinese name (if exists) - ukuran 12
             if name_cn and self.cjk_font:
-                c.setFont(self.cjk_font, 14)
+                c.setFont(self.cjk_font, 12)            # dari 14
                 c.drawString(x + 2 * mm, y, name_cn)
-                y -= 4.5 * mm
+                y -= 4 * mm
             
-            # Addons
+            # Addons - ukuran 8
             if addons:
-                c.setFont(self.latin_font, 9)
+                c.setFont(self.latin_font, 8)           # dari 9
                 for addon in addons:
                     c.drawString(x + 2 * mm, y, f"+{addon}")
-                    y -= 3 * mm
+                    y -= 2.5 * mm                        # kurangi
             
-            # Notes
+            # Notes - ukuran 8
             if notes:
-                c.setFont(self.latin_font, 9)
+                c.setFont(self.latin_font, 8)
                 c.drawString(x + 2 * mm, y, f"#{notes}")
-                y -= 3 * mm
+                y -= 2.5 * mm
             
             # Spacer between items
-            y -= 2 * mm
+            y -= 1.5 * mm                                # dari 2 mm
         
         # Bottom separator
         c.line(x, y, (self.width_mm - self.margin_mm) * mm, y)
@@ -483,32 +484,36 @@ class KitchenPDFGenerator:
         return buffer.getvalue()
     
     def _calculate_height(self, station, table, date_str, by, order_type, items) -> float:
-        """Calculate exact height in mm (estimasi)"""
+        """Calculate exact height in mm (estimasi disesuaikan dengan font lebih kecil)"""
         height = 4  # Top margin + station
         
-        # Info lines
-        height += 4 * 3.5  # 4 lines * 3.5mm each
+        # Info lines (4 lines * 3mm)
+        height += 4 * 3
         
         # Separators and spacing
         height += 5
         
         # Items
         for item in items:
-            height += 4.5  # Main line
+            height += 4      # Main line (dari 4.5)
             
             if item.get('name_cn'):
-                height += 4.5  # Chinese line
+                height += 4  # Chinese line (dari 4.5)
             
-            height += len(item.get('addons', [])) * 3
+            height += len(item.get('addons', [])) * 2.5  # dari 3
             if item.get('notes'):
-                height += 3
+                height += 2.5                             # dari 3
             
-            height += 2  # Spacer
+            height += 1.5   # Spacer (dari 2)
         
         # Bottom
         height += 3
         
-        return max(height, 50)   # minimal 50mm
+        # Pastikan lebih besar dari lebar (75mm) agar portrait
+        if height <= self.width_mm:
+            height = self.width_mm + 10   # minimal 85mm
+        
+        return max(height, 50)
 
 def build_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
     """Build kitchen PDF dengan Chinese support."""
@@ -780,7 +785,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             }
             job_id = conn.printFile(printer_name, tmp_path, f"K_{station}", options)
 
-            # Kirim perintah potong terpisah
+            # Kirim perintah potong terpisah (gunakan fungsi yang ditingkatkan)
             cut_cmd = _esc_cut_full()
             with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
                 tmp_cut.write(cut_cmd)
