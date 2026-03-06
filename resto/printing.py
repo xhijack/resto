@@ -1634,6 +1634,7 @@ def build_escpos_checker(name: str) -> bytes:
 
     # ===== INFORMASI INVOICE =====
     # out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+    out += (f"No Order : {data["name"]}\n").encode("ascii", "ignore")
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
     out += (f"Tgl : {print_time}\n").encode("ascii", "ignore")
     out += (f"Tujuan : {order_type}\n").encode("ascii", "ignore")
