@@ -441,7 +441,7 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
                 tmp.write(open_drawer_command)
                 tmp_path_drawer = tmp.name
             conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
-            
+
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
@@ -1616,7 +1616,7 @@ def build_escpos_checker(name: str) -> bytes:
 
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"CHECKER\n").encode("ascii", "ignore")
+    out += (f"-CHECKER-\n").encode("ascii", "ignore")
 
     if company or branch:
         header_line = f"{company}"
