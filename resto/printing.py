@@ -1,3 +1,15 @@
+from __future__ import annotations
+import math
+import tempfile
+import frappe
+from typing import List, Dict, Any  # <-- TAMBAHKAN IMPORT INI
+from frappe.utils import now_datetime
+from PIL import Image
+from io import BytesIO
+import requests
+import re
+import os
+
 # ========== Konstanta & Util ==========
 LINE_WIDTH = 32           # ganti ke 42 jika printer 42 kolom
 ITEM_HEIGHT_MULT = 2      # 2 = aman di banyak printer; coba 3 kalau masih kecil
@@ -144,6 +156,20 @@ def _pad_lr(left: str, right: str, width: int) -> str:
     if space < 1:
         return (left + " " + right)[0:width]
     return f"{left}{' ' * space}{right}"
+
+def _contains_cjk(text: str) -> bool:
+    """Cek apakah teks mengandung karakter CJK (Chinese, Japanese, Korean)"""
+    if not text:
+        return False
+    for char in text:
+        code = ord(char)
+        # CJK Unified Ideographs (Chinese characters)
+        if (0x4E00 <= code <= 0x9FFF) or \
+           (0x3400 <= code <= 0x4DBF) or \
+           (0x20000 <= code <= 0x2A6DF) or \
+           (0xF900 <= code <= 0xFAFF):  # CJK Compatibility Ideographs
+            return True
+    return False
 
 def _safe_encode(text: str) -> bytes:
     """
@@ -416,6 +442,246 @@ def _format_receipt_lines(data: Dict[str, Any]) -> List[str]:
 
     return lines
 
+# ========== MULTILINGUAL PDF GENERATOR ==========
+class MultilingualReceiptGenerator:
+    """
+    Generator PDF untuk receipt dengan support Chinese (Mandarin) characters.
+    Menggunakan ReportLab untuk generate PDF yang bisa diprint ke printer thermal.
+    """
+    
+    def __init__(self, page_width_mm=75):
+        self.page_width_mm = page_width_mm
+        self.margin_mm = 3  # margin kiri/kanan dalam mm
+        
+        # Register fonts CJK
+        self.font_paths = {
+            'wqy-zenhei': '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+            'wqy-microhei': '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            'noto-sans-cjk': '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            'noto-sans-cjk-sc': '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+            'dejavu': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            'liberation': '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+        }
+        
+        self.registered_fonts = {}
+        self._register_fonts()
+        
+    def _register_fonts(self):
+        """Register fonts yang tersedia di sistem"""
+        try:
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            
+            for font_name, font_path in self.font_paths.items():
+                if os.path.exists(font_path):
+                    try:
+                        register_name = f"Font_{font_name}"
+                        pdfmetrics.registerFont(TTFont(register_name, font_path))
+                        self.registered_fonts[font_name] = register_name
+                    except Exception as e:
+                        frappe.logger().debug(f"Failed to register font {font_name}: {e}")
+                        
+        except ImportError:
+            frappe.throw("ReportLab tidak terinstall. Install dengan: pip install reportlab")
+    
+    def _get_cjk_font(self):
+        """Get font CJK yang tersedia"""
+        for font_key in ['wqy-zenhei', 'noto-sans-cjk', 'noto-sans-cjk-sc', 'wqy-microhei']:
+            if font_key in self.registered_fonts:
+                return self.registered_fonts[font_key]
+        return None
+    
+    def _get_latin_font(self):
+        """Get font Latin yang tersedia"""
+        for font_key in ['dejavu', 'liberation']:
+            if font_key in self.registered_fonts:
+                return self.registered_fonts[font_key]
+        # Fallback ke default Helvetica jika tidak ada
+        return 'Helvetica'
+    
+    def _contains_cjk(self, text: str) -> bool:
+        """Cek apakah teks mengandung karakter CJK"""
+        if not text:
+            return False
+        for char in text:
+            code = ord(char)
+            if (0x4E00 <= code <= 0x9FFF) or \
+               (0x3400 <= code <= 0x4DBF) or \
+               (0x20000 <= code <= 0x2A6DF):
+                return True
+        return False
+    
+    def create_receipt_pdf(self, content_lines: List[Dict], title: str = "Receipt") -> bytes:
+        """
+        Create PDF receipt dari list of content lines.
+        
+        Args:
+            content_lines: List of dict dengan keys:
+                - text: string content
+                - size: font size (default 9)
+                - bold: boolean
+                - align: 'left', 'center', 'right'
+                - is_cjk: auto-detected if not provided
+        """
+        from reportlab.lib.pagesizes import mm
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.colors import HexColor
+        
+        cjk_font = self._get_cjk_font()
+        latin_font = self._get_latin_font()
+        
+        if not cjk_font:
+            frappe.logger().warning("Font CJK tidak ditemukan, Chinese characters mungkin tidak tampil")
+        
+        # Hitung tinggi yang dibutuhkan
+        total_height_mm = self._calculate_height(content_lines)
+        
+        # Buat PDF
+        page_size = (self.page_width_mm * mm, total_height_mm * mm)
+        
+        buffer = BytesIO()
+        c = canvas.Canvas(buffer, pagesize=page_size)
+        
+        width = self.page_width_mm * mm
+        y_pos = total_height_mm * mm - (3 * mm)  # Start dari atas dengan margin
+        
+        for line in content_lines:
+            text = line.get('text', '')
+            size = line.get('size', 9)
+            bold = line.get('bold', False)
+            align = line.get('align', 'left')
+            is_cjk = line.get('is_cjk', self._contains_cjk(text))
+            
+            # Pilih font
+            if is_cjk and cjk_font:
+                font = cjk_font
+                size = min(size, 11)  # Kurangi size untuk CJK
+            else:
+                font = latin_font
+            
+            c.setFont(font, size)
+            
+            # Hitung posisi X berdasarkan alignment
+            if align == 'center':
+                c.drawCentredString(width / 2, y_pos, text)
+            elif align == 'right':
+                c.drawRightString(width - (self.margin_mm * mm), y_pos, text)
+            else:
+                c.drawString(self.margin_mm * mm, y_pos, text)
+            
+            # Move down
+            line_height = size * 0.35  # mm per point
+            y_pos -= (line_height + 1) * mm
+        
+        c.save()
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    def _calculate_height(self, content_lines: List[Dict]) -> float:
+        """Hitung tinggi total yang dibutuhkan dalam mm"""
+        height = 10  # Margin atas/bawah
+        
+        for line in content_lines:
+            size = line.get('size', 9)
+            is_cjk = line.get('is_cjk', False)
+            text = line.get('text', '')
+            
+            if is_cjk:
+                size = min(size, 11)
+            
+            # Estimasi tinggi per baris
+            line_height = size * 0.35
+            height += line_height + 1
+        
+        return max(height, 50)  # Minimum 50mm
+
+def build_multilingual_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
+    """
+    Build kitchen receipt sebagai PDF dengan support Chinese characters.
+    """
+    generator = MultilingualReceiptGenerator(page_width_mm=75)
+    
+    content_lines = []
+    
+    # Header
+    content_lines.append({'text': station_name, 'size': 14, 'bold': True, 'align': 'center', 'is_cjk': False})
+    content_lines.append({'text': '', 'size': 4})  # Spacer
+    
+    # Info
+    content_lines.append({'text': f"Invoice: {data['name']}", 'size': 9, 'align': 'left'})
+    content_lines.append({'text': f"Tanggal: {data['posting_date']} {data['posting_time']}", 'size': 9})
+    if created_by:
+        content_lines.append({'text': f"Petugas: {created_by}", 'size': 9})
+    
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    if table_names:
+        content_lines.append({'text': f"Table: {table_names}", 'size': 10, 'bold': True})
+    
+    content_lines.append({'text': f"Purpose: {data['order_type']}", 'size': 9})
+    content_lines.append({'text': '-' * 32, 'size': 9})
+    
+    # Mandarin mapping
+    resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
+    
+    # Items
+    for it in items:
+        qty = int(it.get('qty', 0)) if float(it.get('qty', 0)).is_integer() else it.get('qty', 0)
+        item_name = it.get('item_name', '')
+        resto_menu = it.get('resto_menu')
+        mandarin_name = mandarin_map.get(resto_menu, '')
+        
+        # Main item line dengan Chinese
+        if mandarin_name:
+            display_text = f"{qty} x {item_name} ({mandarin_name})"
+            is_cjk = True
+        else:
+            display_text = f"{qty} x {item_name}"
+            is_cjk = False
+        
+        content_lines.append({
+            'text': display_text,
+            'size': 11,
+            'bold': True,
+            'is_cjk': is_cjk
+        })
+        
+        # Add-ons
+        add_ons = it.get('add_ons', '')
+        if add_ons:
+            for add in [a.strip() for a in add_ons.split(',') if a.strip()]:
+                if '(' in add and ')' in add:
+                    name = add.rsplit('(', 1)[0].strip()
+                else:
+                    name = add
+                content_lines.append({
+                    'text': f"  {name}",
+                    'size': 9,
+                    'is_cjk': _contains_cjk(name)
+                })
+        
+        # Notes
+        notes = it.get('quick_notes', '')
+        if notes:
+            content_lines.append({
+                'text': f"  # {notes}",
+                'size': 9,
+                'is_cjk': _contains_cjk(notes)
+            })
+        
+        content_lines.append({'text': '', 'size': 3})  # Spacer antar item
+    
+    content_lines.append({'text': '-' * 32, 'size': 9})
+    
+    return generator.create_receipt_pdf(content_lines, title=f"Kitchen_{station_name}")
+
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
     data = _collect_pos_invoice(name)
@@ -492,101 +758,12 @@ def get_item_printers(item: Dict) -> List[str]:
     return printers
 
 def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
-    out = b""
-    out += _esc_init()
-    out += _esc_font_a()
-    out += _esc_char_size(0, 3)
-    out += _esc_align_center() + _esc_bold(True)
-    # KITCHEN ORDER
-    out += _safe_encode(f"{station_name}\n")
-    out += _esc_bold(False) + _esc_align_left()
-
-    out += _safe_encode(f"Invoice: {data['name']}\n")
-    out += _safe_encode(f"Tanggal: {data['posting_date']} {data['posting_time']}\n")
-    out += _safe_encode(f"Petugas: {created_by}\n")
-
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        out += _esc_bold(True)
-        out += _safe_encode(f"Table: {table_names}\n")
-        out += _esc_bold(False)
-
-    out += _safe_encode(f"Purpose : {data['order_type']}\n")
-
-    out += _line("-").encode() + b"\n"
-    
-    # ===== PREPARE MANDARIN MAP =====
-    resto_menus = list(set([
-        i.get("resto_menu")
-        for i in items
-        if i.get("resto_menu")
-    ]))
-
-    mandarin_map = {}
-
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.custom_mandarin_name
-            for d in menu_data
-            if d.custom_mandarin_name
-        }
-
-    for it in items:
-        qty_val = it.get("qty", 0)
-
-        if isinstance(qty_val, float) and qty_val.is_integer():
-            qty = int(qty_val)
-        else:
-            qty = qty_val
-
-        item_name = it.get("item_name", "")
-        resto_menu = it.get("resto_menu")
-        mandarin_name = mandarin_map.get(resto_menu) or ""
-        print(f"Item: {item_name}, Mandarin: {mandarin_name}")
-
-        # ===== ITEM UTAMA + MANDARIN =====
-        if mandarin_name:
-            line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            line = f"{qty} x {item_name}"
-
-        for w in _wrap_text(line, LINE_WIDTH):
-            out += _safe_encode(w + "\n")
-
-        # ===== ADD ONS =====
-        add_ons_str = it.get("add_ons", "")
-        if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
-            for add in add_ons_list:
-                if "(" in add and ")" in add:
-                    name, _ = add.rsplit("(", 1)
-                    name = name.strip()
-                else:
-                    name = add
-
-                add_line = f"  {name}"
-                for w in _wrap_text(add_line, LINE_WIDTH):
-                    out += _safe_encode(w + "\n")
-
-        # ===== NOTES =====
-        notes = it.get("quick_notes", "")
-        if notes:
-            note_line = f"  # {notes}"
-            for w in _wrap_text(note_line, LINE_WIDTH):
-                out += _safe_encode(w + "\n")
-
-        # Spasi antar item
-        out += b"\n"
-
-    out += _line("-").encode() + b"\n"
-    out += _esc_char_size(0, 0)
-    out += _esc_feed(3) + _esc_cut_full()
-    return out
+    """
+    Build kitchen receipt - sekarang menggunakan PDF untuk support Chinese.
+    """
+    # Gunakan PDF generator untuk support Chinese characters
+    pdf_bytes = build_multilingual_kitchen_pdf(data, station_name, items, created_by)
+    return pdf_bytes
 
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
@@ -614,8 +791,9 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
-            raw_kitchen = build_kitchen_receipt(data, kprinter, items,created_by=full_name)
-            kitchen_job = cups_print_raw(raw_kitchen, kprinter)
+            # Sekarang kitchen receipt adalah PDF, print menggunakan cups_print_pdf
+            raw_kitchen = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
+            kitchen_job = cups_print_pdf(raw_kitchen, kprinter)
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
         frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
@@ -644,41 +822,18 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
     """
-    entry:
-      {
-        "kitchen_station": "HOT KITCHEN",
-        "printer_name": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "transaction_date": "2025-10-10 15:23:00",
-        "items": [
-          {
-            "resto_menu": "Nasi Goreng Spesial",
-            "short_name": "NGS",
-            "qty": 2,
-            "quick_notes": "Tanpa Sambel",
-            "add_ons": "Extra Kerupuk"
-          }
-        ]
-      }
+    Build kitchen receipt dari payload sebagai PDF untuk support Chinese.
     """
     current_user = frappe.session.user
-
-    full_name = frappe.db.get_value(
-        "User",
-        current_user,
-        "full_name"
-    )
+    full_name = frappe.db.get_value("User", current_user, "full_name")
 
     station = _safe_str(entry.get("kitchen_station")) or "-"
-    inv     = _safe_str(entry.get("pos_invoice")) or "-"
-    tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    items   = entry.get("items") or []
+    inv = _safe_str(entry.get("pos_invoice")) or "-"
+    tdate = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    items = entry.get("items") or []
     
-    resto_menus = list(set([
-        i.get("resto_menu")
-        for i in items
-        if i.get("resto_menu")
-    ]))
+    # Mandarin mapping
+    resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
     mandarin_map = {}
     if resto_menus:
         menu_data = frappe.get_all(
@@ -686,85 +841,77 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
             filters={"name": ["in", resto_menus]},
             fields=["name", "custom_mandarin_name"]
         )
-        mandarin_map = {
-            d.name: d.custom_mandarin_name
-            for d in menu_data
-            if d.custom_mandarin_name
-        }
-
-    out = b""
-    out += _esc_init()
-    out += _esc_font_a()
-
-    table_name = get_table_names_from_pos_invoice(inv)
-
-    # HEADER (tanpa garis/feed di atas)
-    out += _esc_align_center() + _esc_bold(True)
-    out += _safe_encode(f"{station}\n")
-    out += _esc_bold(False) + _esc_align_left()
-
-    out += _safe_encode(f"No Meja : {table_name}\n")
-    out += _safe_encode(f"Tanggal : {tdate}\n")
-    out += _safe_encode(f"Petugas : {full_name}\n")
+        mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
     
-    out += _safe_encode(_line("-") + "\n")
-
-    # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
+    # Build content untuk PDF
+    generator = MultilingualReceiptGenerator(page_width_mm=75)
+    content_lines = []
+    
+    # Header
+    content_lines.append({'text': station, 'size': 14, 'bold': True, 'align': 'center'})
+    content_lines.append({'text': '', 'size': 4})
+    
+    table_name = get_table_names_from_pos_invoice(inv)
+    content_lines.append({'text': f"No Meja: {table_name}", 'size': 10})
+    content_lines.append({'text': f"Tanggal: {tdate}", 'size': 9})
+    content_lines.append({'text': f"Petugas: {full_name}", 'size': 9})
+    content_lines.append({'text': '-' * 32, 'size': 9})
+    
+    # Items
     for it in items:
-        qty_s      = _fmt_qty(it.get("qty") or 0)
-        item_name  = _safe_str(it.get("item_name"))
+        qty_s = _fmt_qty(it.get("qty") or 0)
+        item_name = _safe_str(it.get("item_name"))
         short_name = _safe_str(it.get("short_name"))
-        menu_name  = _safe_str(it.get("resto_menu"))
-        add_ons    = _safe_str(it.get("add_ons"))
-        qnotes     = _safe_str(it.get("quick_notes"))
+        menu_name = _safe_str(it.get("resto_menu"))
+        add_ons = _safe_str(it.get("add_ons"))
+        qnotes = _safe_str(it.get("quick_notes"))
         
-        # title = short_name or menu_name or "-"
         title = item_name or short_name or menu_name or "-"
         mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
+        
         if mandarin_name:
             display_line = f"{qty_s} x {title} ({mandarin_name})"
+            is_cjk = True
         else:
             display_line = f"{qty_s} x {title}"
-
-        # Besarkan tinggi saja agar tidak pecah kolom
-        out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
-        big_line = _fit(display_line, LINE_WIDTH)
-        out += _safe_encode(big_line + "\n")
-        out += _esc_bold(False) + _esc_char_size(0, 0)
-
-        # Sub-informasi normal (opsional, 1 baris)
-        # if short_name and menu_name and menu_name != short_name:
-        #     out += _safe_encode(f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n")
+            is_cjk = False
         
+        content_lines.append({
+            'text': display_line,
+            'size': 12,
+            'bold': True,
+            'is_cjk': is_cjk
+        })
+        
+        # Add-ons
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
             for add in add_ons_list:
                 if "(" in add and ")" in add:
-                    name, price = add.rsplit("(", 1)
-                    price = price.replace(")", "").strip()
-                    name = name.strip()
-                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
-                    out += _safe_encode(add_line + "\n")
-    
+                    name = add.rsplit("(", 1)[0].strip()
+                else:
+                    name = add
+                content_lines.append({
+                    'text': f"  {name}",
+                    'size': 9,
+                    'is_cjk': _contains_cjk(name)
+                })
+        
         # Notes
         notes = it.get("quick_notes", "")
         if notes:
-            out += _safe_encode(f"  # {notes}\n")
-
-        out += b"\n"  # spacer
-
-    out += _safe_encode(_line("-") + "\n")
-
-    # ==== FEED TAMBAHAN sebelum cut supaya tidak "kepotong cepat" ====
-    out += _esc_feed(5)        # atur 4-7 sesuai perilaku printermu
-
-    # Cut: pilih salah satu—kebanyakan _esc_cut_full() sudah cukup
-    out += _esc_cut_full()
-    # Kalau printer mendukung cut-with-feed, ini alternatif yang rapi:
-    # out += _esc_cut_full_with_feed()
-
-    return out
+            content_lines.append({
+                'text': f"  # {notes}",
+                'size': 9,
+                'is_cjk': _contains_cjk(notes)
+            })
+        
+        content_lines.append({'text': '', 'size': 3})
+    
+    content_lines.append({'text': '-' * 32, 'size': 9})
+    
+    return generator.create_receipt_pdf(content_lines, title=f"Kitchen_{station}")
 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
@@ -807,14 +954,15 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
             
-            raw = build_kitchen_receipt_from_payload(entry)
+            # Generate PDF
+            pdf_bytes = build_kitchen_receipt_from_payload(entry)
 
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(raw)
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                tmp.write(pdf_bytes)
                 tmp_path = tmp.name
             
-
-            job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
+            # Print PDF
+            job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {})
             results.append({
                 "station": station,
                 "printer": printer_name,
