@@ -6,34 +6,32 @@ import tempfile
 import frappe
 from typing import List, Dict, Any
 from frappe.utils import now_datetime
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 import requests
 import re
 import os
 
 # ========== Konstanta & Util ==========
-LINE_WIDTH = 32           # ganti ke 42 jika printer 42 kolom
-ITEM_HEIGHT_MULT = 2      # 2 = aman di banyak printer; coba 3 kalau masih kecil
-
-# Konstanta untuk CJK width calculation
-CJK_WIDTH = 2  # Karakter CJK dianggap 2 karakter latin
-ASCII_WIDTH = 1
+LINE_WIDTH = 32
+ITEM_HEIGHT_MULT = 2
 
 ESC = b"\x1b"
 GS  = b"\x1d"
 
-# Font paths untuk CJK - sesuaikan dengan sistem Anda
+# Font paths untuk CJK rendering
 CJK_FONT_PATHS = [
     '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
     '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
     '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
     '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
+    '/usr/share/fonts/truetype/arphic/uming.ttc',
 ]
 
 LATIN_FONT_PATHS = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
 ]
 
 def _get_cjk_font_path():
@@ -50,133 +48,122 @@ def _get_latin_font_path():
             return path
     return None
 
-def _get_char_width(char: str) -> int:
-    """Hitung lebar karakter: CJK=2, Latin=1"""
+def _contains_cjk(text: str) -> bool:
+    """Cek apakah teks mengandung karakter CJK"""
+    if not text:
+        return False
+    for char in text:
+        code = ord(char)
+        if (0x4E00 <= code <= 0x9FFF) or \
+           (0x3400 <= code <= 0x4DBF) or \
+           (0x20000 <= code <= 0x2A6DF) or \
+           (0x3000 <= code <= 0x303F):
+            return True
+    return False
+
+def _text_to_escpos_image(text: str, font_size: int = 24, max_width: int = 384) -> bytes:
+    """
+    Convert text (dengan CJK) ke image bitmap untuk ESC/POS printing
+    Lebar 384 pixel = 58mm/80mm thermal printer
+    """
     try:
-        # Cek apakah karakter CJK
-        if '\u4e00' <= char <= '\u9fff' or \
-           '\u3400' <= char <= '\u4dbf' or \
-           '\u3000' <= char <= '\u303f' or \
-           '\uff00' <= char <= '\uffef':
-            return CJK_WIDTH
-        # East Asian Wide characters
-        import unicodedata
-        if unicodedata.east_asian_width(char) in ('F', 'W'):
-            return CJK_WIDTH
-        return ASCII_WIDTH
-    except:
-        return ASCII_WIDTH
-
-def _calculate_display_width(text: str) -> int:
-    """Hitung total lebar display string (CJK=2, Latin=1)"""
-    return sum(_get_char_width(c) for c in text)
-
-def _truncate_to_width(text: str, max_width: int, suffix: str = "...") -> str:
-    """Truncate text berdasarkan display width, bukan len()"""
-    if _calculate_display_width(text) <= max_width:
-        return text
-    
-    current_width = 0
-    result = []
-    for char in text:
-        char_width = _get_char_width(char)
-        if current_width + char_width > max_width - _calculate_display_width(suffix):
-            return "".join(result) + suffix
-        result.append(char)
-        current_width += char_width
-    return "".join(result)
-
-def _wrap_text_cjk(text: str, width: int) -> List[str]:
-    """Wrap text dengan support CJK (karakter CJK = 2 width)"""
-    if not text or not text.strip():
-        return [""]
-    
-    words = []
-    current_word = ""
-    current_width = 0
-    
-    # Split by whitespace tapi pertahankan CJK characters
-    for char in text:
-        if char.isspace():
-            if current_word:
-                words.append((current_word, current_width))
-                current_word = ""
-                current_width = 0
-            words.append((char, _get_char_width(char)))
+        # Cari font
+        font_path = _get_cjk_font_path() or _get_latin_font_path()
+        if not font_path:
+            # Fallback ke default font
+            font = ImageFont.load_default()
         else:
-            char_w = _get_char_width(char)
-            # Jika CJK, treat sebagai word tersendiri
-            if char_w == CJK_WIDTH:
-                if current_word:
-                    words.append((current_word, current_width))
-                words.append((char, char_w))
-                current_word = ""
-                current_width = 0
-            else:
-                current_word += char
-                current_width += char_w
-    
-    if current_word:
-        words.append((current_word, current_width))
-    
-    lines = []
-    current_line = ""
-    current_line_width = 0
-    
-    for word, word_width in words:
-        if word.isspace():
-            # Whitespace: tambahkan jika tidak di awal line
-            if current_line:
-                current_line += word
-                current_line_width += word_width
-        else:
-            # Cek apakah muat
-            space_needed = 1 if current_line and not current_line.endswith(" ") else 0
-            if current_line_width + space_needed + word_width <= width:
-                if space_needed and not current_line.endswith(" "):
-                    current_line += " "
-                    current_line_width += 1
-                current_line += word
-                current_line_width += word_width
-            else:
-                # Line baru
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
-                current_line_width = word_width
-    
-    if current_line:
-        lines.append(current_line)
-    
-    return lines if lines else [""]
+            font = ImageFont.truetype(font_path, font_size)
+        
+        # Buat image sementara untuk ukur text
+        temp_img = Image.new('1', (1, 1), 1)
+        draw = ImageDraw.Draw(temp_img)
+        
+        # Get text size
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # Jika terlalu lebar, wrap atau truncate
+        if text_width > max_width:
+            # Coba dengan font lebih kecil
+            for size in [20, 18, 16]:
+                try:
+                    font = ImageFont.truetype(font_path, size)
+                    bbox = draw.textbbox((0, 0), text, font=font)
+                    text_width = bbox[2] - bbox[0]
+                    text_height = bbox[3] - bbox[1]
+                    if text_width <= max_width:
+                        break
+                except:
+                    continue
+        
+        # Buat image final
+        img_width = max_width
+        img_height = text_height + 4  # Padding
+        
+        image = Image.new('1', (img_width, img_height), 1)  # 1 = white background
+        draw = ImageDraw.Draw(image)
+        
+        # Center text
+        x = (img_width - text_width) // 2
+        y = 2
+        draw.text((x, y), text, font=font, fill=0)  # 0 = black text
+        
+        # Convert ke ESC/POS bitmap
+        return _image_to_escpos_bitmap(image)
+        
+    except Exception as e:
+        frappe.logger("pos_print").error(f"Error converting text to image: {e}")
+        # Fallback: return empty
+        return b""
 
-def _pad_lr_cjk(left: str, right: str, width: int) -> str:
-    """Pad left-right dengan support CJK"""
-    left_width = _calculate_display_width(left)
-    right_width = _calculate_display_width(right)
+def _image_to_escpos_bitmap(image: Image.Image) -> bytes:
+    """Convert PIL Image ke ESC/POS bitmap format"""
+    # Convert ke 1-bit (monochrome)
+    image = image.convert('1')
     
-    space = width - left_width - right_width
-    if space < 1:
-        # Jika terlalu panjang, truncate kiri
-        if left_width > width - right_width - 3:
-            left = _truncate_to_width(left, width - right_width - 3) + "..."
-            left_width = _calculate_display_width(left)
-            space = width - left_width - right_width
-        if space < 1:
-            space = 1
+    width = image.width
+    height = image.height
     
-    return f"{left}{' ' * space}{right}"
-
-def _fit_cjk(text: str, width: int) -> str:
-    """Fit text ke width dengan support CJK"""
-    if _calculate_display_width(text) <= width:
-        return text
-    if width <= 3:
-        return _truncate_to_width(text, width)
-    return _truncate_to_width(text, width, "...")
+    # ESC/POS bitmap: GS v 0 (normal) atau GS 8 L (extended)
+    # Kita gunakan GS v 0 untuk kompatibilitas lebih baik
+    
+    bytes_out = b""
+    
+    # Set line spacing to 0 untuk tight printing
+    bytes_out += ESC + b'3' + b'\x00'
+    
+    width_bytes = (width + 7) // 8
+    
+    for y in range(height):
+        # ESC * m n1 n2 - Print bit-image
+        # m = 0 (8-dot single density), 1 (8-dot double density), 32 (24-dot), 33 (24-dot)
+        # Kita gunakan mode 33 (24-dot double density) untuk kualitas lebih baik
+        line_data = b""
+        for x in range(0, width, 8):
+            byte = 0
+            for bit in range(8):
+                if x + bit < width:
+                    pixel = image.getpixel((x + bit, y))
+                    # PIL 1-bit image: 0 = black, 255 = white
+                    if pixel == 0:
+                        byte |= (1 << (7 - bit))
+            line_data += bytes([byte])
+        
+        # Print raster bit image: GS v 0 xL xH yL yH
+        # atau ESC * m n1 n2 d1...dk
+        bytes_out += ESC + b'*' + b'\x33' + bytes([width_bytes % 256, width_bytes // 256]) + line_data + b'\n'
+    
+    # Reset line spacing
+    bytes_out += ESC + b'2'
+    
+    # Feed sedikit
+    bytes_out += ESC + b'd' + b'\x01'
+    
+    return bytes_out
 
 def _esc_init() -> bytes:
-    # Initialize printer
     return ESC + b'@'
 
 def _esc_align_left() -> bytes:
@@ -231,12 +218,6 @@ def _fmt_money(val: float, currency: str = "IDR") -> str:
     return prefix + s
 
 def _wrap_text(text: str, width: int) -> List[str]:
-    """Legacy wrapper - gunakan _wrap_text_cjk untuk CJK"""
-    # Cek apakah ada karakter CJK
-    if any(_get_char_width(c) == CJK_WIDTH for c in text):
-        return _wrap_text_cjk(text, width)
-    
-    # Fallback ke original logic untuk pure ASCII
     words = text.split()
     if not words:
         return [""]
@@ -252,24 +233,30 @@ def _wrap_text(text: str, width: int) -> List[str]:
     return lines
 
 def _fit(text: str, width: int) -> str:
-    """Potong ke 1 baris tepat (no wrap) - dengan support CJK."""
-    if _calculate_display_width(text) <= width:
+    if len(text) <= width:
         return text
-    return _fit_cjk(text, width)
+    if width <= 1:
+        return text[:width]
+    return text[: width - 1] + "…"
 
 def _line(char: str = "-") -> str:
     return char * LINE_WIDTH
 
 def _format_line(left: str, right: str, width: int = LINE_WIDTH):
-    """Format satu baris dengan support CJK"""
-    return _pad_lr_cjk(str(left), str(right), width)
+    left = str(left)
+    right = str(right)
+    space = width - len(left) - len(right)
+    if space < 1:
+        space = 1
+    return f"{left}{' ' * space}{right}"
 
 def _pad_lr(left: str, right: str, width: int) -> str:
-    """Wrapper untuk backward compatibility"""
-    return _pad_lr_cjk(left, right, width)
+    space = width - len(left) - len(right)
+    if space < 1:
+        return (left + " " + right)[0:width]
+    return f"{left}{' ' * space}{right}"
 
 def _esc_print_image(image_path):
-    """Convert logo ke ESC/POS format (bitmap)"""
     if image_path.startswith("/"):
         image_url = frappe.utils.get_url(image_path)
     else:
@@ -301,7 +288,6 @@ def _esc_print_image(image_path):
     return _esc_align_center() + bytes_out + b"\n"
 
 def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
-    """Print PDF menggunakan CUPS"""
     import cups
     import tempfile
 
@@ -317,37 +303,9 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
     job_id = conn.printFile(printer_name, tmp_path, "POS_Invoice", {})
     return job_id
 
-def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
-    """Print raw ESC/POS bytes menggunakan CUPS"""
-    try:
-        import cups
-        conn = cups.Connection()
-        printers = conn.getPrinters()
-        if printer_name not in printers:
-            raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
-
-        if printer_name == "Kasir":
-            # Kirim perintah buka laci
-            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(open_drawer_command)
-                tmp_path_drawer = tmp.name
-            conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
-            
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(raw_bytes)
-            tmp_path = tmp.name
-
-        job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
-        return job_id
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
-        raise
-
 def sanitize_kitchen_payload(items):
     blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
     clean_items = []
-
     for it in items:
         for field in ["add_ons", "quick_notes", "item_name"]:
             if it.get(field):
@@ -356,142 +314,10 @@ def sanitize_kitchen_payload(items):
                     val = val.replace(b, "").strip()
                 it[field] = val
         clean_items.append(it)
-
     return clean_items
-
-# ========== PDF Builder untuk CJK Support ==========
-def _create_receipt_pdf(content_items, width_mm=75, output_path=None):
-    """
-    Membuat PDF receipt dengan support CJK menggunakan ReportLab
-    Berdasarkan code pertama yang berhasil
-    """
-    try:
-        from reportlab.lib.pagesizes import mm
-        from reportlab.pdfgen import canvas
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.lib.colors import HexColor
-    except ImportError:
-        raise ImportError("Install reportlab: pip install reportlab")
-
-    if output_path is None:
-        output_path = tempfile.mktemp(suffix='.pdf')
-
-    # Register fonts
-    cjk_font_path = _get_cjk_font_path()
-    latin_font_path = _get_latin_font_path()
-    
-    registered_fonts = {}
-    
-    if cjk_font_path:
-        try:
-            pdfmetrics.registerFont(TTFont("CJKFont", cjk_font_path))
-            registered_fonts['cjk'] = "CJKFont"
-            print(f"✓ Registered CJK font: {cjk_font_path}")
-        except Exception as e:
-            print(f"✗ Failed to register CJK font: {e}")
-    
-    if latin_font_path:
-        try:
-            pdfmetrics.registerFont(TTFont("LatinFont", latin_font_path))
-            registered_fonts['latin'] = "LatinFont"
-        except Exception as e:
-            print(f"✗ Failed to register Latin font: {e}")
-    
-    if not registered_fonts:
-        raise Exception("Tidak ada font yang berhasil diregister!")
-
-    # Setup canvas
-    page_width = width_mm * mm
-    # Hitung tinggi dinamis
-    line_height = 4.5 * mm  # Tinggi per baris
-    header_height = 20 * mm
-    footer_height = 15 * mm
-    total_height = header_height + (len(content_items) * line_height) + footer_height
-    page_height = max(total_height, 80 * mm)  # Minimum 80mm
-
-    c = canvas.Canvas(output_path, pagesize=(page_width, page_height))
-    
-    y_position = page_height - 5 * mm  # Margin atas
-    
-    cjk_font = registered_fonts.get('cjk', registered_fonts.get('latin'))
-    latin_font = registered_fonts.get('latin', registered_fonts.get('cjk'))
-    
-    # Header
-    c.setFont(cjk_font, 12)
-    c.setFillColor(HexColor('#000000'))
-    
-    # Cek apakah ada CJK di header
-    header_text = "POS INVOICE"
-    test_font = cjk_font if any('\u4e00' <= ch <= '\u9fff' for ch in header_text) else latin_font
-    c.setFont(test_font, 12)
-    c.drawCentredString(page_width/2, y_position, header_text)
-    y_position -= 6 * mm
-    
-    # Garis pemisah
-    c.line(5*mm, y_position, page_width-5*mm, y_position)
-    y_position -= 4 * mm
-    
-    # Konten
-    for item in content_items:
-        text = item.get('text', '')
-        is_cjk = item.get('is_cjk', False)
-        font_size = item.get('size', 9)
-        bold = item.get('bold', False)
-        align = item.get('align', 'left')
-        
-        # Pilih font
-        if is_cjk or any('\u4e00' <= ch <= '\u9fff' for ch in text):
-            font = cjk_font
-            # Kurangi size untuk CJK agar muat
-            font_size = min(font_size, 10)
-        else:
-            font = latin_font
-            
-        c.setFont(font, font_size)
-        
-        # Alignment
-        if align == 'center':
-            c.drawCentredString(page_width/2, y_position, text)
-        elif align == 'right':
-            c.drawRightString(page_width-5*mm, y_position, text)
-        else:
-            c.drawString(5*mm, y_position, text)
-        
-        y_position -= line_height
-        
-        if y_position < 10 * mm:
-            break
-    
-    # Footer
-    y_position -= 3 * mm
-    c.line(5*mm, y_position, page_width-5*mm, y_position)
-    y_position -= 5 * mm
-    
-    c.setFont(cjk_font, 9)
-    c.drawCentredString(page_width/2, y_position, "谢谢光临！")
-    y_position -= 4 * mm
-    c.setFont(latin_font, 8)
-    c.drawCentredString(page_width/2, y_position, "Thank You!")
-    
-    c.save()
-    return output_path
-
-def _contains_cjk(text):
-    """Cek apakah teks mengandung karakter CJK"""
-    if not text:
-        return False
-    for char in text:
-        code = ord(char)
-        if (0x4E00 <= code <= 0x9FFF) or \
-           (0x3400 <= code <= 0x4DBF) or \
-           (0x20000 <= code <= 0x2A6DF):
-            return True
-    return False
 
 # ========== Normalisasi POS Invoice ==========
 def _collect_pos_invoice(name: str) -> Dict[str, Any]:
-    """Ambil POS Invoice + items/payments/taxes lewat frappe.get_doc."""
     doc = frappe.get_doc("POS Invoice", name).reload()
 
     currency = doc.get("currency") or "IDR"
@@ -499,7 +325,6 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
 
     for it in doc.get("items", []):
         item_code = it.get("item_code")
-
         standard_price = frappe.db.get_value(
             "Item Price",
             {"item_code": item_code, "price_list": "Standard Selling"},
@@ -583,967 +408,217 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "doc": doc,
     }
 
-# ========== Builder PDF untuk Bill dengan CJK ==========
-def build_escpos_bill(name: str) -> bytes:
+# ========== HELPER: Print line dengan CJK support ==========
+def _print_line_with_cjk(out: bytes, text: str, encoding: str = "ascii") -> bytes:
     """
-    Build PDF receipt dengan support CJK (Mandarin, dll)
-    Menggunakan ReportLab seperti code pertama yang berhasil
+    Print satu baris teks. Jika mengandung CJK, convert ke image.
+    Jika tidak, gunakan raw ESC/POS text.
     """
+    if _contains_cjk(text):
+        # Convert ke image bitmap
+        image_bytes = _text_to_escpos_image(text, font_size=22, max_width=384)
+        return out + image_bytes
+    else:
+        # Gunakan text biasa
+        if encoding == "ascii":
+            return out + (text + "\n").encode("ascii", "ignore")
+        else:
+            return out + (text + "\n").encode("utf-8", "ignore")
+
+# ========== Builder ESC/POS dengan CJK Support ==========
+def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
     data = _collect_pos_invoice(name)
-    
-    # Prepare content items untuk PDF builder
-    content_items = []
-    cur = data["currency"]
-    
-    # Header
-    if data["company"]:
-        content_items.append({
-            'text': data["company"],
-            'is_cjk': _contains_cjk(data["company"]),
-            'size': 11,
-            'bold': True,
-            'align': 'center'
-        })
-    
-    # Invoice number
-    content_items.append({
-        'text': f"POS INVOICE {data['name']}",
-        'is_cjk': False,
-        'size': 10,
-        'bold': True,
-        'align': 'center'
-    })
-    
-    # Separator line (simulated with text)
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Date
-    content_items.append({
-        'text': f"Tanggal: {data['posting_date']} {data['posting_time']}",
-        'is_cjk': _contains_cjk(f"Tanggal: {data['posting_date']}"),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Customer
-    if data["customer_name"]:
-        content_items.append({
-            'text': f"Customer: {data['customer_name']}",
-            'is_cjk': _contains_cjk(data["customer_name"]),
-            'size': 9,
-            'align': 'left'
-        })
-    
-    # Table
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        content_items.append({
-            'text': f"Table: {table_names}",
-            'is_cjk': False,
-            'size': 9,
-            'bold': True,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Items dengan Mandarin names
-    resto_menus = list(set([
-        i.get("resto_menu") for i in data.get("items", [])
-        if i.get("resto_menu")
-    ]))
-    
-    mandarin_map = {}
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.get("custom_mandarin_name") 
-            for d in menu_data 
-            if d.get("custom_mandarin_name")
-        }
-    
-    for item in data["items"]:
-        item_name = item.get("item_name", "")
-        qty = int(item.get("qty", 0))
-        amount = float(item.get("amount", 0))
-        resto_menu = item.get("resto_menu")
-        
-        # Tambahkan Mandarin name jika ada
-        mandarin_name = mandarin_map.get(resto_menu, "")
-        if mandarin_name:
-            display_name = f"{item_name} ({mandarin_name})"
-        else:
-            display_name = item_name
-        
-        # Item name (dengan CJK support)
-        content_items.append({
-            'text': display_name,
-            'is_cjk': _contains_cjk(display_name),
-            'size': 9,
-            'align': 'left'
-        })
-        
-        # Qty x Rate = Amount
-        line_text = f"{qty} x {_fmt_money(item.get('rate', 0), cur)}".ljust(20) + \
-                   _fmt_money(amount, cur).rjust(12)
-        content_items.append({
-            'text': line_text,
-            'is_cjk': False,
-            'size': 9,
-            'align': 'left'
-        })
-        
-        # Add-ons
-        add_ons = item.get("add_ons", "")
-        if add_ons:
-            for add in add_ons.split(","):
-                if add.strip():
-                    content_items.append({
-                        'text': f"  + {add.strip()}",
-                        'is_cjk': _contains_cjk(add),
-                        'size': 8,
-                        'align': 'left'
-                    })
-        
-        # Notes
-        notes = item.get("quick_notes", "")
-        if notes:
-            content_items.append({
-                'text': f"  # {notes}",
-                'is_cjk': _contains_cjk(notes),
-                'size': 8,
-                'align': 'left'
-            })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Totals
-    content_items.append({
-        'text': f"Subtotal: {_fmt_money(data['total'], cur)}",
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    if data.get("discount_amount", 0) > 0:
-        content_items.append({
-            'text': f"Diskon: -{_fmt_money(data['discount_amount'], cur)}",
-            'is_cjk': _contains_cjk("Diskon"),
-            'size': 9,
-            'align': 'left'
-        })
-    
-    for tax in data.get("taxes", []):
-        content_items.append({
-            'text': f"{tax['description']}: {_fmt_money(tax['amount'], cur)}",
-            'is_cjk': _contains_cjk(tax['description']),
-            'size': 9,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Grand Total
-    content_items.append({
-        'text': f"Grand Total: {_fmt_money(data.get('rounded_total') or data.get('grand_total', 0), cur)}",
-        'is_cjk': _contains_cjk("Grand Total"),
-        'size': 10,
-        'bold': True,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Payments
-    for pay in data.get("payments", []):
-        content_items.append({
-            'text': f"{pay['mode_of_payment']}: {_fmt_money(pay['amount'], cur)}",
-            'is_cjk': _contains_cjk(pay['mode_of_payment']),
-            'size': 9,
-            'align': 'left'
-        })
-    
-    # Change
-    change = data.get("change_amount", 0)
-    if change:
-        content_items.append({
-            'text': f"Change: {_fmt_money(change, cur)}",
-            'is_cjk': _contains_cjk("Change"),
-            'size': 9,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Queue number untuk Take Away
-    order_type = (data.get("order_type") or "").lower()
-    if order_type in ["take away", "takeaway"] and data.get("queue"):
-        content_items.append({
-            'text': "Your Queue Number:",
-            'is_cjk': False,
-            'size': 10,
-            'bold': True,
-            'align': 'center'
-        })
-        content_items.append({
-            'text': str(data["queue"]),
-            'is_cjk': False,
-            'size': 24,
-            'bold': True,
-            'align': 'center'
-        })
-    
-    # Footer
-    content_items.append({
-        'text': "谢谢光临！",
-        'is_cjk': True,
-        'size': 10,
-        'align': 'center'
-    })
-    content_items.append({
-        'text': "Thank You!",
-        'is_cjk': False,
-        'size': 9,
-        'align': 'center'
-    })
-    
-    # Generate PDF
-    pdf_path = _create_receipt_pdf(content_items, width_mm=75)
-    
-    # Read PDF bytes
-    with open(pdf_path, 'rb') as f:
-        pdf_bytes = f.read()
-    
-    # Cleanup temp file
-    try:
-        os.remove(pdf_path)
-    except:
-        pass
-    
-    return pdf_bytes
-
-def _enqueue_bill_worker(name: str, printer_name: str):
-    pdf = build_escpos_bill(name)
-    job_id = cups_print_pdf(pdf, printer_name)
-
-    frappe.logger("pos_print").info({
-        "invoice": name,
-        "printer": printer_name,
-        "job_id": job_id,
-        "type": "bill"
-    })
-
-    return job_id
-
-# ========== Kitchen Receipt dengan CJK Support ==========
-def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
-    """
-    Build kitchen receipt PDF dengan CJK support
-    """
-    content_items = []
-    
-    # Header
-    content_items.append({
-        'text': station_name,
-        'is_cjk': _contains_cjk(station_name),
-        'size': 14,
-        'bold': True,
-        'align': 'center'
-    })
-    
-    content_items.append({
-        'text': f"Invoice: {data['name']}",
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Tanggal: {data['posting_date']} {data['posting_time']}",
-        'is_cjk': _contains_cjk("Tanggal"),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Petugas: {created_by}",
-        'is_cjk': _contains_cjk(created_by) if created_by else False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Table
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        content_items.append({
-            'text': f"Table: {table_names}",
-            'is_cjk': False,
-            'size': 10,
-            'bold': True,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': f"Purpose: {data['order_type']}",
-        'is_cjk': _contains_cjk(data.get("order_type", "")),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Mandarin mapping
-    resto_menus = list(set([
-        i.get("resto_menu") for i in items if i.get("resto_menu")
-    ]))
-    
-    mandarin_map = {}
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.get("custom_mandarin_name")
-            for d in menu_data if d.get("custom_mandarin_name")
-        }
-    
-    # Items
-    for it in items:
-        qty = int(it.get("qty", 0)) if float(it.get("qty", 0)).is_integer() else it.get("qty", 0)
-        item_name = it.get("item_name", "")
-        resto_menu = it.get("resto_menu")
-        mandarin_name = mandarin_map.get(resto_menu, "")
-        
-        if mandarin_name:
-            display_line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            display_line = f"{qty} x {item_name}"
-        
-        # Item utama - BESAR & BOLD
-        content_items.append({
-            'text': display_line,
-            'is_cjk': _contains_cjk(display_line),
-            'size': 14,  # Besar untuk kitchen
-            'bold': True,
-            'align': 'left'
-        })
-        
-        # Add-ons
-        add_ons = it.get("add_ons", "")
-        if add_ons:
-            for add in add_ons.split(","):
-                if add.strip():
-                    # Parse "Nama (harga)"
-                    add_text = add.strip()
-                    if "(" in add_text and ")" in add_text:
-                        name, _ = add_text.rsplit("(", 1)
-                        add_text = name.strip()
-                    
-                    content_items.append({
-                        'text': f"  + {add_text}",
-                        'is_cjk': _contains_cjk(add_text),
-                        'size': 10,
-                        'align': 'left'
-                    })
-        
-        # Notes
-        notes = it.get("quick_notes", "")
-        if notes:
-            content_items.append({
-                'text': f"  # {notes}",
-                'is_cjk': _contains_cjk(notes),
-                'size': 10,
-                'align': 'left'
-            })
-        
-        # Spacer
-        content_items.append({
-            'text': "",
-            'is_cjk': False,
-            'size': 4,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Generate PDF (80mm untuk kitchen)
-    pdf_path = _create_receipt_pdf(content_items, width_mm=80)
-    
-    with open(pdf_path, 'rb') as f:
-        pdf_bytes = f.read()
-    
-    try:
-        os.remove(pdf_path)
-    except:
-        pass
-    
-    return pdf_bytes
-
-# ========== Checker Receipt dengan CJK ==========
-def build_escpos_checker(name: str) -> bytes:
-    data = _collect_pos_invoice(name)
-
-    items = sanitize_kitchen_payload([
-        item for item in data.get("items", [])
-        if int(item.get("is_checked") or 0) == 0
-        and item.get("status_kitchen") == "Already Send To Kitchen"
-    ])
-    
-    if not items:
-        frappe.logger("pos_print").info({
-            "invoice": name,
-            "message": "Semua item sudah di-print ke checker"
-        })
-        return b""
-
-    content_items = []
-    
-    # Header
-    content_items.append({
-        'text': "CHECKER",
-        'is_cjk': False,
-        'size': 14,
-        'bold': True,
-        'align': 'center'
-    })
-    
-    company = data.get("company", "")
-    branch = data.get("branch", "")
-    if company or branch:
-        header = f"{company}" + (f" - {branch}" if branch else "")
-        content_items.append({
-            'text': header,
-            'is_cjk': _contains_cjk(header),
-            'size': 10,
-            'align': 'center'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Info
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    content_items.append({
-        'text': f"No Meja: {table_names}",
-        'is_cjk': _contains_cjk("No Meja"),
-        'size': 10,
-        'bold': True,
-        'align': 'left'
-    })
-    
-    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-    content_items.append({
-        'text': f"Date: {print_time}",
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Purpose: {data.get('order_type', '')}",
-        'is_cjk': _contains_cjk(data.get("order_type", "")),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Waiter: {get_waiter_name(data['name'])}",
-        'is_cjk': _contains_cjk(get_waiter_name(data['name'])),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    pax = get_total_pax_from_pos_invoice(data["name"])
-    if pax:
-        content_items.append({
-            'text': f"Pax: {int(pax)}",
-            'is_cjk': False,
-            'size': 10,
-            'bold': True,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Mandarin mapping
-    resto_menus = list(set([
-        i.get("resto_menu") for i in items if i.get("resto_menu")
-    ]))
-    
-    mandarin_map = {}
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.get("custom_mandarin_name")
-            for d in menu_data if d.get("custom_mandarin_name")
-        }
-    
-    # Items
-    for item in items:
-        qty = item.get("qty", 0)
-        if isinstance(qty, float) and qty.is_integer():
-            qty = int(qty)
-        
-        item_name = item.get("item_name", "")
-        resto_menu = item.get("resto_menu")
-        mandarin_name = mandarin_map.get(resto_menu, "")
-        
-        if mandarin_name:
-            display_line = f"{qty}x {item_name} ({mandarin_name})"
-        else:
-            display_line = f"{qty}x {item_name}"
-        
-        content_items.append({
-            'text': display_line,
-            'is_cjk': _contains_cjk(display_line),
-            'size': 11,
-            'bold': True,
-            'align': 'left'
-        })
-        
-        # Add-ons
-        add_ons = item.get("add_ons", "")
-        if add_ons:
-            for add in add_ons.split(","):
-                if add.strip():
-                    content_items.append({
-                        'text': f"     {add.strip()}",
-                        'is_cjk': _contains_cjk(add),
-                        'size': 9,
-                        'align': 'left'
-                    })
-        
-        # Notes
-        notes = item.get("quick_notes", "")
-        if notes:
-            content_items.append({
-                'text': f"     # {notes}",
-                'is_cjk': _contains_cjk(notes),
-                'size': 9,
-                'align': 'left'
-            })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Queue number untuk Take Away
-    order_type = (data.get("order_type") or "").lower()
-    if order_type in ["take away", "takeaway"] and data.get("queue"):
-        content_items.append({
-            'text': "Your Queue Number:",
-            'is_cjk': False,
-            'size': 10,
-            'bold': True,
-            'align': 'center'
-        })
-        content_items.append({
-            'text': str(data["queue"]),
-            'is_cjk': False,
-            'size': 20,
-            'bold': True,
-            'align': 'center'
-        })
-    
-    # Generate PDF
-    pdf_path = _create_receipt_pdf(content_items, width_mm=75)
-    
-    with open(pdf_path, 'rb') as f:
-        pdf_bytes = f.read()
-    
-    try:
-        os.remove(pdf_path)
-    except:
-        pass
-    
-    return pdf_bytes
-
-def _enqueue_checker_worker(name: str, printer_name: str):
-    pdf = build_escpos_checker(name)
-
-    if not pdf:
-        frappe.logger("pos_print").info({
-            "invoice": name,
-            "message": "Tidak ada item baru untuk di-print ke checker"
-        })
-        return None
-
-    job_id = cups_print_pdf(pdf, printer_name)
-
-    items_to_update = frappe.db.get_all(
-        "POS Invoice Item",
-        filters={"parent": name, "is_checked": 0},
-        pluck="name"
-    )
-
-    if items_to_update:
-        for item_name in items_to_update:
-            frappe.db.set_value("POS Invoice Item", item_name, "is_checked", 1)
-
-        frappe.db.commit()
-        frappe.logger("pos_print").info({
-            "invoice": name,
-            "updated_items": len(items_to_update),
-            "message": "Update is_checked = 1 untuk item yang sudah di-print"
-        })
-
-    frappe.logger("pos_print").info({
-        "invoice": name,
-        "printer": printer_name,
-        "job_id": job_id,
-        "type": "checker"
-    })
-
-    return job_id
-
-# ========== Kitchen Receipt from Payload dengan CJK ==========
-def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
-    current_user = frappe.session.user
-    full_name = frappe.db.get_value("User", current_user, "full_name")
-
-    station = entry.get("kitchen_station", "Kitchen") or "-"
-    inv = entry.get("pos_invoice", "-")
-    tdate = entry.get("transaction_date") or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    items = entry.get("items", [])
-    
-    content_items = []
-    
-    # Header
-    content_items.append({
-        'text': station,
-        'is_cjk': _contains_cjk(station),
-        'size': 16,
-        'bold': True,
-        'align': 'center'
-    })
-    
-    content_items.append({
-        'text': f"Invoice: {inv}",
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Tanggal: {tdate}",
-        'is_cjk': _contains_cjk("Tanggal"),
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': f"Petugas: {full_name}",
-        'is_cjk': _contains_cjk(full_name) if full_name else False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Mandarin mapping
-    resto_menus = list(set([
-        i.get("resto_menu") for i in items if i.get("resto_menu")
-    ]))
-    
-    mandarin_map = {}
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.get("custom_mandarin_name")
-            for d in menu_data if d.get("custom_mandarin_name")
-        }
-    
-    # Items
-    for it in items:
-        qty = it.get("qty", 0)
-        if isinstance(qty, float) and qty.is_integer():
-            qty = int(qty)
-        
-        item_name = it.get("item_name", "") or it.get("short_name", "") or it.get("resto_menu", "-")
-        mandarin_name = mandarin_map.get(it.get("resto_menu"), "")
-        
-        if mandarin_name:
-            display_line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            display_line = f"{qty} x {item_name}"
-        
-        # BESAR untuk kitchen
-        content_items.append({
-            'text': display_line,
-            'is_cjk': _contains_cjk(display_line),
-            'size': 16,  # Besar untuk mudah dibaca kitchen
-            'bold': True,
-            'align': 'left'
-        })
-        
-        # Add-ons
-        add_ons = it.get("add_ons", "")
-        if add_ons:
-            for add in add_ons.split(","):
-                if add.strip():
-                    # Parse harga
-                    add_text = add.strip()
-                    if "(" in add_text and ")" in add_text:
-                        name, _ = add_text.rsplit("(", 1)
-                        add_text = name.strip()
-                    
-                    content_items.append({
-                        'text': f"  {add_text}",
-                        'is_cjk': _contains_cjk(add_text),
-                        'size': 11,
-                        'align': 'left'
-                    })
-        
-        # Notes
-        notes = it.get("quick_notes", "")
-        if notes:
-            content_items.append({
-                'text': f"  # {notes}",
-                'is_cjk': _contains_cjk(notes),
-                'size': 11,
-                'align': 'left'
-            })
-        
-        # Spacer
-        content_items.append({
-            'text': "",
-            'is_cjk': False,
-            'size': 3,
-            'align': 'left'
-        })
-    
-    content_items.append({
-        'text': "-" * 32,
-        'is_cjk': False,
-        'size': 9,
-        'align': 'left'
-    })
-    
-    # Generate PDF (80mm untuk kitchen)
-    pdf_path = _create_receipt_pdf(content_items, width_mm=80)
-    
-    with open(pdf_path, 'rb') as f:
-        pdf_bytes = f.read()
-    
-    try:
-        os.remove(pdf_path)
-    except:
-        pass
-    
-    return pdf_bytes
-
-# ========== Receipt Printer (Raw ESC/POS untuk non-CJK) ==========
-def build_escpos_receipt(name: str) -> bytes:
-    """
-    Fallback ke raw ESC/POS untuk printer yang tidak support PDF
-    TAPI dengan CJK yang di-convert ke image (jika diperlukan)
-    """
-    data = _collect_pos_invoice(name)
-    
-    # Cek apakah ada CJK content
-    has_cjk = any(_contains_cjk(str(v)) for v in [
-        data.get("company", ""),
-        data.get("customer_name", ""),
-    ] + [it.get("item_name", "") for it in data.get("items", [])])
-    
-    # Jika ada CJK, gunakan PDF approach
-    if has_cjk:
-        return build_escpos_bill(name)  # Return PDF bytes
-    
-    # Jika tidak ada CJK, gunakan raw ESC/POS (original logic)
-    items = data.get("items", [])
-    payments = data.get("payments", [])
-    taxes = data.get("taxes", [])
-
-    company = data.get("company") or ""
-    order_type = data.get("order_type") or ""
-    customer = data.get("customer_name") or data.get("customer") or ""
-    total = data.get("total", 0)
-    grand_total = data.get("grand_total", 0)
-    change = data.get("change_amount", 0)
-    
-    separator = "-" * LINE_WIDTH
+    lines = _format_receipt_lines(data)
 
     out = b""
     out += _esc_init()
     out += _esc_font_a()
+    out += _esc_align_left()
+    out += _esc_bold(False)
 
-    # Header
+    # Header bold tengah utk judul toko & nomor invoice
+    if data["company"]:
+        out += _esc_align_center() + _esc_bold(True)
+        for h in _wrap_text(data["company"], LINE_WIDTH):
+            out = _print_line_with_cjk(out, h)
+        out += _esc_bold(False)
+
+    title = f"POS INVOICE {data['name'] or ''}".strip()
     out += _esc_align_center() + _esc_bold(True)
-    if company:
-        out += (company + "\n").encode("ascii", "ignore")
+    out = _print_line_with_cjk(out, title)
     out += _esc_bold(False)
     out += _esc_align_left()
-    out += (separator + "\n").encode("ascii", "ignore")
 
-    # Info
-    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+    for ln in lines:
+        out = _print_line_with_cjk(out, ln)
+
+    # Tambah QR (opsional)
+    if add_qr and qr_data:
+        out += _esc_align_center()
+        out += _esc_qr(qr_data)
+        out += _esc_align_left()
+        out += _esc_feed(1)
+
+    # Feed bawah + cut
+    out += _esc_feed(3) + _esc_cut_full()
+    return out
+
+# ========== CUPS RAW PRINT ==========
+def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
+    try:
+        import cups
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        if printer_name not in printers:
+            raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
+
+        if printer_name == "Kasir":
+            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(open_drawer_command)
+                tmp_path_drawer = tmp.name
+            conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
+            
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = tmp.name
+
+        job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
+        return job_id
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
+        raise
+
+def get_item_printers(item: Dict) -> List[str]:
+    branch_menu = item.get("resto_menu")
+    if not branch_menu:
+        return []
+    doc = frappe.get_doc("Branch Menu", branch_menu)
+    printers = []
+    for ks in doc.get("printers") or []:
+        if ks.get("printer_name"):
+            printers.append(ks["printer_name"])
+    return printers
+
+def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_char_size(0, 3)
+    out += _esc_align_center() + _esc_bold(True)
+    
+    # KITCHEN ORDER - gunakan image jika ada CJK
+    out = _print_line_with_cjk(out, station_name)
+    out += _esc_bold(False) + _esc_align_left()
+
+    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
+    out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
+    out += (f"Petugas: {created_by}\n").encode("ascii", "ignore")
 
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out = _print_line_with_cjk(out, f"Table: {table_names}")
         out += _esc_bold(False)
 
-    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"Purpose : {data['order_type']}\n").encode("ascii", "ignore")
 
-    # Items
-    for item in items:
-        item_name = item.get("item_name", "")
-        qty = int(item.get("qty", 0))
-        rate = item.get("rate", 0)
-        amount = rate * qty
+    out += _line("-").encode() + b"\n"
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
 
-        out += (f"{item_name}\n").encode("ascii", "ignore")
-        line = f"{qty}x @{format_number(rate)}".ljust(LINE_WIDTH - 12) + f"{format_number(amount).rjust(12)}"
-        out += (line + "\n").encode("ascii", "ignore")
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+            if d.custom_mandarin_name
+        }
 
-    # Totals
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_bold(True)
-    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
-    out += _esc_bold(False)
+    for it in items:
+        qty_val = it.get("qty", 0)
+        if isinstance(qty_val, float) and qty_val.is_integer():
+            qty = int(qty_val)
+        else:
+            qty = qty_val
 
-    # Payments
-    for pay in payments:
-        mop = pay.get("mode_of_payment") or "-"
-        amt = pay.get("amount") or 0
-        out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+        item_name = it.get("item_name", "")
+        resto_menu = it.get("resto_menu")
+        mandarin_name = mandarin_map.get(resto_menu) or ""
+        print(f"Item: {item_name}, Mandarin: {mandarin_name}")
 
-    if change:
-        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+        # ===== ITEM UTAMA + MANDARIN =====
+        if mandarin_name:
+            line = f"{qty} x {item_name} ({mandarin_name})"
+        else:
+            line = f"{qty} x {item_name}"
 
-    # Footer
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_align_center()
-    out += b"Thank You!\n"
+        # Gunakan image printing untuk item dengan CJK
+        for w in _wrap_text(line, LINE_WIDTH):
+            out = _print_line_with_cjk(out, w)
 
-    # Queue
-    if (order_type or "").lower() in ["take away", "takeaway"] and data.get("queue"):
-        out += _esc_feed(2)
-        out += _esc_align_center()
-        out += _esc_bold(True)
-        out += b"Queue Number:\n"
-        out += _esc_bold(False)
-        out += b"\x1b!\x38"  # Double size
-        out += f"{data['queue']}\n".encode("ascii", "ignore")
-        out += b"\x1b!\x00"
-        out += _esc_feed(2)
+        # ===== ADD ONS =====
+        add_ons_str = it.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, _ = add.rsplit("(", 1)
+                    name = name.strip()
+                else:
+                    name = add
 
-    out += _esc_feed(8) + _esc_cut_full()
+                add_line = f"  {name}"
+                for w in _wrap_text(add_line, LINE_WIDTH):
+                    out = _print_line_with_cjk(out, w)
+
+        # ===== NOTES =====
+        notes = it.get("quick_notes", "")
+        if notes:
+            note_line = f"  # {notes}"
+            for w in _wrap_text(note_line, LINE_WIDTH):
+                out = _print_line_with_cjk(out, w)
+
+        # Spasi antar item
+        out += b"\n"
+
+    out += _line("-").encode() + b"\n"
+    out += _esc_char_size(0, 0)
+    out += _esc_feed(3) + _esc_cut_full()
     return out
 
-def _enqueue_receipt_worker(name: str, printer_name: str):
-    raw = build_escpos_receipt(name)
-    job_id = cups_print_pdf(raw, printer_name) if raw[:4] == b'%PDF' else cups_print_raw(raw, printer_name)
-
-    frappe.logger("pos_print").info({
-        "invoice": name,
-        "printer": printer_name,
-        "job_id": job_id,
-        "type": "receipt"
-    })
-
-    return job_id
-
-# ========== API Functions ==========
+# ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
 def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
     try:
         data = _collect_pos_invoice(name)
         doc = frappe.get_doc("POS Invoice", name)
-
         full_name = frappe.db.get_value("User", doc.owner, "full_name")
 
         results = []
 
-        # Bill print (PDF dengan CJK support)
-        pdf = build_escpos_bill(name)
-        job_id = cups_print_pdf(pdf, printer_name)
+        raw = build_escpos_from_pos_invoice(name, bool(int(add_qr)), qr_data)
+        job_id = cups_print_raw(raw, printer_name)
         results.append({"printer": printer_name, "job_id": job_id, "type": "bill"})
 
-        # Kitchen prints
         kitchen_groups: Dict[str, List[Dict]] = {}
         for it in data["items"]:
             for printer in get_item_printers(it):
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
-            kitchen_pdf = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
-            kitchen_job = cups_print_pdf(kitchen_pdf, kprinter)
+            raw_kitchen = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
+            kitchen_job = cups_print_raw(raw_kitchen, kprinter)
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
         frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
@@ -1553,6 +628,111 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
         frappe.log_error(frappe.get_traceback(), "POS Invoice Print Error")
         frappe.throw(f"Gagal print invoice {name}: {str(e)}")
 
+# ========== Kitchen: builder dari payload kustom ==========
+def _fmt_qty(val: float | int) -> str:
+    try:
+        f = float(val)
+        return str(int(f)) if f.is_integer() else str(f)
+    except Exception:
+        return str(val)
+
+def _safe_str(v) -> str:
+    return (v or "").strip()
+
+def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
+    pad = " " * indent if indent > 0 else ""
+    for w in _wrap_text(text, LINE_WIDTH - indent):
+        out += (pad + w + "\n").encode("ascii", "ignore")
+    return out
+
+def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
+    current_user = frappe.session.user
+    full_name = frappe.db.get_value("User", current_user, "full_name")
+
+    station = _safe_str(entry.get("kitchen_station")) or "-"
+    inv = _safe_str(entry.get("pos_invoice")) or "-"
+    tdate = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    items = entry.get("items") or []
+    
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+            if d.custom_mandarin_name
+        }
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+
+    # HEADER
+    out += _esc_align_center() + _esc_bold(True)
+    out = _print_line_with_cjk(out, station)
+    out += _esc_bold(False) + _esc_align_left()
+
+    out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
+    out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
+    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+
+    # ITEMS
+    for it in items:
+        qty_s = _fmt_qty(it.get("qty") or 0)
+        item_name = _safe_str(it.get("item_name"))
+        short_name = _safe_str(it.get("short_name"))
+        menu_name = _safe_str(it.get("resto_menu"))
+        add_ons = _safe_str(it.get("add_ons"))
+        qnotes = _safe_str(it.get("quick_notes"))
+        
+        title = item_name or short_name or menu_name or "-"
+        mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
+        if mandarin_name:
+            display_line = f"{qty_s} x {title} ({mandarin_name})"
+        else:
+            display_line = f"{qty_s} x {title}"
+
+        # Besarkan tinggi
+        out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
+        big_line = _fit(display_line, LINE_WIDTH)
+        out = _print_line_with_cjk(out, big_line)
+        out += _esc_bold(False) + _esc_char_size(0, 0)
+        
+        add_ons_str = it.get("add_ons", "")
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    price = price.replace(")", "").strip()
+                    name = name.strip()
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12)
+                    out = _print_line_with_cjk(out, add_line)
+    
+        notes = it.get("quick_notes", "")
+        if notes:
+            out = _print_line_with_cjk(out, f"  # {notes}")
+
+        out += b"\n"
+
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _esc_feed(5)
+    out += _esc_cut_full()
+
+    return out
+
+# ========== API: print kitchen dari payload ==========
 @frappe.whitelist()
 def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
     import json
@@ -1576,8 +756,8 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
 
         results = []
         for entry in entries:
-            station = entry.get("kitchen_station", "")
-            printer_name = entry.get("printer_name", "") or station
+            station = _safe_str(entry.get("kitchen_station"))
+            printer_name = _safe_str(entry.get("printer_name")) or station
             if not station:
                 raise ValueError("Setiap entry wajib memiliki 'kitchen_station'")
             if not printer_name:
@@ -1590,18 +770,18 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
             
-            pdf = build_kitchen_receipt_from_payload(entry)
+            raw = build_kitchen_receipt_from_payload(entry)
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(pdf)
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(raw)
                 tmp_path = tmp.name
 
-            job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {})
+            job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
             results.append({
                 "station": station,
                 "printer": printer_name,
                 "job_id": job_id,
-                "pos_invoice": entry.get("pos_invoice", ""),
+                "pos_invoice": _safe_str(entry.get("pos_invoice")),
             })
 
         frappe.msgprint(f"{len(results)} kitchen ticket dikirim ke printer")
@@ -1611,6 +791,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
         frappe.log_error(frappe.get_traceback(), "Kitchen Print Error (from payload)")
         frappe.throw(f"Gagal print kitchen: {str(e)}")
 
+# ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
 def pos_invoice_print_enqueue(name: str, printer_name: str, add_qr: int = 0, qr_data: str | None = None) -> dict:
     frappe.enqueue(
@@ -1625,8 +806,8 @@ def pos_invoice_print_enqueue(name: str, printer_name: str, add_qr: int = 0, qr_
     return {"queued": True, "name": name, "printer": printer_name}
 
 def _enqueue_worker(name: str, printer_name: str, add_qr: bool, qr_data: str | None):
-    pdf = build_escpos_bill(name)
-    job_id = cups_print_pdf(pdf, printer_name)
+    raw = build_escpos_from_pos_invoice(name, add_qr, qr_data)
+    job_id = cups_print_raw(raw, printer_name)
     frappe.logger("pos_print").info({"invoice": name, "printer": printer_name, "job_id": job_id})
 
 def format_number(val) -> str:
@@ -1687,55 +868,452 @@ def get_cashier_name(pos_invoice_name: str) -> str:
     owner_user_doc = frappe.get_doc("User", invoice.owner)
     return owner_user_doc.full_name or invoice.owner
 
-def get_item_printers(item: Dict) -> List[str]:
-    branch_menu = item.get("resto_menu")
-    if not branch_menu:
-        return []
-    doc = frappe.get_doc("Branch Menu", branch_menu)
-    printers = []
-    for ks in doc.get("printers") or []:
-        if ks.get("printer_name"):
-            printers.append(ks["printer_name"])
-    return printers
+# ========== BILL PRINT dengan CJK ==========
+def build_escpos_bill(name: str) -> bytes:
+    data = _collect_pos_invoice(name)
 
-# ========== Preview Functions ==========
+    items = data.get("items", [])
+    payments = data.get("payments", [])
+    taxes = data.get("taxes", [])
+
+    company = data.get("company") or ""
+    order_type = data.get("order_type") or ""
+    customer = data.get("customer_name") or data.get("customer") or ""
+    total = data.get("total", 0)
+    discount = data.get("discount_amount", 0)
+    tax_total = data.get("total_taxes_and_charges", 0)
+    grand_total = data.get("grand_total", 0)
+    paid = data.get("paid_amount", 0)
+    change = data.get("change_amount", 0)
+    queue_no = data.get("queue") or ""
+    branch = data.get("branch") or ""
+    branch_detail = data.get("branch_detail") or {}
+
+    address1 = branch_detail.get("address_line1") or ""
+    address2 = branch_detail.get("address_line2") or ""
+    city = branch_detail.get("city") or ""
+    pincode = branch_detail.get("pincode") or ""
+    phone = branch_detail.get("phone") or ""
+    
+    # Ambil alamat utama Company
+    address1 = address2 = city = pincode = phone = ""
+
+    if company:
+        addr_links = frappe.get_all(
+            "Dynamic Link",
+            filters={"link_doctype": "Company", "link_name": company},
+            fields=["parent"],
+            order_by="creation asc"
+        )
+
+        if addr_links:
+            address_doc = frappe.get_doc("Address", addr_links[0].parent)
+            address1 = address_doc.address_line1 or ""
+            address2 = address_doc.address_line2 or ""
+            city = address_doc.city or ""
+            pincode = address_doc.pincode or ""
+            phone = address_doc.phone or ""
+
+    total_qty = sum(int(item.get("qty", 0)) for item in items)
+    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+        }
+
+    separator = "-" * LINE_WIDTH
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+
+    # ===== HEADER =====
+    out += _esc_align_center() + _esc_bold(True)
+
+    company_city_line = f"{company} {city}".strip()
+    if company_city_line:
+        out = _print_line_with_cjk(out, company_city_line)
+
+    if address1:
+        out = _print_line_with_cjk(out, address1)
+    if address2:
+        out = _print_line_with_cjk(out, address2)
+    if phone:
+        out = _print_line_with_cjk(out, f"Tlp. {phone}")
+
+    out += _esc_bold(False)
+    out += _esc_align_left()
+    out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== INFORMASI INVOICE =====
+    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    if table_names:
+        out += _esc_bold(True)
+        out = _print_line_with_cjk(out, f"Table: {table_names}")
+        out += _esc_bold(False)
+
+    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(data["name"])
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out = _print_line_with_cjk(out, f"Pax : {pax_int}")
+        out += _esc_bold(False)
+
+    cashier_name = get_cashier_name(data["name"])
+    out = _print_line_with_cjk(out, f"Cashier : {cashier_name}")
+
+    if customer:
+        out = _print_line_with_cjk(out, f"Customer: {customer}")
+
+    out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== ITEMS =====
+    for item in items:
+        item_name = (item.get("item_name") or "").strip()
+        qty = int(item.get("qty") or 0)
+        rate = float(item.get("rate") or 0)
+        amount = qty * rate
+        resto_menu = item.get("resto_menu")
+
+        mandarin_name = mandarin_map.get(resto_menu) or ""
+
+        # ===== NAMA ITEM =====
+        if mandarin_name:
+            display_name = f"{item_name} ({mandarin_name})"
+        else:
+            display_name = item_name
+
+        # Gunakan image printing untuk nama item (karena bisa ada CJK)
+        out = _print_line_with_cjk(out, display_name)
+
+        # ===== BARIS HARGA =====
+        left_part = f"{qty}x @{format_number(rate)}"
+        right_part = format_number(amount)
+        line = left_part.ljust(LINE_WIDTH - 12) + right_part.rjust(12)
+        out += (line + "\n").encode("ascii", "ignore")
+
+        # ===== ADD ONS =====
+        add_ons_str = item.get("add_ons") or ""
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    price = price.replace(")", "").strip()
+                    name = name.strip()
+                    add_line = f"  {name}".ljust(LINE_WIDTH - 12) + format_number(float(price)).rjust(12)
+                    out = _print_line_with_cjk(out, add_line)
+                else:
+                    out = _print_line_with_cjk(out, f"  {add}")
+
+        # ===== NOTES =====
+        notes = (item.get("quick_notes") or "").strip()
+        if notes:
+            out = _print_line_with_cjk(out, f"  # {notes}")
+
+    # ===== TOTAL QTY =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+
+    # ===== TOTALS =====
+    sc_amount = 0
+    tax_amount = 0
+
+    for tax in taxes:
+        tax_name = tax.get("description", "")
+        amount = tax.get("amount", 0)
+
+        if "Pendapatan Service" in tax_name:
+            sc_amount += amount
+        elif "VAT" in tax_name:
+            tax_amount += amount
+
+    if sc_amount:
+        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
+
+    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+
+    if tax_amount:
+        out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+    
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += _esc_bold(True)
+    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
+    out += _esc_bold(False)
+
+    # ===== FOOTER =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += _esc_align_center()
+    out = _print_line_with_cjk(out, "Terima kasih!")
+    out = _print_line_with_cjk(out, "Selamat menikmati hidangan Anda!")
+
+    # ===== QUEUE NUMBER (Take Away) =====
+    order_type_value = (order_type or "").lower()
+    if order_type_value in ["take away", "takeaway"]:
+        queue_no = data.get("queue") or ""
+        if queue_no:
+            out += _esc_feed(2)
+            out += _esc_align_center()
+            out += _esc_bold(True)
+            out = _print_line_with_cjk(out, "Your Queue Number:")
+            out += _esc_bold(False)
+            out += b"\x1b!\x38"
+            out += f"{queue_no}\n".encode("ascii", "ignore")
+            out += b"\x1b!\x00"
+            out += _esc_feed(2)
+
+    out += _esc_feed(8) + _esc_cut_full()
+    return out
+
+def _enqueue_bill_worker(name: str, printer_name: str):
+    raw = build_escpos_bill(name)
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "bill"
+    })
+
+    return job_id
+
+# ========== RECEIPT PRINT ==========
+def build_escpos_receipt(name: str) -> bytes:
+    # Sama dengan bill untuk sekarang, bisa disesuaikan
+    return build_escpos_bill(name)
+
+def _enqueue_receipt_worker(name: str, printer_name: str):
+    raw = build_escpos_receipt(name)
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "receipt"
+    })
+
+    return job_id
+
+# ========== CHECKER PRINT ==========
+def build_escpos_checker(name: str) -> bytes:
+    data = _collect_pos_invoice(name)
+
+    items = sanitize_kitchen_payload([
+        item for item in data.get("items", [])
+        if int(item.get("is_checked") or 0) == 0
+        and item.get("status_kitchen") == "Already Send To Kitchen"
+    ])
+    
+    if not items:
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "message": "Semua item sudah di-print ke checker"
+        })
+        return b""
+
+    payments = data.get("payments", [])
+    taxes = data.get("taxes", [])
+
+    company = data.get("company") or ""
+    order_type = data.get("order_type") or ""
+    customer = data.get("customer_name") or data.get("customer") or ""
+    total = data.get("total", 0)
+    discount = data.get("discount_amount", 0)
+    tax_total = data.get("total_taxes_and_charges", 0)
+    grand_total = data.get("grand_total", 0)
+    paid = data.get("paid_amount", 0)
+    change = data.get("change_amount", 0)
+    queue_no = data.get("queue") or ""
+    branch = data.get("branch") or ""
+    branch_detail = data.get("branch_detail") or {}
+
+    total_qty = sum(int(item.get("qty", 0)) for item in items)
+    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    
+    # ===== PREPARE MANDARIN MAP =====
+    resto_menus = list(set([
+        i.get("resto_menu")
+        for i in items
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {
+            d.name: d.custom_mandarin_name
+            for d in menu_data
+        }
+
+    separator = "-" * LINE_WIDTH
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+
+    # ===== HEADER =====
+    out += _esc_align_center() + _esc_bold(True)
+    out = _print_line_with_cjk(out, "CHECKER")
+
+    if company or branch:
+        header_line = f"{company}"
+        if branch:
+            header_line += f" - {branch}"
+        out = _print_line_with_cjk(out, header_line)
+
+    out += _esc_bold(False)
+    out += _esc_align_left()
+    out += (separator + "\n").encode("ascii", "ignore")
+    
+    table_names = get_table_names_from_pos_invoice(data["name"])
+
+    out = _print_line_with_cjk(out, f"No Meja : {table_names}")
+    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    out = _print_line_with_cjk(out, f"Waiter : {get_waiter_name(data['name'])}")
+    
+    pax = get_total_pax_from_pos_invoice(data["name"])
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out = _print_line_with_cjk(out, f"Pax : {pax_int}")
+        out += _esc_bold(False)
+
+    out += (separator + "\n").encode("ascii", "ignore")
+
+    # ===== ITEMS =====
+    for item in items:
+        item_name = (item.get("item_name") or "").strip()
+        qty = item.get("qty") or 1
+        resto_menu = item.get("resto_menu")
+        mandarin_name = mandarin_map.get(resto_menu) or ""
+
+        if isinstance(qty, (int, float)):
+            qty_str = f"{int(qty)}x"
+        else:
+            qty_str = f"{qty}x"
+
+        if mandarin_name:
+            full_item_name = f"{item_name} ({mandarin_name})"
+        else:
+            full_item_name = item_name
+
+        line = f"{qty_str.ljust(5)}{full_item_name}"
+        out = _print_line_with_cjk(out, line)
+
+        # ===== ADD ONS =====
+        add_ons_str = item.get("add_ons") or ""
+        if add_ons_str:
+            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+            for add in add_ons_list:
+                out = _print_line_with_cjk(out, " " * 7 + add)
+
+        # ===== QUICK NOTES =====
+        notes = (item.get("quick_notes") or "").strip()
+        if notes:
+            out = _print_line_with_cjk(out, " " * 7 + f"# {notes}")
+
+    # ===== TOTAL QTY =====
+    out += (separator + "\n").encode("ascii", "ignore")
+    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+
+    # ===== QUEUE NUMBER (Take Away) =====
+    order_type_value = (order_type or "").lower()
+    if order_type_value in ["take away", "takeaway"]:
+        queue_no = data.get("queue") or ""
+        if queue_no:
+            out += _esc_feed(2)
+            out += _esc_align_center()
+            out += _esc_bold(True)
+            out = _print_line_with_cjk(out, "Your Queue Number:")
+            out += _esc_bold(False)
+            out += b"\x1b!\x38"
+            out += f"{queue_no}\n".encode("ascii", "ignore")
+            out += b"\x1b!\x00"
+            out += _esc_feed(2)
+
+    out += _esc_feed(8) + _esc_cut_full()
+    return out
+
+def _enqueue_checker_worker(name: str, printer_name: str):
+    raw = build_escpos_checker(name)
+
+    if not raw:
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "message": "Tidak ada item baru untuk di-print ke checker"
+        })
+        return None
+
+    job_id = cups_print_raw(raw, printer_name)
+
+    items_to_update = frappe.db.get_all(
+        "POS Invoice Item",
+        filters={"parent": name, "is_checked": 0},
+        pluck="name"
+    )
+
+    if items_to_update:
+        for item_name in items_to_update:
+            frappe.db.set_value("POS Invoice Item", item_name, "is_checked", 1)
+
+        frappe.db.commit()
+        frappe.logger("pos_print").info({
+            "invoice": name,
+            "updated_items": len(items_to_update),
+            "message": "Update is_checked = 1 untuk item yang sudah di-print"
+        })
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "checker"
+    })
+
+    return job_id
+
+# ========== PREVIEW FUNCTIONS ==========
 @frappe.whitelist(allow_guest=True)
 def preview_receipt(name: str):
     if not frappe.db.exists("POS Invoice", name):
         return {"error": f"POS Invoice {name} tidak ditemukan"}
 
-    pdf_bytes = build_escpos_bill(name)
-    
-    # Convert PDF ke text representation untuk preview
-    text = "[PDF Receipt dengan CJK Support]\n\n"
-    
-    # Decode untuk preview (extract text dari PDF tidak mudah, jadi kita buat summary)
-    data = _collect_pos_invoice(name)
-    
-    lines = []
-    lines.append(f"Company: {data.get('company', '')}")
-    lines.append(f"Invoice: {data.get('name', '')}")
-    lines.append(f"Date: {data.get('posting_date', '')} {data.get('posting_time', '')}")
-    lines.append(f"Customer: {data.get('customer_name', '')}")
-    lines.append("-" * 40)
-    
-    for item in data.get("items", []):
-        lines.append(f"{item.get('qty', 0)} x {item.get('item_name', '')}")
-        if item.get("add_ons"):
-            lines.append(f"   + {item.get('add_ons')}")
-        if item.get("quick_notes"):
-            lines.append(f"   # {item.get('quick_notes')}")
-    
-    lines.append("-" * 40)
-    lines.append(f"Total: {data.get('grand_total', 0)}")
-    
-    text += "\n".join(lines)
+    receipt_bytes = build_escpos_bill(name)
+
+    # Untuk preview, kita decode yang bisa saja
+    text = receipt_bytes.decode("utf-8", "ignore")
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
 
     return {
         "preview": text,
         "invoice": name,
-        "timestamp": now_datetime(),
-        "pdf_size": len(pdf_bytes)
+        "timestamp": now_datetime()
     }
     
 @frappe.whitelist(allow_guest=True)
@@ -1743,44 +1321,15 @@ def preview_checker(name: str):
     if not frappe.db.exists("POS Invoice", name):
         return {"error": f"POS Invoice {name} tidak ditemukan"}
 
-    pdf_bytes = build_escpos_checker(name)
-    
-    if not pdf_bytes:
-        return {
-            "preview": "Tidak ada item baru untuk checker",
-            "invoice": name,
-            "timestamp": now_datetime()
-        }
+    receipt_bytes = build_escpos_checker(name)
 
-    text = "[PDF Checker dengan CJK Support]\n\n"
-    
-    data = _collect_pos_invoice(name)
-    lines = []
-    lines.append("CHECKER")
-    lines.append(f"Table: {get_table_names_from_pos_invoice(name)}")
-    lines.append("-" * 40)
-    
-    # Get unchecked items only
-    items = [
-        item for item in data.get("items", [])
-        if int(item.get("is_checked") or 0) == 0
-        and item.get("status_kitchen") == "Already Send To Kitchen"
-    ]
-    
-    for item in items:
-        lines.append(f"{item.get('qty', 0)}x {item.get('item_name', '')}")
-        if item.get("add_ons"):
-            lines.append(f"   {item.get('add_ons')}")
-        if item.get("quick_notes"):
-            lines.append(f"   # {item.get('quick_notes')}")
-    
-    text += "\n".join(lines)
+    text = receipt_bytes.decode("utf-8", "ignore")
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
 
     return {
         "preview": text,
         "invoice": name,
-        "timestamp": now_datetime(),
-        "pdf_size": len(pdf_bytes)
+        "timestamp": now_datetime()
     }
 
 @frappe.whitelist(allow_guest=True)
@@ -1809,23 +1358,13 @@ def preview_kitchen_receipt_simple(invoice_name: str):
             "quick_notes": it.get("quick_notes")
         })
 
-    pdf_bytes = build_kitchen_receipt_from_payload(entry)
+    receipt_bytes = build_kitchen_receipt_from_payload(entry)
 
-    text = "[PDF Kitchen dengan CJK Support]\n\n"
-    text += f"Station: {entry['kitchen_station']}\n"
-    text += f"Invoice: {entry['pos_invoice']}\n"
-    text += "-" * 40 + "\n"
-    
-    for it in entry["items"]:
-        text += f"{it.get('qty', 0)} x {it.get('resto_menu', '')}\n"
-        if it.get("add_ons"):
-            text += f"   + {it.get('add_ons')}\n"
-        if it.get("quick_notes"):
-            text += f"   # {it.get('quick_notes')}\n"
+    text = receipt_bytes.decode("utf-8", "ignore")
+    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
 
     return {
         "preview": text.strip(),
         "invoice": invoice_name,
-        "timestamp": now_datetime(),
-        "pdf_size": len(pdf_bytes)
+        "timestamp": now_datetime()
     }
