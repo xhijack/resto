@@ -473,15 +473,23 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
         return None
 
 @frappe.whitelist()
-def send_to_kitchen(payload):
-    """
-    1. Buat POS Invoice
-    2. Print ke kitchen station (optional — error tidak batalkan invoice)
-    """
-
+def send_to_kitchen(payload, table_name=None):
     try:
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+
         result = create_pos_invoice(payload)
         pos_name = result["name"]
+
+        table_update_result = None
+
+        # ✅ update table dulu sebelum print
+        if table_name:
+            table_update_result = update_table_status(
+                name=table_name,
+                status="Terisi",
+                orders=[{"invoice_name": pos_name}]
+            )
 
         try:
             print_to_ks_now(pos_name)
@@ -493,6 +501,7 @@ def send_to_kitchen(payload):
         return {
             "status": "success",
             "pos_invoice": pos_name,
+            "table_update": table_update_result,
             "message": f"POS Invoice {pos_name} created. {printing_status}"
         }
 
