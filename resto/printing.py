@@ -767,12 +767,17 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("pos_invoice", "")
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
+            
+            if printer_name == "Kasir":
+                open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+                raw = open_drawer_command + raw
 
             raw = build_kitchen_receipt_from_payload(entry)
 
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
+            
 
             job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
             results.append({
