@@ -668,12 +668,14 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += _esc_init()
     out += _esc_font_a()
 
+    table_name = get_table_names_from_pos_invoice(inv)
+
     # HEADER (tanpa garis/feed di atas)
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
-    out += (f"Invoice : {inv}\n").encode("ascii", "ignore")
+    out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
     
