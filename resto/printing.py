@@ -433,6 +433,15 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
         if printer_name not in printers:
             raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
+
+        if printer_name == "Kasir":
+            # Kirim perintah buka laci
+            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(open_drawer_command)
+                tmp_path_drawer = tmp.name
+            conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
+            
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
@@ -768,10 +777,6 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
             
-            if printer_name == "Kasir":
-                open_drawer_command = b'\x1B\x70\x00\x19\xFA'
-                raw = open_drawer_command + raw
-
             raw = build_kitchen_receipt_from_payload(entry)
 
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
