@@ -285,180 +285,205 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "doc": doc,
     }
 
-# ========== COMPACT MULTILINGUAL PDF GENERATOR ==========
-class CompactReceiptGenerator:
+# ========== KITCHEN PDF GENERATOR - PORTRAIT 58MM ==========
+class KitchenReceiptPDF:
     """
-    Generator PDF compact untuk thermal printer dengan minimal margin.
-    Optimized untuk 58mm paper width.
+    Generator PDF untuk Kitchen Receipt - PORTRAIT 58mm x dynamic height
     """
     
-    def __init__(self, page_width_mm=58):
-        self.page_width_mm = page_width_mm
-        self.margin_mm = 1  # Minimal margin 1mm saja untuk compact
+    def __init__(self):
+        self.width_mm = 58  # 58mm thermal paper
+        self.margin_mm = 2  # 2mm margin
+        self.usable_width_mm = self.width_mm - (2 * self.margin_mm)
         
-        self.font_paths = {
-            'wqy-zenhei': '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-            'wqy-microhei': '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-            'noto-sans-cjk': '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-            'noto-sans-cjk-sc': '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',
-            'dejavu': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-            'liberation': '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-        }
-        
-        self.registered_fonts = {}
-        self._register_fonts()
-        
-    def _register_fonts(self):
+        # Register fonts
+        self.cjk_font = None
+        self.latin_font = 'Helvetica'
+        self._setup_fonts()
+    
+    def _setup_fonts(self):
+        """Setup CJK fonts"""
         try:
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont
             
-            for font_name, font_path in self.font_paths.items():
-                if os.path.exists(font_path):
+            font_paths = [
+                '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
+                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+            ]
+            
+            for path in font_paths:
+                if os.path.exists(path):
                     try:
-                        register_name = f"Font_{font_name}"
-                        pdfmetrics.registerFont(TTFont(register_name, font_path))
-                        self.registered_fonts[font_name] = register_name
-                    except Exception as e:
-                        frappe.logger().debug(f"Failed to register font {font_name}: {e}")
+                        pdfmetrics.registerFont(TTFont('CJKFont', path))
+                        self.cjk_font = 'CJKFont'
+                        break
+                    except:
+                        continue
                         
         except ImportError:
-            frappe.throw("ReportLab tidak terinstall. Install dengan: pip install reportlab")
+            pass
     
-    def _get_cjk_font(self):
-        for font_key in ['wqy-zenhei', 'noto-sans-cjk', 'noto-sans-cjk-sc', 'wqy-microhei']:
-            if font_key in self.registered_fonts:
-                return self.registered_fonts[font_key]
-        return None
+    def _get_text_width(self, text: str, font_name: str, font_size: int) -> float:
+        """Estimate text width in mm"""
+        # Rough estimate: 1pt = 0.3528mm
+        # CJK chars ~ 1.5x wider than latin
+        avg_char_width_pt = 0.6 if font_name == self.cjk_font else 0.4
+        return len(text) * avg_char_width_pt * font_size * 0.3528
     
-    def _get_latin_font(self):
-        for font_key in ['dejavu', 'liberation']:
-            if font_key in self.registered_fonts:
-                return self.registered_fonts[font_key]
-        return 'Helvetica'
+    def _wrap_line(self, text: str, max_width_mm: float, font_size: int, is_cjk: bool) -> List[str]:
+        """Wrap text to fit width"""
+        font = self.cjk_font if (is_cjk and self.cjk_font) else self.latin_font
+        
+        words = text.split()
+        lines = []
+        current = ""
+        
+        for word in words:
+            test = current + " " + word if current else word
+            width = self._get_text_width(test, font, font_size)
+            
+            if width <= max_width_mm:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        
+        if current:
+            lines.append(current)
+        
+        return lines if lines else [text]
     
-    def _contains_cjk(self, text: str) -> bool:
-        if not text:
-            return False
-        for char in text:
-            code = ord(char)
-            if (0x4E00 <= code <= 0x9FFF) or \
-               (0x3400 <= code <= 0x4DBF) or \
-               (0x20000 <= code <= 0x2A6DF):
-                return True
-        return False
-    
-    def _estimate_lines(self, text: str, font_size: int, is_cjk: bool) -> int:
-        """Estimasi jumlah baris yang dibutuhkan dengan wrapping"""
-        # 58mm dengan margin 1mm = 56mm usable
-        # Rough estimate chars per line
-        chars_per_line = 16 if is_cjk else 28  # CJK lebih lebar
-        if len(text) <= chars_per_line:
-            return 1
-        return max(1, (len(text) + chars_per_line - 1) // chars_per_line)
-    
-    def create_receipt_pdf(self, content_lines: List[Dict], title: str = "Receipt") -> bytes:
+    def generate(self, title: str, header_info: List[str], items: List[Dict]) -> bytes:
         """
-        Create PDF receipt PORTRAIT orientation dengan minimal height.
+        Generate PDF - PORTRAIT orientation
         """
         from reportlab.lib.pagesizes import mm
         from reportlab.pdfgen import canvas
         
-        cjk_font = self._get_cjk_font()
-        latin_font = self._get_latin_font()
+        # Calculate height needed
+        total_height = self._calculate_height(title, header_info, items)
         
-        # Hitung tinggi yang dibutuhkan (compact)
-        total_height_mm = self._calculate_compact_height(content_lines)
-        
-        # PORTRAIT: width = 58mm, height = dynamic (taller than width)
-        page_size = (self.page_width_mm * mm, total_height_mm * mm)
+        # PORTRAIT: width=58mm, height=dynamic (must be > width)
+        page_size = (self.width_mm * mm, total_height * mm)
         
         buffer = BytesIO()
         c = canvas.Canvas(buffer, pagesize=page_size)
         
-        width = self.page_width_mm * mm
-        usable_width = width - (2 * self.margin_mm * mm)
-        y_pos = total_height_mm * mm - (1.5 * mm)  # Margin atas minimal
+        y = total_height * mm - 3 * mm  # Start from top with small margin
+        x_left = self.margin_mm * mm
         
-        for line in content_lines:
-            text = line.get('text', '')
-            size = line.get('size', 9)
-            bold = line.get('bold', False)
-            align = line.get('align', 'left')
-            is_cjk = line.get('is_cjk', self._contains_cjk(text))
+        # Title (centered, bold)
+        c.setFont(self.latin_font, 12)
+        c.drawCentredString(self.width_mm * mm / 2, y, title)
+        y -= 5 * mm
+        
+        # Header info
+        c.setFont(self.latin_font, 8)
+        for info in header_info:
+            c.drawString(x_left, y, info)
+            y -= 3.5 * mm
+        
+        # Separator
+        y -= 1 * mm
+        c.line(x_left, y, (self.width_mm - self.margin_mm) * mm, y)
+        y -= 3 * mm
+        
+        # Items
+        for item in items:
+            qty = item.get('qty', '')
+            name = item.get('name', '')
+            name_cn = item.get('name_cn', '')
+            addons = item.get('addons', [])
+            notes = item.get('notes', '')
             
-            # Pilih font
-            if is_cjk and cjk_font:
-                font = cjk_font
-                size = min(size, 10)
-            else:
-                font = latin_font
+            # Line 1: Qty + Name (Latin, bold)
+            line1 = f"{qty}x {name}"
+            c.setFont(self.latin_font, 10)
+            wrapped = self._wrap_line(line1, self.usable_width_mm, 10, False)
+            for wline in wrapped:
+                c.drawString(x_left, y, wline)
+                y -= 3.5 * mm
             
-            c.setFont(font, size)
+            # Line 2: Chinese name (if exists)
+            if name_cn and self.cjk_font:
+                c.setFont(self.cjk_font, 11)
+                # Indent slightly
+                c.drawString(x_left + 3 * mm, y, name_cn)
+                y -= 4 * mm
             
-            # Calculate position X berdasarkan alignment
-            if align == 'center':
-                x_pos = width / 2
-                c.drawCentredString(x_pos, y_pos, text)
-            elif align == 'right':
-                x_pos = width - (self.margin_mm * mm)
-                c.drawRightString(x_pos, y_pos, text)
-            else:
-                x_pos = self.margin_mm * mm
-                c.drawString(x_pos, y_pos, text)
+            # Addons
+            if addons:
+                c.setFont(self.latin_font, 7)
+                for addon in addons:
+                    addon_text = f"  +{addon}"
+                    c.drawString(x_left, y, addon_text)
+                    y -= 2.8 * mm
             
-            # Compact line spacing
-            line_height_mm = size * 0.3  # Tighter spacing
-            y_pos -= (line_height_mm + 0.3) * mm  # Minimal spacing antar line
+            # Notes
+            if notes:
+                c.setFont(self.latin_font, 7)
+                note_text = f"  #{notes}"
+                c.drawString(x_left, y, note_text)
+                y -= 2.8 * mm
+            
+            # Spacer between items
+            y -= 1.5 * mm
+        
+        # Bottom separator
+        y += 1 * mm  # Adjust back slightly
+        c.line(x_left, y, (self.width_mm - self.margin_mm) * mm, y)
         
         c.save()
         buffer.seek(0)
         return buffer.getvalue()
     
-    def _calculate_compact_height(self, content_lines: List[Dict]) -> float:
-        """Hitung tinggi total compact (minimal) dalam mm"""
-        height = 3  # Margin atas/bawah minimal (3mm total)
+    def _calculate_height(self, title: str, header_info: List[str], items: List[Dict]) -> float:
+        """Calculate total height needed in mm"""
+        height = 6  # Top margin + title
         
-        for line in content_lines:
-            size = line.get('size', 9)
-            is_cjk = line.get('is_cjk', False)
-            text = line.get('text', '')
-            
-            if is_cjk:
-                size = min(size, 10)
-            
-            # Estimasi baris dengan wrapping
-            estimated_lines = self._estimate_lines(text, size, is_cjk)
-            
-            # Compact line height
-            line_height = size * 0.3
-            height += (estimated_lines * line_height) + 0.3  # Tight spacing
+        # Header
+        height += len(header_info) * 3.5
         
-        return max(height, 20)  # Minimum 20mm
+        # Separator
+        height += 4
+        
+        # Items
+        for item in items:
+            name = item.get('name', '')
+            name_cn = item.get('name_cn', '')
+            addons = item.get('addons', [])
+            notes = item.get('notes', '')
+            
+            # Main name (estimate wrapping)
+            name_lines = max(1, len(name) // 25)
+            height += name_lines * 3.5
+            
+            # Chinese name
+            if name_cn:
+                height += 4
+            
+            # Addons
+            height += len(addons) * 2.8
+            
+            # Notes
+            if notes:
+                height += 2.8
+            
+            # Spacer
+            height += 1.5
+        
+        # Bottom
+        height += 5
+        
+        return max(height, 80)  # Minimum 80mm height
 
 def build_multilingual_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
-    """Build kitchen receipt sebagai PDF compact portrait dengan Chinese support."""
-    generator = CompactReceiptGenerator(page_width_mm=58)
+    """Build kitchen receipt PDF dengan proper portrait orientation."""
     
-    content_lines = []
-    
-    # Header - compact
-    content_lines.append({'text': station_name, 'size': 11, 'bold': True, 'align': 'center', 'is_cjk': False})
-    
-    # Info - compact
-    content_lines.append({'text': f"Inv: {data['name']}", 'size': 7, 'align': 'left'})
-    content_lines.append({'text': f"{data['posting_date']} {data['posting_time'][:5]}", 'size': 7})
-    if created_by:
-        content_lines.append({'text': f"By: {created_by}", 'size': 7})
-    
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        content_lines.append({'text': f"Table: {table_names}", 'size': 8, 'bold': True})
-    
-    content_lines.append({'text': f"Type: {data['order_type']}", 'size': 7})
-    content_lines.append({'text': '-' * 20, 'size': 7})
-    
-    # Mandarin mapping
+    # Prepare mandarin map
     resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
     mandarin_map = {}
     if resto_menus:
@@ -469,59 +494,51 @@ def build_multilingual_kitchen_pdf(data: Dict[str, Any], station_name: str, item
         )
         mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
     
-    # Items dengan format compact newline
+    # Build items
+    pdf_items = []
     for it in items:
         qty = int(it.get('qty', 0)) if float(it.get('qty', 0)).is_integer() else it.get('qty', 0)
         item_name = it.get('item_name', '')
         resto_menu = it.get('resto_menu')
         mandarin_name = mandarin_map.get(resto_menu, '')
         
-        # Baris 1: Qty + Item Name (Latin) - compact
-        main_line = f"{qty}x {item_name}"
-        content_lines.append({
-            'text': main_line,
-            'size': 9,
-            'bold': True,
-            'is_cjk': False
-        })
-        
-        # Baris 2: Chinese name (jika ada) - compact indent
-        if mandarin_name:
-            content_lines.append({
-                'text': f"  {mandarin_name}",  # 2 spaces indent
-                'size': 10,
-                'is_cjk': True
-            })
-        
-        # Add-ons - compact
-        add_ons = it.get('add_ons', '')
-        if add_ons:
-            for add in [a.strip() for a in add_ons.split(',') if a.strip()]:
+        # Parse addons
+        addons = []
+        add_ons_str = it.get('add_ons', '')
+        if add_ons_str:
+            for add in [a.strip() for a in add_ons_str.split(',') if a.strip()]:
                 if '(' in add and ')' in add:
                     name = add.rsplit('(', 1)[0].strip()
                 else:
                     name = add
-                content_lines.append({
-                    'text': f"  +{name}",
-                    'size': 7,
-                    'is_cjk': _contains_cjk(name)
-                })
+                addons.append(name)
         
-        # Notes - compact
+        # Parse notes
         notes = it.get('quick_notes', '')
-        if notes:
-            content_lines.append({
-                'text': f"  #{notes}",
-                'size': 7,
-                'is_cjk': _contains_cjk(notes)
-            })
         
-        # Minimal spacer antar item
-        content_lines.append({'text': '', 'size': 1})
+        pdf_items.append({
+            'qty': qty,
+            'name': item_name,
+            'name_cn': mandarin_name,
+            'addons': addons,
+            'notes': notes
+        })
     
-    content_lines.append({'text': '-' * 20, 'size': 7})
+    # Build header info
+    table_names = get_table_names_from_pos_invoice(data["name"])
+    header_info = [
+        f"Inv: {data['name']}",
+        f"{data['posting_date']} {data['posting_time'][:5]}",
+    ]
+    if created_by:
+        header_info.append(f"By: {created_by}")
+    if table_names:
+        header_info.append(f"Table: {table_names}")
+    header_info.append(f"Type: {data['order_type']}")
     
-    return generator.create_receipt_pdf(content_lines, title=f"K_{station_name}")
+    # Generate PDF
+    generator = KitchenReceiptPDF()
+    return generator.generate(station_name, header_info, pdf_items)
 
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
@@ -594,9 +611,8 @@ def get_item_printers(item: Dict) -> List[str]:
     return printers
 
 def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
-    """Build kitchen receipt menggunakan PDF compact."""
-    pdf_bytes = build_multilingual_kitchen_pdf(data, station_name, items, created_by)
-    return pdf_bytes
+    """Build kitchen receipt menggunakan PDF portrait."""
+    return build_multilingual_kitchen_pdf(data, station_name, items, created_by)
 
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
@@ -641,14 +657,8 @@ def _fmt_qty(val: float | int) -> str:
 def _safe_str(v) -> str:
     return (v or "").strip()
 
-def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
-    pad = " " * indent if indent > 0 else ""
-    for w in _wrap_text(text, LINE_WIDTH - indent):
-        out += _safe_encode(pad + w + "\n")
-    return out
-
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
-    """Build kitchen receipt dari payload sebagai PDF compact."""
+    """Build kitchen receipt dari payload sebagai PDF portrait."""
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name")
 
@@ -668,20 +678,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         )
         mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
     
-    # Build content untuk PDF compact
-    generator = CompactReceiptGenerator(page_width_mm=58)
-    content_lines = []
-    
-    # Header compact
-    content_lines.append({'text': station, 'size': 11, 'bold': True, 'align': 'center'})
-    
-    table_name = get_table_names_from_pos_invoice(inv)
-    content_lines.append({'text': f"Table: {table_name}", 'size': 8})
-    content_lines.append({'text': f"{tdate}", 'size': 7})
-    content_lines.append({'text': f"By: {full_name}", 'size': 7})
-    content_lines.append({'text': '-' * 20, 'size': 7})
-    
-    # Items compact dengan newline
+    # Build items
+    pdf_items = []
     for it in items:
         qty_s = _fmt_qty(it.get("qty") or 0)
         item_name = _safe_str(it.get("item_name"))
@@ -691,52 +689,38 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         title = item_name or short_name or menu_name or "-"
         mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
         
-        # Baris 1: Qty + Item Name
-        main_line = f"{qty_s}x {title}"
-        content_lines.append({
-            'text': main_line,
-            'size': 9,
-            'bold': True,
-            'is_cjk': False
-        })
-        
-        # Baris 2: Chinese name
-        if mandarin_name:
-            content_lines.append({
-                'text': f"  {mandarin_name}",
-                'size': 10,
-                'is_cjk': True
-            })
-        
-        # Add-ons compact
+        # Parse addons
+        addons = []
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",")]
-            for add in add_ons_list:
+            for add in [a.strip() for a in add_ons_str.split(",")]:
                 if "(" in add and ")" in add:
                     name = add.rsplit("(", 1)[0].strip()
                 else:
                     name = add
-                content_lines.append({
-                    'text': f"  +{name}",
-                    'size': 7,
-                    'is_cjk': _contains_cjk(name)
-                })
+                addons.append(name)
         
-        # Notes compact
         notes = it.get("quick_notes", "")
-        if notes:
-            content_lines.append({
-                'text': f"  #{notes}",
-                'size': 7,
-                'is_cjk': _contains_cjk(notes)
-            })
         
-        content_lines.append({'text': '', 'size': 1})
+        pdf_items.append({
+            'qty': qty_s,
+            'name': title,
+            'name_cn': mandarin_name,
+            'addons': addons,
+            'notes': notes
+        })
     
-    content_lines.append({'text': '-' * 20, 'size': 7})
+    # Build header
+    table_name = get_table_names_from_pos_invoice(inv)
+    header_info = [
+        f"Table: {table_name}",
+        f"{tdate}",
+        f"By: {full_name}",
+    ]
     
-    return generator.create_receipt_pdf(content_lines, title=f"K_{station}")
+    # Generate PDF
+    generator = KitchenReceiptPDF()
+    return generator.generate(station, header_info, pdf_items)
 
 # ========== API: print kitchen dari payload ==========
 @frappe.whitelist()
