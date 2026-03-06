@@ -11,7 +11,7 @@ import re
 import os
 
 # ========== Konstanta & Util ==========
-LINE_WIDTH = 32
+LINE_WIDTH = 42          # untuk ESC/POS bill (75mm biasanya 42-48 karakter)
 ITEM_HEIGHT_MULT = 2
 
 ESC = b"\x1b"
@@ -189,6 +189,7 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
 def cups_print_pdf_with_cut(pdf_bytes: bytes, printer_name: str) -> int:
     """
     Print PDF dengan auto-cut menggunakan CUPS options.
+    Menambahkan perintah potong terpisah setelah PDF.
     """
     import cups
     import tempfile
@@ -202,15 +203,24 @@ def cups_print_pdf_with_cut(pdf_bytes: bytes, printer_name: str) -> int:
         tmp.write(pdf_bytes)
         tmp_path = tmp.name
 
-    # Options untuk thermal printer dengan auto-cut
+    # Options untuk thermal printer dengan auto-cut, ukuran 75mm
     options = {
-        'media': 'Custom.58x200mm',  # Custom size
+        'media': 'Custom.75x200mm',      # disesuaikan untuk 75mm
         'fit-to-page': 'False',
         'print-scaling': 'none',
-        'page-ranges': '1',  # Only print page 1
+        'page-ranges': '1',              # Only print page 1
+        'orientation-requested': '3',     # 3 = portrait
     }
     
     job_id = conn.printFile(printer_name, tmp_path, "Kitchen_Order", options)
+
+    # Kirim perintah potong terpisah
+    cut_cmd = _esc_cut_full()
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
+        tmp_cut.write(cut_cmd)
+        cut_path = tmp_cut.name
+    conn.printFile(printer_name, cut_path, "Cut", {"raw": "true"})
+
     return job_id
 
 def sanitize_kitchen_payload(items):
@@ -322,12 +332,12 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
 class KitchenPDFGenerator:
     """
     Generator PDF untuk Kitchen Receipt - compact dengan proper height calculation.
-    Menggunakan 58mm width, minimal margin, dan exact height calculation.
+    Menggunakan 75mm width, minimal margin, dan exact height calculation.
     """
     
     def __init__(self):
-        self.width_mm = 58
-        self.margin_mm = 1.5  # Minimal margin
+        self.width_mm = 75                # lebar kertas 75mm
+        self.margin_mm = 1.5               # margin kiri/kanan
         self.usable_width = self.width_mm - (2 * self.margin_mm)
         
         # Register CJK fonts
@@ -370,8 +380,9 @@ class KitchenPDFGenerator:
         from reportlab.lib.pagesizes import mm
         from reportlab.pdfgen import canvas
         from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
         
-        # Calculate exact height needed
+        # Calculate exact height needed (estimate kasar + buffer)
         total_height = self._calculate_height(station, table, date_str, by, order_type, items)
         
         # Create PDF with exact size (PORTRAIT: height > width)
@@ -383,14 +394,15 @@ class KitchenPDFGenerator:
         # Start from top with minimal margin
         y = total_height * mm - 2 * mm
         x = self.margin_mm * mm
+        usable_width_pt = self.usable_width * mm   # lebar berguna dalam points
         
         # STATION NAME - Center, Bold, Large
-        c.setFont(self.latin_font, 13)
+        c.setFont(self.latin_font, 16)
         c.drawCentredString(self.width_mm * mm / 2, y, station)
-        y -= 5 * mm
+        y -= 6 * mm
         
-        # INFO - Compact
-        c.setFont(self.latin_font, 8)
+        # INFO - Compact tapi lebih besar
+        c.setFont(self.latin_font, 10)
         info_lines = [
             f"Tbl:{table}",
             f"{date_str}",
@@ -399,12 +411,12 @@ class KitchenPDFGenerator:
         ]
         for line in info_lines:
             c.drawString(x, y, line)
-            y -= 3 * mm
+            y -= 3.5 * mm
         
         # Separator
         y -= 1 * mm
         c.line(x, y, (self.width_mm - self.margin_mm) * mm, y)
-        y -= 3 * mm
+        y -= 3.5 * mm
         
         # ITEMS
         for item in items:
@@ -414,33 +426,54 @@ class KitchenPDFGenerator:
             addons = item.get('addons', [])
             notes = item.get('notes', '')
             
-            # Qty + Name (Bold, larger)
-            c.setFont(self.latin_font, 10)
+            # Qty + Name (Bold, larger, dengan wrapping sederhana)
+            c.setFont(self.latin_font, 14)
             main_text = f"{qty}x {name}"
-            c.drawString(x, y, main_text)
-            y -= 4 * mm
+            
+            # Wrapping manual jika terlalu panjang
+            if c.stringWidth(main_text, self.latin_font, 14) > usable_width_pt:
+                words = main_text.split()
+                line_parts = []
+                current_line = ""
+                for w in words:
+                    test_line = (current_line + " " + w).strip()
+                    if c.stringWidth(test_line, self.latin_font, 14) <= usable_width_pt:
+                        current_line = test_line
+                    else:
+                        if current_line:
+                            line_parts.append(current_line)
+                        current_line = w
+                if current_line:
+                    line_parts.append(current_line)
+                
+                for part in line_parts:
+                    c.drawString(x, y, part)
+                    y -= 4.5 * mm
+            else:
+                c.drawString(x, y, main_text)
+                y -= 4.5 * mm
             
             # Chinese name (if exists)
             if name_cn and self.cjk_font:
-                c.setFont(self.cjk_font, 11)
+                c.setFont(self.cjk_font, 14)
                 c.drawString(x + 2 * mm, y, name_cn)
-                y -= 4 * mm
+                y -= 4.5 * mm
             
             # Addons
             if addons:
-                c.setFont(self.latin_font, 7)
+                c.setFont(self.latin_font, 9)
                 for addon in addons:
                     c.drawString(x + 2 * mm, y, f"+{addon}")
-                    y -= 2.5 * mm
+                    y -= 3 * mm
             
             # Notes
             if notes:
-                c.setFont(self.latin_font, 7)
+                c.setFont(self.latin_font, 9)
                 c.drawString(x + 2 * mm, y, f"#{notes}")
-                y -= 2.5 * mm
+                y -= 3 * mm
             
             # Spacer between items
-            y -= 1.5 * mm
+            y -= 2 * mm
         
         # Bottom separator
         c.line(x, y, (self.width_mm - self.margin_mm) * mm, y)
@@ -450,32 +483,32 @@ class KitchenPDFGenerator:
         return buffer.getvalue()
     
     def _calculate_height(self, station, table, date_str, by, order_type, items) -> float:
-        """Calculate exact height in mm"""
+        """Calculate exact height in mm (estimasi)"""
         height = 4  # Top margin + station
         
         # Info lines
-        height += 4 * 3  # 4 lines * 3mm each
+        height += 4 * 3.5  # 4 lines * 3.5mm each
         
         # Separators and spacing
         height += 5
         
         # Items
         for item in items:
-            height += 4  # Main line
+            height += 4.5  # Main line
             
             if item.get('name_cn'):
-                height += 4  # Chinese line
+                height += 4.5  # Chinese line
             
-            height += len(item.get('addons', [])) * 2.5
+            height += len(item.get('addons', [])) * 3
             if item.get('notes'):
-                height += 2.5
+                height += 3
             
-            height += 1.5  # Spacer
+            height += 2  # Spacer
         
         # Bottom
         height += 3
         
-        return max(height, 40)
+        return max(height, 50)   # minimal 50mm
 
 def build_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
     """Build kitchen PDF dengan Chinese support."""
@@ -605,7 +638,7 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
         for kprinter, items in kitchen_groups.items():
             # Kitchen pakai PDF dengan Chinese support
             pdf_bytes = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
-            # Print dengan auto-cut option
+            # Print dengan auto-cut option (sudah include cut)
             kitchen_job = cups_print_pdf_with_cut(pdf_bytes, kprinter)
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
@@ -738,13 +771,22 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 tmp.write(pdf_bytes)
                 tmp_path = tmp.name
             
-            # Print dengan auto-cut
+            # Print dengan auto-cut (ukuran 75mm)
             options = {
-                'media': 'Custom.58x200mm',
+                'media': 'Custom.75x200mm',
                 'fit-to-page': 'False',
                 'print-scaling': 'none',
+                'orientation-requested': '3',
             }
             job_id = conn.printFile(printer_name, tmp_path, f"K_{station}", options)
+
+            # Kirim perintah potong terpisah
+            cut_cmd = _esc_cut_full()
+            with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
+                tmp_cut.write(cut_cmd)
+                cut_path = tmp_cut.name
+            conn.printFile(printer_name, cut_path, "Cut", {"raw": "true"})
+
             results.append({
                 "station": station,
                 "printer": printer_name,
@@ -842,7 +884,7 @@ def build_escpos_bill(name: str) -> bytes:
     from frappe.utils import now_datetime
 
     data = _collect_pos_invoice(name)
-    LINE_WIDTH = 32
+    LINE_WIDTH = 42   # untuk 75mm
 
     def money(val):
         return f"{int(round(val or 0)):,.0f}".replace(",", ".")
@@ -921,8 +963,8 @@ def build_escpos_bill(name: str) -> bytes:
     <head>
     <meta charset="utf-8">
     <style>
-    @page {{ size: 58mm 300mm; margin:4mm; }}
-    body {{ font-family:"DejaVu Sans Mono", monospace; font-size:10px; line-height:1.2; width:58mm; }}
+    @page {{ size: 75mm 300mm; margin:4mm; }}
+    body {{ font-family:"DejaVu Sans Mono", monospace; font-size:10px; line-height:1.2; width:75mm; }}
     table {{ width:100%; border-collapse: collapse; table-layout: fixed; }}
     td {{ padding:0; vertical-align: top; }}
     .center {{ text-align:center; }}
