@@ -1615,8 +1615,10 @@ def build_escpos_checker(name: str) -> bytes:
     out += _esc_font_a()
 
     # ===== HEADER =====
+    table_name = get_table_names_from_pos_invoice(data["name"])
+
     out += _esc_align_center() + _esc_bold(True)
-    out += (f"-CHECKER-\n").encode("ascii", "ignore")
+    out += (f"--CHECKER--\n{int(table_name)}").encode("ascii", "ignore")
 
     if company or branch:
         header_line = f"{company}"
@@ -1630,13 +1632,13 @@ def build_escpos_checker(name: str) -> bytes:
     out += (separator + "\n").encode("ascii", "ignore")
     
     # Nama table
-    table_names = get_table_names_from_pos_invoice(data["name"])
+    table_name = get_table_names_from_pos_invoice(data["name"])
 
     # ===== INFORMASI INVOICE =====
     # out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
-    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+    out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
+    out += (f"Tgl : {print_time}\n").encode("ascii", "ignore")
+    out += (f"Tujuan : {order_type}\n").encode("ascii", "ignore")
     out += (f"Waiter : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
     if pax:
