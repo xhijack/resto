@@ -549,17 +549,70 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
         })
     return doc.insert(ignore_permissions=True)
 
+# def print_to_ks_now(pos_invoice):
+#     from resto.printing import kitchen_print_from_payload
+#     for item in get_branch_menu_for_kitchen_printing(pos_invoice):
+#         ksp = send_to_ks_printing(item.get("kitchen_station"), pos_invoice, item.get("items", []))
+#         payload = {
+#             "kitchen_station": ksp.kitchen_station,
+#             "printer_name": ksp.printer_name,
+#             "pos_invoice": pos_invoice,
+#             "items": item.get("items", [])
+#         }
+#         kitchen_print_from_payload(payload)
+
+def mark_items_as_checked(items):
+    for item in items:
+        frappe.db.set_value(
+            "POS Invoice Item",
+            item.get("name"),
+            "is_checked",
+            1,
+            update_modified=False
+        )
+
+    frappe.db.commit()
+    
 def print_to_ks_now(pos_invoice):
-    from resto.printing import kitchen_print_from_payload
-    for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-        ksp = send_to_ks_printing(item.get("kitchen_station"), pos_invoice, item.get("items", []))
-        payload = {
-            "kitchen_station": ksp.kitchen_station,
-            "printer_name": ksp.printer_name,
+
+    items = frappe.get_all(
+        "POS Invoice Item",
+        filters={
+            "parent": pos_invoice,
+            "is_checked": 0,
+            "status_kitchen": ["!=", "Void Menu"]
+        },
+        fields=[
+            "name",
+            "resto_menu",
+            "qty",
+            "add_ons",
+            "quick_notes",
+            "kitchen_station"
+        ]
+    )
+
+    if not items:
+        return
+
+    grouped = group_items_by_station(items)
+
+    for station, station_items in grouped.items():
+        ksp = send_to_ks_printing(
+            station,
+            pos_invoice,
+            station_items
+        )
+
+        kitchen_print_from_payload({
+            "kitchen_station": station,
+            "printer_name": ksp.printer_name if hasattr(ksp, "printer_name") else "",
             "pos_invoice": pos_invoice,
-            "items": item.get("items", [])
-        }
-        kitchen_print_from_payload(payload)
+            "items": station_items
+        })
+
+        # ⭐ Mark printed
+        mark_items_as_checked(station_items)
 
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):
