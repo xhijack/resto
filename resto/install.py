@@ -352,3 +352,14 @@ def after_migrate():
             "options": "User",
             "insert_after": "is_return"
         }).insert(ignore_permissions=True)
+        
+    if not frappe.db.exists("Custom Field", {"dt": "Mode of Payment", "fieldname": "parent"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "Mode of Payment",
+            "fieldname": "parent",
+            "label": "Parent",
+            "fieldtype": "Link",
+            "options": "Mode of Payment",
+            "insert_after": "mode_of_payment"
+        }).insert(ignore_permissions=True)
