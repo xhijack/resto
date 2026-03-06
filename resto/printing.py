@@ -36,8 +36,9 @@ def _esc_font_a() -> bytes:
     return ESC + b'M' + b'\x00'
 
 def _esc_cut_full() -> bytes:
-    # Kombinasi beberapa perintah potong untuk kompatibilitas maksimal
-    return GS + b'V' + b'\x00' + b'\x1B\x69'   # GS V 0 dan ESC i
+    # Perintah potong standar: GS V 0 (potong penuh)
+    # Ditambah ESC i untuk kompatibilitas beberapa printer
+    return GS + b'V' + b'\x00' + b'\x1B\x69'
 
 def _esc_feed(n: int) -> bytes:
     n = max(0, min(n, 255))
@@ -215,8 +216,9 @@ def cups_print_pdf_with_cut(pdf_bytes: bytes, printer_name: str) -> int:
     
     job_id = conn.printFile(printer_name, tmp_path, "Kitchen_Order", options)
 
-    # Kirim perintah potong terpisah (gunakan fungsi yang sudah ditingkatkan)
-    cut_cmd = _esc_cut_full()  # sekarang mengembalikan GS V + ESC i
+    # Kirim perintah feed + potong terpisah
+    # Feed 5 baris agar kertas keluar sedikit sebelum dipotong
+    cut_cmd = _esc_feed(5) + _esc_cut_full()
     with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
         tmp_cut.write(cut_cmd)
         cut_path = tmp_cut.name
@@ -575,7 +577,8 @@ def build_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict]
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
     data = _collect_pos_invoice(name)
-    lines = _format_receipt_lines(data)
+    # Asumsikan _format_receipt_lines didefinisikan di tempat lain
+    lines = _format_receipt_lines(data)   # pastikan fungsi ini ada
 
     out = b""
     out += _esc_init()
@@ -776,7 +779,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 tmp.write(pdf_bytes)
                 tmp_path = tmp.name
             
-            # Print dengan auto-cut (ukuran 75mm)
+            # Print PDF dengan opsi portrait
             options = {
                 'media': 'Custom.75x200mm',
                 'fit-to-page': 'False',
@@ -785,8 +788,8 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             }
             job_id = conn.printFile(printer_name, tmp_path, f"K_{station}", options)
 
-            # Kirim perintah potong terpisah (gunakan fungsi yang ditingkatkan)
-            cut_cmd = _esc_cut_full()
+            # Kirim perintah feed (5 baris) + potong
+            cut_cmd = _esc_feed(5) + _esc_cut_full()
             with tempfile.NamedTemporaryFile(delete=False) as tmp_cut:
                 tmp_cut.write(cut_cmd)
                 cut_path = tmp_cut.name
