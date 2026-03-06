@@ -35,15 +35,30 @@ def _esc_bold(on: bool) -> bytes:
 def _esc_font_a() -> bytes:
     return ESC + b'M' + b'\x00'
 
+def _esc_font_b() -> bytes:
+    return ESC + b'M' + b'\x01'
+
 def _esc_cut_full() -> bytes:
     return GS + b'V' + b'\x00'
 
-def _esc_cut_full_with_feed() -> bytes:
-    return GS + b'V' + b'\x41'
+def _esc_cut_partial() -> bytes:
+    return GS + b'V' + b'\x01'
 
 def _esc_feed(n: int) -> bytes:
     n = max(0, min(n, 255))
     return ESC + b'd' + bytes([n])
+
+def _esc_line_spacing(n: int = 30) -> bytes:
+    """Set line spacing, default 30/180 inch"""
+    return ESC + b'3' + bytes([n])
+
+def _esc_reset_line_spacing() -> bytes:
+    return ESC + b'2'
+
+def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
+    w = max(0, min(7, int(width_mul)))
+    h = max(0, min(7, int(height_mul)))
+    return GS + b'!' + bytes([(w << 4) | h])
 
 def _esc_qr(data: str) -> bytes:
     store_pL = (len(data) + 3) & 0xFF
@@ -55,11 +70,6 @@ def _esc_qr(data: str) -> bytes:
     cmds += GS + b'(' + b'k' + bytes([store_pL, store_pH]) + b'1P0' + data.encode('utf-8')
     cmds += GS + b'(' + b'k' + b'\x03\x00' + b'1Q' + b'\x30'
     return cmds
-
-def _esc_char_size(width_mul: int = 0, height_mul: int = 0) -> bytes:
-    w = max(0, min(7, int(width_mul)))
-    h = max(0, min(7, int(height_mul)))
-    return GS + b'!' + bytes([(w << 4) | h])
 
 def _fmt_money(val: float, currency: str = "IDR") -> str:
     n = 0 if currency.upper() in ("IDR", "RP") else 2
@@ -164,21 +174,30 @@ def _esc_print_image(image_path):
 
     return _esc_align_center() + bytes_out + b"\n"
 
-def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
-    import cups
-    import tempfile
+def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
+    try:
+        import cups
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        if printer_name not in printers:
+            raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
-    conn = cups.Connection()
-    printers = conn.getPrinters()
-    if printer_name not in printers:
-        raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan")
+        if printer_name == "Kasir":
+            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(open_drawer_command)
+                tmp_path_drawer = tmp.name
+            conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
+            
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(raw_bytes)
+            tmp_path = tmp.name
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(pdf_bytes)
-        tmp_path = tmp.name
-
-    job_id = conn.printFile(printer_name, tmp_path, "POS_Invoice", {})
-    return job_id
+        job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
+        return job_id
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
+        raise
 
 def sanitize_kitchen_payload(items):
     blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
@@ -285,205 +304,13 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "doc": doc,
     }
 
-# ========== KITCHEN PDF GENERATOR - PORTRAIT 58MM ==========
-class KitchenReceiptPDF:
+# ========== KITCHEN RECEIPT - ESC/POS DIRECT (BUKAN PDF) ==========
+def build_kitchen_escpos(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
     """
-    Generator PDF untuk Kitchen Receipt - PORTRAIT 58mm x dynamic height
+    Build Kitchen receipt menggunakan ESC/POS commands (bukan PDF).
+    Lebih reliable untuk auto-cut dan spacing.
     """
-    
-    def __init__(self):
-        self.width_mm = 58  # 58mm thermal paper
-        self.margin_mm = 2  # 2mm margin
-        self.usable_width_mm = self.width_mm - (2 * self.margin_mm)
-        
-        # Register fonts
-        self.cjk_font = None
-        self.latin_font = 'Helvetica'
-        self._setup_fonts()
-    
-    def _setup_fonts(self):
-        """Setup CJK fonts"""
-        try:
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            
-            font_paths = [
-                '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc',
-                '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-                '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
-            ]
-            
-            for path in font_paths:
-                if os.path.exists(path):
-                    try:
-                        pdfmetrics.registerFont(TTFont('CJKFont', path))
-                        self.cjk_font = 'CJKFont'
-                        break
-                    except:
-                        continue
-                        
-        except ImportError:
-            pass
-    
-    def _get_text_width(self, text: str, font_name: str, font_size: int) -> float:
-        """Estimate text width in mm"""
-        # Rough estimate: 1pt = 0.3528mm
-        # CJK chars ~ 1.5x wider than latin
-        avg_char_width_pt = 0.6 if font_name == self.cjk_font else 0.4
-        return len(text) * avg_char_width_pt * font_size * 0.3528
-    
-    def _wrap_line(self, text: str, max_width_mm: float, font_size: int, is_cjk: bool) -> List[str]:
-        """Wrap text to fit width"""
-        font = self.cjk_font if (is_cjk and self.cjk_font) else self.latin_font
-        
-        words = text.split()
-        lines = []
-        current = ""
-        
-        for word in words:
-            test = current + " " + word if current else word
-            width = self._get_text_width(test, font, font_size)
-            
-            if width <= max_width_mm:
-                current = test
-            else:
-                if current:
-                    lines.append(current)
-                current = word
-        
-        if current:
-            lines.append(current)
-        
-        return lines if lines else [text]
-    
-    def generate(self, title: str, header_info: List[str], items: List[Dict]) -> bytes:
-        """
-        Generate PDF - PORTRAIT orientation
-        """
-        from reportlab.lib.pagesizes import mm
-        from reportlab.pdfgen import canvas
-        
-        # Calculate height needed
-        total_height = self._calculate_height(title, header_info, items)
-        
-        # PORTRAIT: width=58mm, height=dynamic (must be > width)
-        page_size = (self.width_mm * mm, total_height * mm)
-        
-        buffer = BytesIO()
-        c = canvas.Canvas(buffer, pagesize=page_size)
-        
-        y = total_height * mm - 3 * mm  # Start from top with small margin
-        x_left = self.margin_mm * mm
-        
-        # Title (centered, bold)
-        c.setFont(self.latin_font, 12)
-        c.drawCentredString(self.width_mm * mm / 2, y, title)
-        y -= 5 * mm
-        
-        # Header info
-        c.setFont(self.latin_font, 8)
-        for info in header_info:
-            c.drawString(x_left, y, info)
-            y -= 3.5 * mm
-        
-        # Separator
-        y -= 1 * mm
-        c.line(x_left, y, (self.width_mm - self.margin_mm) * mm, y)
-        y -= 3 * mm
-        
-        # Items
-        for item in items:
-            qty = item.get('qty', '')
-            name = item.get('name', '')
-            name_cn = item.get('name_cn', '')
-            addons = item.get('addons', [])
-            notes = item.get('notes', '')
-            
-            # Line 1: Qty + Name (Latin, bold)
-            line1 = f"{qty}x {name}"
-            c.setFont(self.latin_font, 10)
-            wrapped = self._wrap_line(line1, self.usable_width_mm, 10, False)
-            for wline in wrapped:
-                c.drawString(x_left, y, wline)
-                y -= 3.5 * mm
-            
-            # Line 2: Chinese name (if exists)
-            if name_cn and self.cjk_font:
-                c.setFont(self.cjk_font, 11)
-                # Indent slightly
-                c.drawString(x_left + 3 * mm, y, name_cn)
-                y -= 4 * mm
-            
-            # Addons
-            if addons:
-                c.setFont(self.latin_font, 7)
-                for addon in addons:
-                    addon_text = f"  +{addon}"
-                    c.drawString(x_left, y, addon_text)
-                    y -= 2.8 * mm
-            
-            # Notes
-            if notes:
-                c.setFont(self.latin_font, 7)
-                note_text = f"  #{notes}"
-                c.drawString(x_left, y, note_text)
-                y -= 2.8 * mm
-            
-            # Spacer between items
-            y -= 1.5 * mm
-        
-        # Bottom separator
-        y += 1 * mm  # Adjust back slightly
-        c.line(x_left, y, (self.width_mm - self.margin_mm) * mm, y)
-        
-        c.save()
-        buffer.seek(0)
-        return buffer.getvalue()
-    
-    def _calculate_height(self, title: str, header_info: List[str], items: List[Dict]) -> float:
-        """Calculate total height needed in mm"""
-        height = 6  # Top margin + title
-        
-        # Header
-        height += len(header_info) * 3.5
-        
-        # Separator
-        height += 4
-        
-        # Items
-        for item in items:
-            name = item.get('name', '')
-            name_cn = item.get('name_cn', '')
-            addons = item.get('addons', [])
-            notes = item.get('notes', '')
-            
-            # Main name (estimate wrapping)
-            name_lines = max(1, len(name) // 25)
-            height += name_lines * 3.5
-            
-            # Chinese name
-            if name_cn:
-                height += 4
-            
-            # Addons
-            height += len(addons) * 2.8
-            
-            # Notes
-            if notes:
-                height += 2.8
-            
-            # Spacer
-            height += 1.5
-        
-        # Bottom
-        height += 5
-        
-        return max(height, 80)  # Minimum 80mm height
-
-def build_multilingual_kitchen_pdf(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: str = None) -> bytes:
-    """Build kitchen receipt PDF dengan proper portrait orientation."""
-    
-    # Prepare mandarin map
+    # Get mandarin map
     resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
     mandarin_map = {}
     if resto_menus:
@@ -493,52 +320,72 @@ def build_multilingual_kitchen_pdf(data: Dict[str, Any], station_name: str, item
             fields=["name", "custom_mandarin_name"]
         )
         mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_line_spacing(24)  # Tighter line spacing
     
-    # Build items
-    pdf_items = []
+    # === HEADER ===
+    out += _esc_align_center()
+    out += _esc_char_size(1, 1)  # Double width & height untuk station name
+    out += _esc_bold(True)
+    out += _safe_encode(station_name + "\n")
+    out += _esc_bold(False)
+    out += _esc_char_size(0, 0)  # Reset size
+    out += _esc_align_left()
+    
+    # Compact info
+    out += _safe_encode(f"Tbl:{get_table_names_from_pos_invoice(data['name'])}\n")
+    out += _safe_encode(f"{data['posting_date']} {data['posting_time'][:5]}\n")
+    if created_by:
+        out += _safe_encode(f"By:{created_by}\n")
+    out += _safe_encode(f"Type:{data['order_type']}\n")
+    out += _safe_encode("-" * 32 + "\n")
+    
+    # === ITEMS ===
     for it in items:
         qty = int(it.get('qty', 0)) if float(it.get('qty', 0)).is_integer() else it.get('qty', 0)
         item_name = it.get('item_name', '')
         resto_menu = it.get('resto_menu')
         mandarin_name = mandarin_map.get(resto_menu, '')
         
-        # Parse addons
-        addons = []
-        add_ons_str = it.get('add_ons', '')
-        if add_ons_str:
-            for add in [a.strip() for a in add_ons_str.split(',') if a.strip()]:
-                if '(' in add and ')' in add:
+        # Qty + Item name (BOLD, larger)
+        out += _esc_bold(True)
+        out += _esc_char_size(0, 1)  # Double height
+        out += _safe_encode(f"{qty}x {item_name}\n")
+        out += _esc_char_size(0, 0)
+        out += _esc_bold(False)
+        
+        # Chinese name (if exists) - indented, normal size
+        if mandarin_name:
+            out += _safe_encode(f"  {mandarin_name}\n")
+        
+        # Add-ons (compact)
+        add_ons = it.get('add_ons', '')
+        if add_ons:
+            for add in [a.strip() for a in add_ons.split(',') if a.strip()]:
+                if '(' in add and ')':
                     name = add.rsplit('(', 1)[0].strip()
                 else:
                     name = add
-                addons.append(name)
+                out += _safe_encode(f"  +{name}\n")
         
-        # Parse notes
+        # Notes (compact)
         notes = it.get('quick_notes', '')
+        if notes:
+            out += _safe_encode(f"  #{notes}\n")
         
-        pdf_items.append({
-            'qty': qty,
-            'name': item_name,
-            'name_cn': mandarin_name,
-            'addons': addons,
-            'notes': notes
-        })
+        # Minimal spacer
+        out += _safe_encode("\n")
     
-    # Build header info
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    header_info = [
-        f"Inv: {data['name']}",
-        f"{data['posting_date']} {data['posting_time'][:5]}",
-    ]
-    if created_by:
-        header_info.append(f"By: {created_by}")
-    if table_names:
-        header_info.append(f"Table: {table_names}")
-    header_info.append(f"Type: {data['order_type']}")
+    out += _safe_encode("-" * 32 + "\n")
     
-    # Generate PDF
-    generator = KitchenReceiptPDF()
-    return generator.generate(station_name, header_info, pdf_items)
+    # === FOOTER ===
+    out += _esc_feed(2)
+    out += _esc_cut_full()  # AUTO CUT!
+    
+    return out
 
 # ========== Builder ESC/POS ==========
 def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str | None = None) -> bytes:
@@ -573,32 +420,6 @@ def build_escpos_from_pos_invoice(name: str, add_qr: bool = False, qr_data: str 
     out += _esc_feed(3) + _esc_cut_full()
     return out
 
-# ========== CUPS RAW PRINT ==========
-def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
-    try:
-        import cups
-        conn = cups.Connection()
-        printers = conn.getPrinters()
-        if printer_name not in printers:
-            raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
-
-        if printer_name == "Kasir":
-            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(open_drawer_command)
-                tmp_path_drawer = tmp.name
-            conn.printFile(printer_name, tmp_path_drawer, "Open Drawer", {"raw": "true"})
-            
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(raw_bytes)
-            tmp_path = tmp.name
-
-        job_id = conn.printFile(printer_name, tmp_path, "POS_Receipt", {"raw": "true"})
-        return job_id
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
-        raise
-
 def get_item_printers(item: Dict) -> List[str]:
     branch_menu = item.get("resto_menu")
     if not branch_menu:
@@ -611,8 +432,8 @@ def get_item_printers(item: Dict) -> List[str]:
     return printers
 
 def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
-    """Build kitchen receipt menggunakan PDF portrait."""
-    return build_multilingual_kitchen_pdf(data, station_name, items, created_by)
+    """Build kitchen receipt menggunakan ESC/POS (bukan PDF)."""
+    return build_kitchen_escpos(data, station_name, items, created_by)
 
 # ========== API: cetak sekarang (sync) ==========
 @frappe.whitelist()
@@ -635,8 +456,9 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
+            # Kitchen sekarang pakai ESC/POS direct, bukan PDF
             raw_kitchen = build_kitchen_receipt(data, kprinter, items, created_by=full_name)
-            kitchen_job = cups_print_pdf(raw_kitchen, kprinter)
+            kitchen_job = cups_print_raw(raw_kitchen, kprinter)  # Use cups_print_raw, not cups_print_pdf
             results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
 
         frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
@@ -658,7 +480,7 @@ def _safe_str(v) -> str:
     return (v or "").strip()
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
-    """Build kitchen receipt dari payload sebagai PDF portrait."""
+    """Build kitchen receipt dari payload menggunakan ESC/POS."""
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name")
 
@@ -678,8 +500,28 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         )
         mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
     
-    # Build items
-    pdf_items = []
+    # Build ESC/POS
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_line_spacing(24)  # Tight spacing
+    
+    # Header
+    out += _esc_align_center()
+    out += _esc_char_size(1, 1)
+    out += _esc_bold(True)
+    out += _safe_encode(station + "\n")
+    out += _esc_bold(False)
+    out += _esc_char_size(0, 0)
+    out += _esc_align_left()
+    
+    table_name = get_table_names_from_pos_invoice(inv)
+    out += _safe_encode(f"Tbl:{table_name}\n")
+    out += _safe_encode(f"{tdate}\n")
+    out += _safe_encode(f"By:{full_name}\n")
+    out += _safe_encode("-" * 32 + "\n")
+    
+    # Items
     for it in items:
         qty_s = _fmt_qty(it.get("qty") or 0)
         item_name = _safe_str(it.get("item_name"))
@@ -689,38 +531,39 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         title = item_name or short_name or menu_name or "-"
         mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
         
-        # Parse addons
-        addons = []
+        # Qty + Item (bold, double height)
+        out += _esc_bold(True)
+        out += _esc_char_size(0, 1)
+        out += _safe_encode(f"{qty_s}x {title}\n")
+        out += _esc_char_size(0, 0)
+        out += _esc_bold(False)
+        
+        # Chinese
+        if mandarin_name:
+            out += _safe_encode(f"  {mandarin_name}\n")
+        
+        # Add-ons
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
             for add in [a.strip() for a in add_ons_str.split(",")]:
-                if "(" in add and ")" in add:
+                if "(" in add and ")":
                     name = add.rsplit("(", 1)[0].strip()
                 else:
                     name = add
-                addons.append(name)
+                out += _safe_encode(f"  +{name}\n")
         
+        # Notes
         notes = it.get("quick_notes", "")
+        if notes:
+            out += _safe_encode(f"  #{notes}\n")
         
-        pdf_items.append({
-            'qty': qty_s,
-            'name': title,
-            'name_cn': mandarin_name,
-            'addons': addons,
-            'notes': notes
-        })
+        out += _safe_encode("\n")
     
-    # Build header
-    table_name = get_table_names_from_pos_invoice(inv)
-    header_info = [
-        f"Table: {table_name}",
-        f"{tdate}",
-        f"By: {full_name}",
-    ]
+    out += _safe_encode("-" * 32 + "\n")
+    out += _esc_feed(2)
+    out += _esc_cut_full()  # AUTO CUT!
     
-    # Generate PDF
-    generator = KitchenReceiptPDF()
-    return generator.generate(station, header_info, pdf_items)
+    return out
 
 # ========== API: print kitchen dari payload ==========
 @frappe.whitelist()
@@ -760,13 +603,15 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
             
-            pdf_bytes = build_kitchen_receipt_from_payload(entry)
+            # ESC/POS direct, bukan PDF
+            esc_bytes = build_kitchen_receipt_from_payload(entry)
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(pdf_bytes)
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(esc_bytes)
                 tmp_path = tmp.name
             
-            job_id = conn.printFile(printer_name, tmp_path, f"K_{station}", {})
+            # Print raw ESC/POS
+            job_id = conn.printFile(printer_name, tmp_path, f"K_{station}", {"raw": "true"})
             results.append({
                 "station": station,
                 "printer": printer_name,
@@ -1234,6 +1079,7 @@ def build_escpos_checker(name: str) -> bytes:
     out = b""
     out += _esc_init()
     out += _esc_font_a()
+    out += _esc_line_spacing(24)  # Tight spacing
 
     # HEADER
     out += _esc_align_center() + _esc_bold(True)
@@ -1278,30 +1124,33 @@ def build_escpos_checker(name: str) -> bytes:
         else:
             qty_str = f"{qty}x"
 
-        # BARIS 1: Qty + Item Name (Latin)
-        line1 = f"{qty_str.ljust(4)}{item_name}"
+        # BARIS 1: Qty + Item Name (Latin, BOLD, Double Height)
+        out += _esc_bold(True)
+        out += _esc_char_size(0, 1)  # Double height
+        line1 = f"{qty_str} {item_name}"
         out += _safe_encode(line1 + "\n")
+        out += _esc_char_size(0, 0)
+        out += _esc_bold(False)
 
-        # BARIS 2: Chinese name (jika ada) - dengan indent
+        # BARIS 2: Chinese name (if exists)
         if mandarin_name:
-            chinese_line = f"    {mandarin_name}"  # 4 spaces indent
-            out += _safe_encode(chinese_line + "\n")
+            out += _safe_encode(f"  {mandarin_name}\n")
 
         # ADD ONS
         add_ons_str = item.get("add_ons") or ""
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
             for add in add_ons_list:
-                add_line = f"    + {add}"
+                add_line = f"  + {add}"
                 out += _safe_encode(add_line + "\n")
 
         # QUICK NOTES
         notes = (item.get("quick_notes") or "").strip()
         if notes:
-            note_line = f"    # {notes}"
+            note_line = f"  # {notes}"
             out += _safe_encode(note_line + "\n")
         
-        # Spacer antar item (minimal)
+        # Minimal spacer
         out += _safe_encode("\n")
 
     # TOTAL QTY
@@ -1325,8 +1174,10 @@ def build_escpos_checker(name: str) -> bytes:
             out += b"\x1b!\x00"
             out += _esc_feed(2)
 
-    # Feed minimal + cut
-    out += _esc_feed(4) + _esc_cut_full()
+    # Feed minimal + CUT
+    out += _esc_feed(3)
+    out += _esc_cut_full()  # AUTO CUT!
+    
     return out
 
 def _enqueue_checker_worker(name: str, printer_name: str):
