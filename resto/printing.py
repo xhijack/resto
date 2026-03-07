@@ -194,34 +194,17 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
     return job_id
 
 def sanitize_kitchen_payload(items):
-    """
-    Bersihkan payload item kitchen:
-    - Hilangkan kata tambahan
-    - Pastikan field is_checked dan status_kitchen ada
-    """
     blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
     clean_items = []
 
     for it in items:
-        # copy supaya tidak overwrite input
-        item = it.copy()
-
         for field in ["add_ons", "quick_notes", "item_name"]:
-            if item.get(field):
-                val = item[field]
+            if it.get(field):
+                val = it[field]
                 for b in blacklist:
                     val = val.replace(b, "").strip()
-                item[field] = val
-
-        # pastikan status_kitchen ada
-        item["status_kitchen"] = (item.get("status_kitchen") or "").strip()
-        # pastikan is_checked integer
-        try:
-            item["is_checked"] = int(item.get("is_checked") or 0)
-        except:
-            item["is_checked"] = 0
-
-        clean_items.append(item)
+                it[field] = val
+        clean_items.append(it)
 
     return clean_items
 
@@ -480,13 +463,25 @@ def get_item_printers(item: Dict) -> List[str]:
             printers.append(ks["printer_name"])
     return printers
 
-def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by: None) -> bytes:
+def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[Dict], created_by=None) -> bytes:
     out = b""
+
+    # ===== FILTER ITEM YANG BELUM PERNAH DI PRINT =====
+    filtered_items = [
+        it for it in items
+        if int(it.get("is_checked") or 0) == 0
+        and it.get("status_kitchen") == "Already Send To Kitchen"
+    ]
+
+    # Jika tidak ada item baru → tidak print apapun
+    if not filtered_items:
+        return b""
+
     out += _esc_init()
     out += _esc_font_a()
     out += _esc_char_size(0, 3)
+
     out += _esc_align_center() + _esc_bold(True)
-    # KITCHEN ORDER
     out += (f"{station_name}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
@@ -503,11 +498,11 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += (f"Purpose : {data['order_type']}\n").encode("ascii", "ignore")
 
     out += _line("-").encode() + b"\n"
-    
-    # ===== PREPARE MANDARIN MAP =====
+
+    # ===== PREPARE MANDARIN MAP (HANYA ITEM YANG DI PRINT) =====
     resto_menus = list(set([
         i.get("resto_menu")
-        for i in items
+        for i in filtered_items
         if i.get("resto_menu")
     ]))
 
@@ -519,13 +514,15 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
             filters={"name": ["in", resto_menus]},
             fields=["name", "custom_mandarin_name"]
         )
+
         mandarin_map = {
             d.name: d.custom_mandarin_name
             for d in menu_data
             if d.custom_mandarin_name
         }
 
-    for it in items:
+    # ===== PRINT ITEM =====
+    for it in filtered_items:
         qty_val = it.get("qty", 0)
 
         if isinstance(qty_val, float) and qty_val.is_integer():
@@ -536,9 +533,8 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         item_name = it.get("item_name", "")
         resto_menu = it.get("resto_menu")
         mandarin_name = mandarin_map.get(resto_menu) or ""
-        print(f"Item: {item_name}, Mandarin: {mandarin_name}")
 
-        # ===== ITEM UTAMA + MANDARIN =====
+        # ===== ITEM UTAMA =====
         if mandarin_name:
             line = f"{qty} x {item_name} ({mandarin_name})"
         else:
@@ -551,6 +547,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+
             for add in add_ons_list:
                 if "(" in add and ")" in add:
                     name, _ = add.rsplit("(", 1)
@@ -559,6 +556,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
                     name = add
 
                 add_line = f"  {name}"
+
                 for w in _wrap_text(add_line, LINE_WIDTH):
                     out += (w + "\n").encode("utf-8")
 
@@ -566,6 +564,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         notes = it.get("quick_notes", "")
         if notes:
             note_line = f"  # {notes}"
+
             for w in _wrap_text(note_line, LINE_WIDTH):
                 out += (w + "\n").encode("utf-8")
 
@@ -573,8 +572,11 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         out += b"\n"
 
     out += _line("-").encode() + b"\n"
+
     out += _esc_char_size(0, 0)
-    out += _esc_feed(3) + _esc_cut_full()
+    out += _esc_feed(3)
+    out += _esc_cut_full()
+
     return out
 
 # ========== API: cetak sekarang (sync) ==========
@@ -661,8 +663,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    items_raw = entry.get("items") or []
-    items = sanitize_kitchen_payload(items_raw)
+    items   = entry.get("items") or []
     
     resto_menus = list(set([
         i.get("resto_menu")
@@ -796,6 +797,23 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry.setdefault("pos_invoice", "")
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
+
+            # Filter item yang belum pernah di print
+            items = [
+                item for item in entry["items"]
+                if int(item.get("is_checked") or 0) == 0
+                and item.get("status_kitchen") == "Already Send To Kitchen"
+            ]
+
+            # Jika tidak ada item baru → skip print
+            if not items:
+                frappe.logger("pos_print").info({
+                    "invoice": entry.get("pos_invoice"),
+                    "message": "Tidak ada item baru untuk kitchen"
+                })
+                continue
+
+            entry["items"] = items
             
             raw = build_kitchen_receipt_from_payload(entry)
 
@@ -805,41 +823,6 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             
 
             job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
-            
-            # === Update is_checked setelah print success ===
-            try:
-                pos_invoice = _safe_str(entry.get("pos_invoice"))
-
-                if pos_invoice:
-                    items_to_update = frappe.db.get_all(
-                        "POS Invoice Item",
-                        filters={
-                            "parent": pos_invoice,
-                            "is_checked": 0,
-                            "status_kitchen": "Already Send To Kitchen"
-                        },
-                        pluck="name"
-                    )
-
-                    if items_to_update:
-                        frappe.db.set_value(
-                            "POS Invoice Item",
-                            {"name": ["in", items_to_update]},
-                            "is_checked",
-                            1
-                        )
-
-                        frappe.db.commit()
-
-                        frappe.logger("pos_print").info({
-                            "invoice": pos_invoice,
-                            "updated_items": len(items_to_update),
-                            "message": "Kitchen payload print → is_checked = 1"
-                        })
-
-            except Exception:
-                frappe.log_error(frappe.get_traceback(), "Kitchen Payload Update Checker Error")
-            
             results.append({
                 "station": station,
                 "printer": printer_name,
@@ -942,427 +925,427 @@ def get_cashier_name(pos_invoice_name: str) -> str:
     owner_user_doc = frappe.get_doc("User", invoice.owner)
     return owner_user_doc.full_name or invoice.owner
 
-def build_escpos_bill(name: str) -> bytes:
-    data = _collect_pos_invoice(name)
-
-    items = data.get("items", [])
-    payments = data.get("payments", [])
-    taxes = data.get("taxes", [])
-
-    company = data.get("company") or ""
-    order_type = data.get("order_type") or ""
-    customer = data.get("customer_name") or data.get("customer") or ""
-    total = data.get("total", 0)
-    discount = data.get("discount_amount", 0)
-    tax_total = data.get("total_taxes_and_charges", 0)
-    grand_total = data.get("grand_total", 0)
-    paid = data.get("paid_amount", 0)
-    change = data.get("change_amount", 0)
-    queue_no = data.get("queue") or ""
-    branch = data.get("branch") or ""
-    branch_detail = data.get("branch_detail") or {}
-
-    address1 = branch_detail.get("address_line1") or ""
-    address2 = branch_detail.get("address_line2") or ""
-    city = branch_detail.get("city") or ""
-    pincode = branch_detail.get("pincode") or ""
-    phone = branch_detail.get("phone") or ""
-    
-    # Ambil alamat utama Company
-    address1 = address2 = city = pincode = phone = ""
-
-    if company:
-        addr_links = frappe.get_all(
-            "Dynamic Link",
-            filters={"link_doctype": "Company", "link_name": company},
-            fields=["parent"],
-            order_by="creation asc"
-        )
-
-        if addr_links:
-            address_doc = frappe.get_doc("Address", addr_links[0].parent)
-            address1 = address_doc.address_line1 or ""
-            address2 = address_doc.address_line2 or ""
-            city = address_doc.city or ""
-            pincode = address_doc.pincode or ""
-            phone = address_doc.phone or ""
-
-    # Hitung total qty semua items
-    total_qty = sum(int(item.get("qty", 0)) for item in items)
-
-    # Format waktu cetak
-    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-    
-    # ===== PREPARE MANDARIN MAP =====
-    resto_menus = list(set([
-        i.get("resto_menu")
-        for i in items
-        if i.get("resto_menu")
-    ]))
-
-    mandarin_map = {}
-    
-    if resto_menus:
-        menu_data = frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", resto_menus]},
-            fields=["name", "custom_mandarin_name"]
-        )
-        mandarin_map = {
-            d.name: d.custom_mandarin_name
-            for d in menu_data
-        }
-
-    separator = "-" * LINE_WIDTH
-
-    out = b""
-    out += _esc_init()
-    out += _esc_font_a()
-
-    # ===== HEADER =====
-    out += _esc_align_center() + _esc_bold(True)
-
-    # Nama company + city
-    company_city_line = f"{company} {city}".strip()
-    if company_city_line:
-        out += (company_city_line + "\n").encode("ascii", "ignore")
-
-    # Alamat lengkap
-    if address1:
-        out += (address1 + "\n").encode("ascii", "ignore")
-    if address2:
-        out += (address2 + "\n").encode("ascii", "ignore")
-    if phone:
-        out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
-
-    # if company or branch:
-    #     header_line = f"{company}"
-    #     if branch:
-    #         header_line += f" - {branch}"
-    #     out += (header_line + "\n").encode("ascii", "ignore")
-
-    out += _esc_bold(False)
-
-    # Alamat branch
-    # if address1 or address2 or city or pincode or phone:
-    #     out += _esc_align_center()
-    #     if address1:
-    #         out += (f"{address1}\n").encode("ascii", "ignore")
-    #     if address2:
-    #         out += (f"{address2}\n").encode("ascii", "ignore")
-    #     if city or pincode:
-    #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
-    #     if phone:
-    #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
-
-
-    out += _esc_align_left()
-    out += (separator + "\n").encode("ascii", "ignore")
-
-    # ===== INFORMASI INVOICE =====
-    out += (f"No : {data['name']}\n").encode("ascii", "ignore")
-    out += (f"Date : {print_time}\n").encode("ascii", "ignore")
-
-    # Nama table
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
-
-    out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
-    pax = get_total_pax_from_pos_invoice(data["name"])
-    if pax:
-        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
-        out += _esc_bold(True)
-        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
-
-
-    # Nama kasir
-    cashier_name = get_cashier_name(data["name"])
-    out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
-
-    # Customer
-    if customer:
-        out += (f"Customer: {customer}\n").encode("ascii", "ignore")
-
-    out += (separator + "\n").encode("ascii", "ignore")
-
-    # ===== ITEMS =====
-    for item in items:
-        item_name = (item.get("item_name") or "").strip()
-        qty = int(item.get("qty") or 0)
-        rate = float(item.get("rate") or 0)
-        amount = qty * rate
-        resto_menu = item.get("resto_menu")
-
-        mandarin_name = mandarin_map.get(resto_menu) or ""
-
-        # ===== NAMA ITEM =====
-        if mandarin_name:
-            display_name = f"{item_name} ({mandarin_name})"
-        else:
-            display_name = item_name
-
-        out += (display_name + "\n").encode("utf-8")
-
-        # ===== BARIS HARGA =====
-        left_part = f"{qty}x @{format_number(rate)}"
-        right_part = format_number(amount)
-
-        line = left_part.ljust(LINE_WIDTH - 12) + right_part.rjust(12)
-        out += (line + "\n").encode("ascii", "ignore")
-
-        # ===== ADD ONS =====
-        add_ons_str = item.get("add_ons") or ""
-        if add_ons_str:
-            add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
-            for add in add_ons_list:
-                if "(" in add and ")" in add:
-                    name, price = add.rsplit("(", 1)
-                    price = price.replace(")", "").strip()
-                    name = name.strip()
-                    add_line = f"  {name}".ljust(LINE_WIDTH - 12) + \
-                            f"{format_number(float(price)).rjust(12)}"
-                    out += (add_line + "\n").encode("ascii", "ignore")
-                else:
-                    out += (f"  {add}\n").encode("utf-8")
-
-        # ===== NOTES =====
-        notes = (item.get("quick_notes") or "").strip()
-        if notes:
-            out += (f"  # {notes}\n").encode("utf-8")
-
-    # ===== TOTAL QTY =====
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += (f"{total_qty} items\n").encode("ascii", "ignore")
-
-    # ===== TOTALS =====
-    sc_amount = 0
-    tax_amount = 0
-
-    for tax in taxes:
-        tax_name = tax.get("description", "")
-        amount = tax.get("amount", 0)
-
-        if "Pendapatan Service" in tax_name:
-            sc_amount += amount
-        elif "VAT" in tax_name:
-            tax_amount += amount
-
-    # 1️⃣ Print SC dulu
-    if sc_amount:
-        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
-
-    # 2️⃣ Lalu Subtotal
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
-
-    # 3️⃣ Lalu Tax
-    if tax_amount:
-        out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
-    
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_bold(True)
-    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
-    out += _esc_bold(False)
-
-
-    # ===== PAYMENT =====
-    # for pay in payments:
-    #     mop = pay.get("mode_of_payment") or "-"
-    #     amt = pay.get("amount") or 0
-    #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
-
-    # if change:
-    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
-
-    # ===== FOOTER =====
-    out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_align_center()
-    out += b"Terima kasih!\n"
-    out += b"Selamat menikmati hidangan Anda!\n"
-
-    # ===== QUEUE NUMBER (Take Away) =====
-    order_type_value = (order_type or "").lower()
-    if order_type_value in ["take away", "takeaway"]:
-        queue_no = data.get("queue") or ""
-        if queue_no:
-            out += _esc_feed(2)
-            out += _esc_align_center()
-            out += _esc_bold(True)
-            out += b"Your Queue Number:\n"
-            out += _esc_bold(False)
-
-            # --- Font besar + center untuk nomor antrian ---
-            out += _esc_align_center()          # pastikan tetap di tengah
-            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
-            out += f"{queue_no}\n".encode("ascii", "ignore")
-            out += b"\x1b!\x00"                 # reset font ke normal
-            out += _esc_feed(2)
-
-
-    # Feed bawah + cut
-    out += _esc_feed(8) + _esc_cut_full()
-    return out
-
-def _enqueue_bill_worker(name: str, printer_name: str):
-    raw = build_escpos_bill(name)
-    job_id = cups_print_raw(raw, printer_name)
-
-    frappe.logger("pos_print").info({
-        "invoice": name,
-        "printer": printer_name,
-        "job_id": job_id,
-        "type": "bill"
-    })
-
-    return job_id
-
 # def build_escpos_bill(name: str) -> bytes:
-#     """
-#     Return PDF bytes (thermal-like layout simulation) keeping all original data and layout
-#     """
-#     import frappe
-#     from frappe.utils.pdf import get_pdf
-#     from frappe.utils import now_datetime
-
 #     data = _collect_pos_invoice(name)
 
-#     LINE_WIDTH = 32
+#     items = data.get("items", [])
+#     payments = data.get("payments", [])
+#     taxes = data.get("taxes", [])
 
-#     def money(val):
-#         return f"{int(round(val or 0)):,.0f}".replace(",", ".")
+#     company = data.get("company") or ""
+#     order_type = data.get("order_type") or ""
+#     customer = data.get("customer_name") or data.get("customer") or ""
+#     total = data.get("total", 0)
+#     discount = data.get("discount_amount", 0)
+#     tax_total = data.get("total_taxes_and_charges", 0)
+#     grand_total = data.get("grand_total", 0)
+#     paid = data.get("paid_amount", 0)
+#     change = data.get("change_amount", 0)
+#     queue_no = data.get("queue") or ""
+#     branch = data.get("branch") or ""
+#     branch_detail = data.get("branch_detail") or {}
 
-#     # ===============================
-#     # Mandarin Mapping
-#     # ===============================
+#     address1 = branch_detail.get("address_line1") or ""
+#     address2 = branch_detail.get("address_line2") or ""
+#     city = branch_detail.get("city") or ""
+#     pincode = branch_detail.get("pincode") or ""
+#     phone = branch_detail.get("phone") or ""
+    
+#     # Ambil alamat utama Company
+#     address1 = address2 = city = pincode = phone = ""
+
+#     if company:
+#         addr_links = frappe.get_all(
+#             "Dynamic Link",
+#             filters={"link_doctype": "Company", "link_name": company},
+#             fields=["parent"],
+#             order_by="creation asc"
+#         )
+
+#         if addr_links:
+#             address_doc = frappe.get_doc("Address", addr_links[0].parent)
+#             address1 = address_doc.address_line1 or ""
+#             address2 = address_doc.address_line2 or ""
+#             city = address_doc.city or ""
+#             pincode = address_doc.pincode or ""
+#             phone = address_doc.phone or ""
+
+#     # Hitung total qty semua items
+#     total_qty = sum(int(item.get("qty", 0)) for item in items)
+
+#     # Format waktu cetak
+#     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    
+#     # ===== PREPARE MANDARIN MAP =====
 #     resto_menus = list(set([
-#         i.get("resto_menu") for i in data.get("items", [])
+#         i.get("resto_menu")
+#         for i in items
 #         if i.get("resto_menu")
 #     ]))
 
 #     mandarin_map = {}
+    
 #     if resto_menus:
 #         menu_data = frappe.get_all(
 #             "Resto Menu",
 #             filters={"name": ["in", resto_menus]},
 #             fields=["name", "custom_mandarin_name"]
 #         )
-#         mandarin_map = {d.name: d.get("custom_mandarin_name") for d in menu_data if d.get("custom_mandarin_name")}
+#         mandarin_map = {
+#             d.name: d.custom_mandarin_name
+#             for d in menu_data
+#         }
 
-#     # ===============================
-#     # Text Helper
-#     # ===============================
-#     def wrap_text(text, width=LINE_WIDTH):
-#         if not text:
-#             return [""]
-#         words = str(text).split()
-#         lines, current = [], ""
-#         for w in words:
-#             if len(current) + len(w) + 1 <= width:
-#                 current = f"{current} {w}".strip()
-#             else:
-#                 lines.append(current)
-#                 current = w
-#         if current:
-#             lines.append(current)
-#         return lines
+#     separator = "-" * LINE_WIDTH
 
-#     def format_line(left, right):
-#         space = LINE_WIDTH - len(str(left)) - len(str(right))
-#         return f"{left}{' ' * max(space, 1)}{right}"
+#     out = b""
+#     out += _esc_init()
+#     out += _esc_font_a()
 
-#     # ===============================
-#     # Items HTML
-#     # ===============================
-#     items_html = ""
-#     for item in data.get("items", []):
+#     # ===== HEADER =====
+#     out += _esc_align_center() + _esc_bold(True)
+
+#     # Nama company + city
+#     company_city_line = f"{company} {city}".strip()
+#     if company_city_line:
+#         out += (company_city_line + "\n").encode("ascii", "ignore")
+
+#     # Alamat lengkap
+#     if address1:
+#         out += (address1 + "\n").encode("ascii", "ignore")
+#     if address2:
+#         out += (address2 + "\n").encode("ascii", "ignore")
+#     if phone:
+#         out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
+
+#     # if company or branch:
+#     #     header_line = f"{company}"
+#     #     if branch:
+#     #         header_line += f" - {branch}"
+#     #     out += (header_line + "\n").encode("ascii", "ignore")
+
+#     out += _esc_bold(False)
+
+#     # Alamat branch
+#     # if address1 or address2 or city or pincode or phone:
+#     #     out += _esc_align_center()
+#     #     if address1:
+#     #         out += (f"{address1}\n").encode("ascii", "ignore")
+#     #     if address2:
+#     #         out += (f"{address2}\n").encode("ascii", "ignore")
+#     #     if city or pincode:
+#     #         out += (f"{city} - {pincode}\n").encode("ascii", "ignore")
+#     #     if phone:
+#     #         out += (f"Phone: {phone}\n").encode("ascii", "ignore")
+
+
+#     out += _esc_align_left()
+#     out += (separator + "\n").encode("ascii", "ignore")
+
+#     # ===== INFORMASI INVOICE =====
+#     out += (f"No : {data['name']}\n").encode("ascii", "ignore")
+#     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
+
+#     # Nama table
+#     table_names = get_table_names_from_pos_invoice(data["name"])
+#     if table_names:
+#         out += _esc_bold(True)
+#         out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+#         out += _esc_bold(False)
+
+#     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
+#     pax = get_total_pax_from_pos_invoice(data["name"])
+#     if pax:
+#         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+#         out += _esc_bold(True)
+#         out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
+#         out += _esc_bold(False)
+
+
+#     # Nama kasir
+#     cashier_name = get_cashier_name(data["name"])
+#     out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
+
+#     # Customer
+#     if customer:
+#         out += (f"Customer: {customer}\n").encode("ascii", "ignore")
+
+#     out += (separator + "\n").encode("ascii", "ignore")
+
+#     # ===== ITEMS =====
+#     for item in items:
+#         item_name = (item.get("item_name") or "").strip()
 #         qty = int(item.get("qty") or 0)
-#         name_item = item.get("item_name") or ""
-#         amount = float(item.get("amount") or 0)
+#         rate = float(item.get("rate") or 0)
+#         amount = qty * rate
 #         resto_menu = item.get("resto_menu")
-#         mandarin = mandarin_map.get(resto_menu) or ""
-#         display_name = f"{name_item} ({mandarin})" if mandarin else name_item
 
-#         for line in wrap_text(f"{qty} x {display_name}"):
-#             items_html += f"<tr><td colspan='2'>{line}</td></tr>"
+#         mandarin_name = mandarin_map.get(resto_menu) or ""
 
-#         items_html += f"<tr><td style='padding-left:8px;'>{format_line('', money(amount))}</td></tr>"
+#         # ===== NAMA ITEM =====
+#         if mandarin_name:
+#             display_name = f"{item_name} ({mandarin_name})"
+#         else:
+#             display_name = item_name
 
-#         # Add-ons
-#         for add in (item.get("add_ons") or "").split(","):
-#             if add.strip():
-#                 items_html += f"<tr><td style='padding-left:8px;'>+ {add.strip()}</td></tr>"
+#         out += (display_name + "\n").encode("utf-8")
 
-#         # Notes
-#         if item.get("quick_notes"):
-#             items_html += f"<tr><td style='padding-left:8px;'># {item['quick_notes']}</td></tr>"
+#         # ===== BARIS HARGA =====
+#         left_part = f"{qty}x @{format_number(rate)}"
+#         right_part = format_number(amount)
 
-#     # ===============================
-#     # Taxes HTML
-#     # ===============================
-#     taxes_html = ""
-#     for tax in data.get("taxes", []):
-#         taxes_html += f"<tr><td>{tax.get('description','')}</td><td style='text-align:right;'>{money(tax.get('amount',0))}</td></tr>"
+#         line = left_part.ljust(LINE_WIDTH - 12) + right_part.rjust(12)
+#         out += (line + "\n").encode("ascii", "ignore")
 
-#     # ===============================
-#     # Payments HTML
-#     # ===============================
-#     payments_html = ""
-#     for pay in data.get("payments", []):
-#         payments_html += f"<tr><td>{pay.get('mode_of_payment','')}</td><td style='text-align:right;'>{money(pay.get('amount',0))}</td></tr>"
+#         # ===== ADD ONS =====
+#         add_ons_str = item.get("add_ons") or ""
+#         if add_ons_str:
+#             add_ons_list = [a.strip() for a in add_ons_str.split(",") if a.strip()]
+#             for add in add_ons_list:
+#                 if "(" in add and ")" in add:
+#                     name, price = add.rsplit("(", 1)
+#                     price = price.replace(")", "").strip()
+#                     name = name.strip()
+#                     add_line = f"  {name}".ljust(LINE_WIDTH - 12) + \
+#                             f"{format_number(float(price)).rjust(12)}"
+#                     out += (add_line + "\n").encode("ascii", "ignore")
+#                 else:
+#                     out += (f"  {add}\n").encode("utf-8")
 
-#     # ===============================
-#     # Other info
-#     # ===============================
-#     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-#     company = data.get("company") or ""
-#     customer = data.get("customer_name") or data.get("customer") or ""
-#     order_type = data.get("order_type") or ""
-#     queue_no = data.get("queue") or ""
-#     total_qty = sum(int(item.get("qty",0)) for item in data.get("items", []))
+#         # ===== NOTES =====
+#         notes = (item.get("quick_notes") or "").strip()
+#         if notes:
+#             out += (f"  # {notes}\n").encode("utf-8")
 
-#     # ===============================
-#     # HTML Template
-#     # ===============================
-#     html = f"""
-#     <html>
-#     <head>
-#     <meta charset="utf-8">
-#     <style>
-#     @page {{ size: 58mm 300mm; margin:4mm; }}
-#     body {{ font-family:"DejaVu Sans Mono", monospace; font-size:10px; line-height:1.2; width:58mm; }}
-#     table {{ width:100%; border-collapse: collapse; table-layout: fixed; }}
-#     td {{ padding:0; vertical-align: top; }}
-#     .center {{ text-align:center; }}
-#     .right {{ text-align:right; }}
-#     hr {{ border-top:1px dashed black; border-bottom:none; margin:4px 0; }}
-#     </style>
-#     </head>
-#     <body>
-#     <div class='center'><b>{company}</b><br>{print_time}<br>Invoice: {data.get('name')}</div>
-#     <hr>
-#     <table>{items_html}</table>
-#     <hr>
-#     <table>
-#     <tr><td>Subtotal</td><td class='right'>{money(data.get('total',0))}</td></tr>
-#     {taxes_html}
-#     <tr><td><b>Grand Total</b></td><td class='right'><b>{money(data.get('grand_total',0))}</b></td></tr>
-#     </table>
-#     <hr>
-#     <table>{payments_html}</table>
-#     <br>
-#     <div class='center'>Terima kasih!<br>Selamat menikmati hidangan Anda!</div>
-#     """
+#     # ===== TOTAL QTY =====
+#     out += (separator + "\n").encode("ascii", "ignore")
+#     out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
-#     # Queue number for take away
-#     if order_type.lower() in ["take away","takeaway"] and queue_no:
-#         html += f"<br><div class='center'><b>Your Queue Number: {queue_no}</b></div>"
+#     # ===== TOTALS =====
+#     sc_amount = 0
+#     tax_amount = 0
 
-#     html += "</body></html>"
+#     for tax in taxes:
+#         tax_name = tax.get("description", "")
+#         amount = tax.get("amount", 0)
 
-#     return get_pdf(html)
+#         if "Pendapatan Service" in tax_name:
+#             sc_amount += amount
+#         elif "VAT" in tax_name:
+#             tax_amount += amount
+
+#     # 1️⃣ Print SC dulu
+#     if sc_amount:
+#         out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
+
+#     # 2️⃣ Lalu Subtotal
+#     out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+
+#     # 3️⃣ Lalu Tax
+#     if tax_amount:
+#         out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
+    
+#     out += (separator + "\n").encode("ascii", "ignore")
+#     out += _esc_bold(True)
+#     out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
+#     out += _esc_bold(False)
+
+
+#     # ===== PAYMENT =====
+#     # for pay in payments:
+#     #     mop = pay.get("mode_of_payment") or "-"
+#     #     amt = pay.get("amount") or 0
+#     #     out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
+
+#     # if change:
+#     #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+
+#     # ===== FOOTER =====
+#     out += (separator + "\n").encode("ascii", "ignore")
+#     out += _esc_align_center()
+#     out += b"Terima kasih!\n"
+#     out += b"Selamat menikmati hidangan Anda!\n"
+
+#     # ===== QUEUE NUMBER (Take Away) =====
+#     order_type_value = (order_type or "").lower()
+#     if order_type_value in ["take away", "takeaway"]:
+#         queue_no = data.get("queue") or ""
+#         if queue_no:
+#             out += _esc_feed(2)
+#             out += _esc_align_center()
+#             out += _esc_bold(True)
+#             out += b"Your Queue Number:\n"
+#             out += _esc_bold(False)
+
+#             # --- Font besar + center untuk nomor antrian ---
+#             out += _esc_align_center()          # pastikan tetap di tengah
+#             out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
+#             out += f"{queue_no}\n".encode("ascii", "ignore")
+#             out += b"\x1b!\x00"                 # reset font ke normal
+#             out += _esc_feed(2)
+
+
+#     # Feed bawah + cut
+#     out += _esc_feed(8) + _esc_cut_full()
+#     return out
+
+# def _enqueue_bill_worker(name: str, printer_name: str):
+#     raw = build_escpos_bill(name)
+#     job_id = cups_print_raw(raw, printer_name)
+
+#     frappe.logger("pos_print").info({
+#         "invoice": name,
+#         "printer": printer_name,
+#         "job_id": job_id,
+#         "type": "bill"
+#     })
+
+#     return job_id
+
+def build_escpos_bill(name: str) -> bytes:
+    """
+    Return PDF bytes (thermal-like layout simulation) keeping all original data and layout
+    """
+    import frappe
+    from frappe.utils.pdf import get_pdf
+    from frappe.utils import now_datetime
+
+    data = _collect_pos_invoice(name)
+
+    LINE_WIDTH = 32
+
+    def money(val):
+        return f"{int(round(val or 0)):,.0f}".replace(",", ".")
+
+    # ===============================
+    # Mandarin Mapping
+    # ===============================
+    resto_menus = list(set([
+        i.get("resto_menu") for i in data.get("items", [])
+        if i.get("resto_menu")
+    ]))
+
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {d.name: d.get("custom_mandarin_name") for d in menu_data if d.get("custom_mandarin_name")}
+
+    # ===============================
+    # Text Helper
+    # ===============================
+    def wrap_text(text, width=LINE_WIDTH):
+        if not text:
+            return [""]
+        words = str(text).split()
+        lines, current = [], ""
+        for w in words:
+            if len(current) + len(w) + 1 <= width:
+                current = f"{current} {w}".strip()
+            else:
+                lines.append(current)
+                current = w
+        if current:
+            lines.append(current)
+        return lines
+
+    def format_line(left, right):
+        space = LINE_WIDTH - len(str(left)) - len(str(right))
+        return f"{left}{' ' * max(space, 1)}{right}"
+
+    # ===============================
+    # Items HTML
+    # ===============================
+    items_html = ""
+    for item in data.get("items", []):
+        qty = int(item.get("qty") or 0)
+        name_item = item.get("item_name") or ""
+        amount = float(item.get("amount") or 0)
+        resto_menu = item.get("resto_menu")
+        mandarin = mandarin_map.get(resto_menu) or ""
+        display_name = f"{name_item} ({mandarin})" if mandarin else name_item
+
+        for line in wrap_text(f"{qty} x {display_name}"):
+            items_html += f"<tr><td colspan='2'>{line}</td></tr>"
+
+        items_html += f"<tr><td style='padding-left:8px;'>{format_line('', money(amount))}</td></tr>"
+
+        # Add-ons
+        for add in (item.get("add_ons") or "").split(","):
+            if add.strip():
+                items_html += f"<tr><td style='padding-left:8px;'>+ {add.strip()}</td></tr>"
+
+        # Notes
+        if item.get("quick_notes"):
+            items_html += f"<tr><td style='padding-left:8px;'># {item['quick_notes']}</td></tr>"
+
+    # ===============================
+    # Taxes HTML
+    # ===============================
+    taxes_html = ""
+    for tax in data.get("taxes", []):
+        taxes_html += f"<tr><td>{tax.get('description','')}</td><td style='text-align:right;'>{money(tax.get('amount',0))}</td></tr>"
+
+    # ===============================
+    # Payments HTML
+    # ===============================
+    payments_html = ""
+    for pay in data.get("payments", []):
+        payments_html += f"<tr><td>{pay.get('mode_of_payment','')}</td><td style='text-align:right;'>{money(pay.get('amount',0))}</td></tr>"
+
+    # ===============================
+    # Other info
+    # ===============================
+    print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
+    company = data.get("company") or ""
+    customer = data.get("customer_name") or data.get("customer") or ""
+    order_type = data.get("order_type") or ""
+    queue_no = data.get("queue") or ""
+    total_qty = sum(int(item.get("qty",0)) for item in data.get("items", []))
+
+    # ===============================
+    # HTML Template
+    # ===============================
+    html = f"""
+    <html>
+    <head>
+    <meta charset="utf-8">
+    <style>
+    @page {{ size: 58mm 300mm; margin:4mm; }}
+    body {{ font-family:"DejaVu Sans Mono", monospace; font-size:10px; line-height:1.2; width:58mm; }}
+    table {{ width:100%; border-collapse: collapse; table-layout: fixed; }}
+    td {{ padding:0; vertical-align: top; }}
+    .center {{ text-align:center; }}
+    .right {{ text-align:right; }}
+    hr {{ border-top:1px dashed black; border-bottom:none; margin:4px 0; }}
+    </style>
+    </head>
+    <body>
+    <div class='center'><b>{company}</b><br>{print_time}<br>Invoice: {data.get('name')}</div>
+    <hr>
+    <table>{items_html}</table>
+    <hr>
+    <table>
+    <tr><td>Subtotal</td><td class='right'>{money(data.get('total',0))}</td></tr>
+    {taxes_html}
+    <tr><td><b>Grand Total</b></td><td class='right'><b>{money(data.get('grand_total',0))}</b></td></tr>
+    </table>
+    <hr>
+    <table>{payments_html}</table>
+    <br>
+    <div class='center'>Terima kasih!<br>Selamat menikmati hidangan Anda!</div>
+    """
+
+    # Queue number for take away
+    if order_type.lower() in ["take away","takeaway"] and queue_no:
+        html += f"<br><div class='center'><b>Your Queue Number: {queue_no}</b></div>"
+
+    html += "</body></html>"
+
+    return get_pdf(html)
 
 def _enqueue_bill_worker(name: str, printer_name: str):
     pdf = build_escpos_bill(name)
@@ -1554,8 +1537,8 @@ def build_escpos_receipt(name: str) -> bytes:
         amt = pay.get("amount") or 0
         out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
-    # if change:
-    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+    if change:
+        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
     out += (separator + "\n").encode("ascii", "ignore")
