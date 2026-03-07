@@ -1501,8 +1501,8 @@ def build_escpos_receipt(name: str) -> bytes:
         amt = pay.get("amount") or 0
         out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
-    if change:
-        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+    # if change:
+    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
     out += (separator + "\n").encode("ascii", "ignore")
