@@ -64,7 +64,7 @@ def after_migrate():
             "doctype": "Custom Field",
             "dt": "POS Invoice Item",
             "fieldname": "is_print_kitchen",
-            "label": "Is Checked (Printed)",
+            "label": "Is Print Kitchen",
             "fieldtype": "Check",
             "insert_after":"add_ons",
             "default": 0,

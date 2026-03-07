@@ -474,7 +474,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     filtered_items = [
         it for it in items
         if int(it.get("is_print_kitchen") or 0) == 0
-        and it.get("status_kitchen") == "Already Send To Kitchen"
+        # and it.get("status_kitchen") == "Already Send To Kitchen"
     ]
 
     # Jika tidak ada item baru → tidak print apapun
@@ -609,9 +609,41 @@ def pos_invoice_print_now(name: str, printer_name: str, add_qr: int = 0, qr_data
                 kitchen_groups.setdefault(printer, []).append(it)
 
         for kprinter, items in kitchen_groups.items():
-            raw_kitchen = build_kitchen_receipt(data, kprinter, items,created_by=full_name)
+            raw_kitchen = build_kitchen_receipt(
+                data,
+                kprinter,
+                items,
+                created_by=full_name
+            )
+
+            # jika tidak ada item baru → skip print
+            if not raw_kitchen:
+                frappe.logger("pos_print").info({
+                    "invoice": name,
+                    "printer": kprinter,
+                    "message": "Tidak ada item baru untuk kitchen"
+                })
+                continue
+
             kitchen_job = cups_print_raw(raw_kitchen, kprinter)
-            results.append({"printer": kprinter, "job_id": kitchen_job, "type": "kitchen"})
+
+            # ===== UPDATE STATUS PRINT =====
+            for it in items:
+                if int(it.get("is_print_kitchen") or 0) == 0:
+                    frappe.db.set_value(
+                        "POS Invoice Item",
+                        it.get("name"),
+                        "is_print_kitchen",
+                        1
+                    )
+
+            results.append({
+                "printer": kprinter,
+                "job_id": kitchen_job,
+                "type": "kitchen"
+            })
+
+        frappe.db.commit()
 
         frappe.msgprint(f"POS Invoice {name} terkirim ke {len(results)} printer")
         return {"ok": True, "jobs": results}
@@ -808,7 +840,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             items = [
                 item for item in entry["items"]
                 if int(item.get("is_print_kitchen") or 0) == 0
-                and item.get("status_kitchen") == "Already Send To Kitchen"
+                # and item.get("status_kitchen") == "Already Send To Kitchen"
             ]
 
             # Jika tidak ada item baru → skip print
@@ -1445,8 +1477,8 @@ def build_escpos_checker(name: str) -> bytes:
 
     items = sanitize_kitchen_payload([
         item for item in data.get("items", [])
-        # if int(item.get("custom_is_printed_checker") or 0) == 0
-        if item.get("status_kitchen") == "Already Send To Kitchen"
+        if int(item.get("is_checked") or 0) == 0
+        # if item.get("status_kitchen") == "Already Send To Kitchen"
     ])
     
     if not items:
@@ -1620,19 +1652,19 @@ def _enqueue_checker_worker(name: str, printer_name: str):
 
     items_to_update = frappe.db.get_all(
         "POS Invoice Item",
-        filters={"parent": name, "custom_is_printed_checker": 0},
+        filters={"parent": name, "is_checked": 0},
         pluck="name"
     )
 
     if items_to_update:
         for item_name in items_to_update:
-            frappe.db.set_value("POS Invoice Item", item_name, "custom_is_printed_checker", 1)
+            frappe.db.set_value("POS Invoice Item", item_name, "is_checked", 1)
 
         frappe.db.commit()
         frappe.logger("pos_print").info({
             "invoice": name,
             "updated_items": len(items_to_update),
-            "message": "Update custom_is_printed_checker = 1 untuk item yang sudah di-print"
+            "message": "Update is_checked = 1 untuk item yang sudah di-print"
         })
 
     frappe.logger("pos_print").info({
