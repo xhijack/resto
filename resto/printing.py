@@ -13,7 +13,7 @@ import re
 
 # ========== Konstanta & Util ==========
 LINE_WIDTH = 32           # ganti ke 42 jika printer 42 kolom
-ITEM_HEIGHT_MULT = 2      # 2 = aman di banyak printer; coba 3 kalau masih kecil
+ITEM_HEIGHT_MULT = 4      # 2 = aman di banyak printer; coba 3 kalau masih kecil
 
 ESC = b"\x1b"
 GS  = b"\x1d"
@@ -483,7 +483,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += _esc_init()
     out += _esc_font_a()
-    out += _esc_char_size(0, 3)
+    out += _esc_char_size(0, 4)
 
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station_name}\n").encode("ascii", "ignore")
@@ -539,10 +539,10 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
         # ===== ITEM UTAMA =====
-        if mandarin_name:
-            line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            line = f"{qty} x {item_name}"
+        # if mandarin_name:
+        #     line = f"{qty} x {item_name} ({mandarin_name})"
+        # else:
+        line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
             out += (w + "\n").encode("utf-8")
@@ -739,6 +739,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
+    
     for it in items:
         qty_s      = _fmt_qty(it.get("qty") or 0)
         item_name  = _safe_str(it.get("item_name"))
@@ -749,11 +750,11 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         
         # title = short_name or menu_name or "-"
         title = item_name or short_name or menu_name or "-"
-        mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
-        if mandarin_name:
-            display_line = f"{qty_s} x {title} ({mandarin_name})"
-        else:
-            display_line = f"{qty_s} x {title}"
+        # mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
+        # if mandarin_name:
+        #     display_line = f"{qty_s} x {title} ({mandarin_name})"
+        # else:
+        display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
         out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
@@ -1471,8 +1472,8 @@ def build_escpos_receipt(name: str) -> bytes:
         amt = pay.get("amount") or 0
         out += (f"{mop}:".rjust(LINE_WIDTH - 12) + f"{format_number(amt).rjust(12)}\n").encode("ascii", "ignore")
 
-    if change:
-        out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
+    # if change:
+    #     out += (f"Change:".rjust(LINE_WIDTH - 12) + f"{format_number(change).rjust(12)}\n").encode("ascii", "ignore")
 
     # ===== FOOTER =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1618,7 +1619,7 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
-
+    out += _esc_char_size(0, 4) 
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
@@ -1635,10 +1636,10 @@ def build_escpos_checker(name: str) -> bytes:
             qty_str = f"{qty}x"
 
         # Gabungkan dalam 1 baris
-        if mandarin_name:
-            full_item_name = f"{item_name} ({mandarin_name})"
-        else:
-            full_item_name = item_name
+        # if mandarin_name:
+        #     full_item_name = f"{item_name} ({mandarin_name})"
+        # else:
+        full_item_name = item_name
 
         line = f"{qty_str.ljust(5)}{full_item_name}"
         out += (line + "\n").encode("utf-8")
@@ -1655,6 +1656,7 @@ def build_escpos_checker(name: str) -> bytes:
         if notes:
             out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
+    out += _esc_char_size(0, 0)
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
