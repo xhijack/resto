@@ -739,6 +739,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
+    out += _esc_char_size(0, 3)
     for it in items:
         qty_s      = _fmt_qty(it.get("qty") or 0)
         item_name  = _safe_str(it.get("item_name"))
@@ -783,6 +784,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
         out += b"\n"  # spacer
 
+    out += _esc_char_size(0, 0)
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ==== FEED TAMBAHAN sebelum cut supaya tidak "kepotong cepat" ====
@@ -1635,10 +1637,10 @@ def build_escpos_checker(name: str) -> bytes:
             qty_str = f"{qty}x"
 
         # Gabungkan dalam 1 baris
-        if mandarin_name:
-            full_item_name = f"{item_name} ({mandarin_name})"
-        else:
-            full_item_name = item_name
+        # if mandarin_name:
+        #     full_item_name = f"{item_name} ({mandarin_name})"
+        # else:
+        full_item_name = item_name
 
         line = f"{qty_str.ljust(5)}{full_item_name}"
         out += (line + "\n").encode("utf-8")
