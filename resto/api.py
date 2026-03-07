@@ -555,16 +555,51 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
     return doc.insert(ignore_permissions=True)
 
 def print_to_ks_now(pos_invoice):
+
     from resto.printing import kitchen_print_from_payload
+
     for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-        ksp = send_to_ks_printing(item.get("kitchen_station"), pos_invoice, item.get("items", []))
+
+        # LOCK ITEM BEFORE BUILD PAYLOAD
+        locked_items = []
+
+        for it in item.get("items", []):
+
+            name = it.get("name")
+
+            if not name:
+                continue
+
+            status = frappe.db.get_value(
+                "POS Invoice Item",
+                name,
+                "is_print_kitchen"
+            )
+
+            if int(status or 0) == 0:
+
+                frappe.db.set_value(
+                    "POS Invoice Item",
+                    name,
+                    "is_print_kitchen",
+                    1
+                )
+
+                locked_items.append(it)
+
+        if not locked_items:
+            continue
+
         payload = {
-            "kitchen_station": ksp.kitchen_station,
-            "printer_name": ksp.printer_name,
+            "kitchen_station": item.get("kitchen_station"),
+            "printer_name": item.get("printer_name"),
             "pos_invoice": pos_invoice,
-            "items": item.get("items", [])
+            "items": locked_items
         }
+
         kitchen_print_from_payload(payload)
+
+    frappe.db.commit()
 
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):

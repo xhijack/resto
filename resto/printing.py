@@ -798,9 +798,11 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
 def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
+    """
+    payload: dict (single) / list (multi) / str (JSON)
+    """
     import json
     import cups
-
     try:
         # ===== NORMALIZE PAYLOAD =====
         if isinstance(payload, list):
@@ -814,87 +816,67 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             obj = json.loads(payload or "[]")
             entries = obj if isinstance(obj, list) else [obj]
         else:
-            raise TypeError("Unsupported payload type")
+            raise TypeError(f"payload bertipe {type(payload).__name__} tidak didukung")
 
         conn = cups.Connection()
         printers = conn.getPrinters()
 
         results = []
-
         for entry in entries:
-
             station = _safe_str(entry.get("kitchen_station"))
             printer_name = _safe_str(entry.get("printer_name")) or station
             pos_invoice = _safe_str(entry.get("pos_invoice"))
-
             if not station:
-                raise ValueError("Kitchen station wajib diisi")
+                raise ValueError("Setiap entry wajib memiliki 'kitchen_station'")
+            if not printer_name:
+                raise ValueError("Setiap entry wajib memiliki 'printer_name'")
 
             if printer_name not in printers:
                 raise frappe.ValidationError(
                     f"Printer '{printer_name}' tidak ditemukan di CUPS"
                 )
 
-            entry.setdefault(
-                "transaction_date",
-                frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-            )
+            entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
+            entry.setdefault("items", [])
 
-            # ======================================================
-            # LOCK ITEM BEFORE PRINT (Race Condition Safe)
-            # ======================================================
-
-            items_to_print = []
-
-            for item in entry.get("items", []):
-
-                item_name = item.get("name")
-                if not item_name:
-                    continue
-
-                status = frappe.db.get_value(
-                    "POS Invoice Item",
-                    item_name,
-                    "is_print_kitchen"
-                )
-
-                # Checkbox logic:
-                # None / 0 → Not printed
-                # 1 → Printed
-                if int(status or 0) == 0:
-
-                    # LOCK → set printed immediately to prevent duplicate worker
-                    frappe.db.set_value(
-                        "POS Invoice Item",
-                        item_name,
-                        "is_print_kitchen",
-                        1
-                    )
-
-                    items_to_print.append(item)
+            # ===== FILTER ITEM BELUM DI PRINT =====
+            items_to_print = [
+                item for item in entry["items"]
+                if int(item.get("is_print_kitchen") or 0) == 0
+            ]
 
             if not items_to_print:
+
                 frappe.logger("pos_print").info({
                     "invoice": pos_invoice,
                     "printer": printer_name,
-                    "message": "Tidak ada item baru kitchen print"
+                    "message": "Tidak ada item baru untuk kitchen"
                 })
                 continue
 
-            # Clone payload supaya tidak mutate original object
-            build_entry = dict(entry)
-            build_entry["items"] = items_to_print
+            # ===== SET ITEMS YANG AKAN DI PRINT =====
+            entry["items"] = items_to_print
 
-            raw = build_kitchen_receipt_from_payload(build_entry)
+            # ===== BUILD ESC/POS =====
+            raw = build_kitchen_receipt_from_payload(entry)
 
+            # jika builder menghasilkan kosong → skip
             if not raw:
+
+                frappe.logger("pos_print").info({
+                    "invoice": pos_invoice,
+                    "printer": printer_name,
+                    "message": "Builder menghasilkan raw kosong"
+                })
+
                 continue
 
-            # ===== PRINT =====
+            # ===== WRITE TEMP FILE =====
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
 
+            # ===== PRINT KE CUPS =====
             job_id = conn.printFile(
                 printer_name,
                 tmp_path,
@@ -902,8 +884,20 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 {"raw": "true"}
             )
 
+            # ===== UPDATE STATUS PRINT =====
+            for item in items_to_print:
+
+                if item.get("name"):
+                    frappe.db.set_value(
+                        "POS Invoice Item",
+                        item.get("name"),
+                        "is_print_kitchen",
+                        1
+                    )
+
             frappe.db.commit()
 
+            # ===== LOG PRINT =====
             frappe.logger("pos_print").info({
                 "invoice": pos_invoice,
                 "printer": printer_name,
@@ -918,17 +912,23 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 "pos_invoice": pos_invoice
             })
 
+
+        frappe.msgprint(f"{len(results)} kitchen ticket dikirim ke printer")
+
         return {
             "ok": True,
             "jobs": results
         }
 
+
     except Exception:
+
         frappe.log_error(
             frappe.get_traceback(),
-            "Kitchen Print Error"
+            "Kitchen Print Error (from payload)"
         )
-        frappe.throw("Gagal print kitchen")
+
+        frappe.throw("Gagal print kitchen. Silakan cek error log.")
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
