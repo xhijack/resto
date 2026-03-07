@@ -413,14 +413,20 @@ def get_branch_menu_by_resto_menu(pos_name):
 
 @frappe.whitelist()
 def process_kitchen_printing(pos_invoice):
-    frappe.enqueue(
-        "resto.api._process_kitchen_printing_worker",
-        queue="long",
-        timeout=300,
-        pos_invoice=pos_invoice
-    )
+    # frappe.enqueue(
+    #     "resto.api._process_kitchen_printing_worker",
+    #     queue="long",
+    #     timeout=300,
+    #     pos_invoice=pos_invoice
+    # )
 
-    return True
+    # return True
+    branch_name = get_branch_from_invoice(pos_invoice)
+
+    enqueue_checker_after_kitchen(pos_invoice, branch_name)
+    
+#alternative
+
 
 def get_branch_from_invoice(pos_invoice):
     branch = frappe.db.get_value(
@@ -452,6 +458,8 @@ def _process_kitchen_printing_worker(pos_invoice):
 @frappe.whitelist()
 def enqueue_checker_after_kitchen(pos_name: str, branch: str):
     from resto.printing import _enqueue_checker_worker
+
+    print_to_ks_now(pos_name)
 
     try:
         printer = frappe.db.get_value(
