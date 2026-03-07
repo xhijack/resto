@@ -1587,7 +1587,7 @@ def build_escpos_checker(name: str) -> bytes:
 
     items = sanitize_kitchen_payload([
         item for item in data.get("items", [])
-        if int(item.get("is_checked") or 0) == 0
+        if int(item.get("custom_is_printed_checker") or 0) == 0
         and item.get("status_kitchen") == "Already Send To Kitchen"
     ])
     
@@ -1762,19 +1762,19 @@ def _enqueue_checker_worker(name: str, printer_name: str):
 
     items_to_update = frappe.db.get_all(
         "POS Invoice Item",
-        filters={"parent": name, "is_checked": 0},
+        filters={"parent": name, "custom_is_printed_checker": 0},
         pluck="name"
     )
 
     if items_to_update:
         for item_name in items_to_update:
-            frappe.db.set_value("POS Invoice Item", item_name, "is_checked", 1)
+            frappe.db.set_value("POS Invoice Item", item_name, "custom_is_printed_checker", 1)
 
         frappe.db.commit()
         frappe.logger("pos_print").info({
             "invoice": name,
             "updated_items": len(items_to_update),
-            "message": "Update is_checked = 1 untuk item yang sudah di-print"
+            "message": "Update custom_is_printed_checker = 1 untuk item yang sudah di-print"
         })
 
     frappe.logger("pos_print").info({
