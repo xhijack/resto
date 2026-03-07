@@ -798,12 +798,11 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
 def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
-    """
-    payload: dict (single) / list (multi) / str (JSON)
-    """
     import json
     import cups
+
     try:
+        # ===== NORMALIZE PAYLOAD =====
         if isinstance(payload, list):
             entries = payload
         elif isinstance(payload, dict):
@@ -815,76 +814,121 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             obj = json.loads(payload or "[]")
             entries = obj if isinstance(obj, list) else [obj]
         else:
-            raise TypeError(f"payload bertipe {type(payload).__name__} tidak didukung")
+            raise TypeError("Unsupported payload type")
 
         conn = cups.Connection()
         printers = conn.getPrinters()
 
         results = []
+
         for entry in entries:
+
             station = _safe_str(entry.get("kitchen_station"))
             printer_name = _safe_str(entry.get("printer_name")) or station
+            pos_invoice = _safe_str(entry.get("pos_invoice"))
+
             if not station:
-                raise ValueError("Setiap entry wajib memiliki 'kitchen_station'")
-            if not printer_name:
-                raise ValueError("Setiap entry wajib memiliki 'printer_name'")
+                raise ValueError("Kitchen station wajib diisi")
 
             if printer_name not in printers:
-                raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
+                raise frappe.ValidationError(
+                    f"Printer '{printer_name}' tidak ditemukan di CUPS"
+                )
 
-            entry.setdefault("pos_invoice", "")
-            entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
-            entry.setdefault("items", [])
+            entry.setdefault(
+                "transaction_date",
+                frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+            )
 
-            # Filter item yang belum pernah di print
-            items = [
-                item for item in entry["items"]
-                if int(item.get("is_print_kitchen") or 0) == 0
-                # and item.get("status_kitchen") == "Already Send To Kitchen"
-            ]
+            # ======================================================
+            # LOCK ITEM BEFORE PRINT (Race Condition Safe)
+            # ======================================================
 
-            # Jika tidak ada item baru → skip print
-            if not items:
+            items_to_print = []
+
+            for item in entry.get("items", []):
+
+                item_name = item.get("name")
+                if not item_name:
+                    continue
+
+                status = frappe.db.get_value(
+                    "POS Invoice Item",
+                    item_name,
+                    "is_print_kitchen"
+                )
+
+                # Checkbox logic:
+                # None / 0 → Not printed
+                # 1 → Printed
+                if int(status or 0) == 0:
+
+                    # LOCK → set printed immediately to prevent duplicate worker
+                    frappe.db.set_value(
+                        "POS Invoice Item",
+                        item_name,
+                        "is_print_kitchen",
+                        1
+                    )
+
+                    items_to_print.append(item)
+
+            if not items_to_print:
                 frappe.logger("pos_print").info({
-                    "invoice": entry.get("pos_invoice"),
-                    "message": "Tidak ada item baru untuk kitchen"
+                    "invoice": pos_invoice,
+                    "printer": printer_name,
+                    "message": "Tidak ada item baru kitchen print"
                 })
                 continue
 
-            entry["items"] = items
-            
-            raw = build_kitchen_receipt_from_payload(entry)
+            # Clone payload supaya tidak mutate original object
+            build_entry = dict(entry)
+            build_entry["items"] = items_to_print
 
+            raw = build_kitchen_receipt_from_payload(build_entry)
+
+            if not raw:
+                continue
+
+            # ===== PRINT =====
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 tmp.write(raw)
                 tmp_path = tmp.name
-            
 
-            job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
-            pos_invoice = entry.get("pos_invoice")
-            for item in items:
-                frappe.db.set_value(
-                    "POS Invoice Item",
-                    item.get("name"),
-                    "is_print_kitchen",
-                    1
-                )
+            job_id = conn.printFile(
+                printer_name,
+                tmp_path,
+                f"KITCHEN_{station}",
+                {"raw": "true"}
+            )
 
             frappe.db.commit()
-            
+
+            frappe.logger("pos_print").info({
+                "invoice": pos_invoice,
+                "printer": printer_name,
+                "job_id": job_id,
+                "items_printed": len(items_to_print)
+            })
+
             results.append({
                 "station": station,
                 "printer": printer_name,
                 "job_id": job_id,
-                "pos_invoice": _safe_str(entry.get("pos_invoice")),
+                "pos_invoice": pos_invoice
             })
 
-        frappe.msgprint(f"{len(results)} kitchen ticket dikirim ke printer")
-        return {"ok": True, "jobs": results}
+        return {
+            "ok": True,
+            "jobs": results
+        }
 
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Kitchen Print Error (from payload)")
-        frappe.throw(f"Gagal print kitchen: {str(e)}")
+    except Exception:
+        frappe.log_error(
+            frappe.get_traceback(),
+            "Kitchen Print Error"
+        )
+        frappe.throw("Gagal print kitchen")
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
