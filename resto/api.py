@@ -333,7 +333,8 @@ def create_pos_invoice(payload):
             "add_ons": item.get("add_ons"),  # tetap string field di item
             "quick_notes": item.get("quick_notes"),
             "waiter": item.get("waiter"),
-            "is_checked": item.get("is_checked")
+            "is_checked": item.get("is_checked"),
+            "is_print_kitchen": item.get("is_print_kitchen")
         })
 
     # Tambahkan pembayaran
@@ -436,7 +437,11 @@ def get_branch_from_invoice(pos_invoice):
     
 def _process_kitchen_printing_worker(pos_invoice):
     try:
+        frappe.logger().info(f"KITCHEN WORKER START {pos_invoice}")
+
         print_to_ks_now(pos_invoice)
+
+        frappe.logger().info(f"KITCHEN PRINT DONE {pos_invoice}")
 
         enqueue_checker_after_kitchen(
             pos_invoice,
@@ -493,7 +498,7 @@ def send_to_kitchen(payload, table_name=None):
 
         try:
             print_to_ks_now(pos_name)
-            printing_status = "Printing berhasil"
+            printing_status = "Printing queued"
         except Exception as print_err:
             frappe.log_error(frappe.get_traceback(), f"Printing Error for POS {pos_name}")
             printing_status = f"Printing gagal: {str(print_err)}"

@@ -58,6 +58,17 @@ def after_migrate():
             "insert_after":"add_ons",
             "default": 0,
         }).insert(ignore_permissions=True)
+        
+    if not frappe.db.exists("Custom Field", {'fieldname': "is_print_kitchen", "dt": "POS Invoice Item"}):
+        frappe.get_doc({
+            "doctype": "Custom Field",
+            "dt": "POS Invoice Item",
+            "fieldname": "is_print_kitchen",
+            "label": "Is Checked (Printed)",
+            "fieldtype": "Check",
+            "insert_after":"add_ons",
+            "default": 0,
+        }).insert(ignore_permissions=True)
 
     # if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
     #     frappe.get_doc({
@@ -353,13 +364,15 @@ def after_migrate():
             "insert_after": "is_return"
         }).insert(ignore_permissions=True)
         
-    if not frappe.db.exists("Custom Field", {"dt": "Mode of Payment", "fieldname": "custom_parent"}):
+    if not frappe.db.exists("Custom Field", {"dt": "Mode of Payment", "fieldname": "parent1"}):
         frappe.get_doc({
             "doctype": "Custom Field",
             "dt": "Mode of Payment",
-            "fieldname": "custom_parent",
+            "fieldname": "parent1",
             "label": "Parent",
             "fieldtype": "Link",
             "options": "Mode of Payment",
             "insert_after": "mode_of_payment"
         }).insert(ignore_permissions=True)
+        
+    

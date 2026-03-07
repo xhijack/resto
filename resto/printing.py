@@ -229,6 +229,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
 
 
         items.append({
+            "name": it.get("name"),
             "item_code": it.get("item_code"),
             "item_name": it.get("item_name") or it.get("item_code"),
             "resto_menu": it.get("resto_menu"),
@@ -242,7 +243,8 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "add_ons" : it.get("add_ons") or "",
             "quick_notes": it.get("quick_notes") or "",
             "status_kitchen": it.get("status_kitchen") or "",
-            "is_checked": int(it.get("is_checked") or 0)
+            "is_checked": int(it.get("is_checked") or 0),
+            "is_print_kitchen": int(it.get("is_print_kitchen") or 0),
         })
 
     taxes = []
@@ -471,7 +473,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     # ===== FILTER ITEM YANG BELUM PERNAH DI PRINT =====
     filtered_items = [
         it for it in items
-        if int(it.get("is_checked") or 0) == 0
+        if int(it.get("is_print_kitchen") or 0) == 0
         and it.get("status_kitchen") == "Already Send To Kitchen"
     ]
 
@@ -805,7 +807,7 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             # Filter item yang belum pernah di print
             items = [
                 item for item in entry["items"]
-                if int(item.get("is_checked") or 0) == 0
+                if int(item.get("is_print_kitchen") or 0) == 0
                 and item.get("status_kitchen") == "Already Send To Kitchen"
             ]
 
@@ -827,6 +829,17 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             
 
             job_id = conn.printFile(printer_name, tmp_path, f"KITCHEN_{station}", {"raw": "true"})
+            pos_invoice = entry.get("pos_invoice")
+            for item in items:
+                frappe.db.set_value(
+                    "POS Invoice Item",
+                    item.get("name"),
+                    "is_print_kitchen",
+                    1
+                )
+
+            frappe.db.commit()
+            
             results.append({
                 "station": station,
                 "printer": printer_name,
@@ -1206,165 +1219,6 @@ def _enqueue_bill_worker(name: str, printer_name: str):
 
     return job_id
 
-# def build_escpos_bill(name: str) -> bytes:
-#     """
-#     Return PDF bytes (thermal-like layout simulation) keeping all original data and layout
-#     """
-#     import frappe
-#     from frappe.utils.pdf import get_pdf
-#     from frappe.utils import now_datetime
-
-#     data = _collect_pos_invoice(name)
-
-#     LINE_WIDTH = 32
-
-#     def money(val):
-#         return f"{int(round(val or 0)):,.0f}".replace(",", ".")
-
-#     # ===============================
-#     # Mandarin Mapping
-#     # ===============================
-#     resto_menus = list(set([
-#         i.get("resto_menu") for i in data.get("items", [])
-#         if i.get("resto_menu")
-#     ]))
-
-#     mandarin_map = {}
-#     if resto_menus:
-#         menu_data = frappe.get_all(
-#             "Resto Menu",
-#             filters={"name": ["in", resto_menus]},
-#             fields=["name", "custom_mandarin_name"]
-#         )
-#         mandarin_map = {d.name: d.get("custom_mandarin_name") for d in menu_data if d.get("custom_mandarin_name")}
-
-#     # ===============================
-#     # Text Helper
-#     # ===============================
-#     def wrap_text(text, width=LINE_WIDTH):
-#         if not text:
-#             return [""]
-#         words = str(text).split()
-#         lines, current = [], ""
-#         for w in words:
-#             if len(current) + len(w) + 1 <= width:
-#                 current = f"{current} {w}".strip()
-#             else:
-#                 lines.append(current)
-#                 current = w
-#         if current:
-#             lines.append(current)
-#         return lines
-
-#     def format_line(left, right):
-#         space = LINE_WIDTH - len(str(left)) - len(str(right))
-#         return f"{left}{' ' * max(space, 1)}{right}"
-
-#     # ===============================
-#     # Items HTML
-#     # ===============================
-#     items_html = ""
-#     for item in data.get("items", []):
-#         qty = int(item.get("qty") or 0)
-#         name_item = item.get("item_name") or ""
-#         amount = float(item.get("amount") or 0)
-#         resto_menu = item.get("resto_menu")
-#         mandarin = mandarin_map.get(resto_menu) or ""
-#         display_name = f"{name_item} ({mandarin})" if mandarin else name_item
-
-#         for line in wrap_text(f"{qty} x {display_name}"):
-#             items_html += f"<tr><td colspan='2'>{line}</td></tr>"
-
-#         items_html += f"<tr><td style='padding-left:8px;'>{format_line('', money(amount))}</td></tr>"
-
-#         # Add-ons
-#         for add in (item.get("add_ons") or "").split(","):
-#             if add.strip():
-#                 items_html += f"<tr><td style='padding-left:8px;'>+ {add.strip()}</td></tr>"
-
-#         # Notes
-#         if item.get("quick_notes"):
-#             items_html += f"<tr><td style='padding-left:8px;'># {item['quick_notes']}</td></tr>"
-
-#     # ===============================
-#     # Taxes HTML
-#     # ===============================
-#     taxes_html = ""
-#     for tax in data.get("taxes", []):
-#         taxes_html += f"<tr><td>{tax.get('description','')}</td><td style='text-align:right;'>{money(tax.get('amount',0))}</td></tr>"
-
-#     # ===============================
-#     # Payments HTML
-#     # ===============================
-#     payments_html = ""
-#     for pay in data.get("payments", []):
-#         payments_html += f"<tr><td>{pay.get('mode_of_payment','')}</td><td style='text-align:right;'>{money(pay.get('amount',0))}</td></tr>"
-
-#     # ===============================
-#     # Other info
-#     # ===============================
-#     print_time = now_datetime().strftime("%d/%m/%Y %H:%M")
-#     company = data.get("company") or ""
-#     customer = data.get("customer_name") or data.get("customer") or ""
-#     order_type = data.get("order_type") or ""
-#     queue_no = data.get("queue") or ""
-#     total_qty = sum(int(item.get("qty",0)) for item in data.get("items", []))
-
-#     # ===============================
-#     # HTML Template
-#     # ===============================
-#     html = f"""
-#     <html>
-#     <head>
-#     <meta charset="utf-8">
-#     <style>
-#     @page {{ size: 58mm 300mm; margin:4mm; }}
-#     body {{ font-family:"DejaVu Sans Mono", monospace; font-size:10px; line-height:1.2; width:58mm; }}
-#     table {{ width:100%; border-collapse: collapse; table-layout: fixed; }}
-#     td {{ padding:0; vertical-align: top; }}
-#     .center {{ text-align:center; }}
-#     .right {{ text-align:right; }}
-#     hr {{ border-top:1px dashed black; border-bottom:none; margin:4px 0; }}
-#     </style>
-#     </head>
-#     <body>
-#     <div class='center'><b>{company}</b><br>{print_time}<br>Invoice: {data.get('name')}</div>
-#     <hr>
-#     <table>{items_html}</table>
-#     <hr>
-#     <table>
-#     <tr><td>Subtotal</td><td class='right'>{money(data.get('total',0))}</td></tr>
-#     {taxes_html}
-#     <tr><td><b>Grand Total</b></td><td class='right'><b>{money(data.get('grand_total',0))}</b></td></tr>
-#     </table>
-#     <hr>
-#     <table>{payments_html}</table>
-#     <br>
-#     <div class='center'>Terima kasih!<br>Selamat menikmati hidangan Anda!</div>
-#     """
-
-#     # Queue number for take away
-#     if order_type.lower() in ["take away","takeaway"] and queue_no:
-#         html += f"<br><div class='center'><b>Your Queue Number: {queue_no}</b></div>"
-
-#     html += "</body></html>"
-
-#     return get_pdf(html)
-
-# def _enqueue_bill_worker(name: str, printer_name: str):
-#     pdf = build_escpos_bill(name)
-#     job_id = cups_print_pdf(pdf, printer_name)
-
-#     frappe.logger("pos_print").info({
-#         "invoice": name,
-#         "printer": printer_name,
-#         "job_id": job_id,
-#         "type": "bill"
-#     })
-
-#     return job_id
-
-
 def build_escpos_receipt(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
@@ -1591,8 +1445,8 @@ def build_escpos_checker(name: str) -> bytes:
 
     items = sanitize_kitchen_payload([
         item for item in data.get("items", [])
-        if int(item.get("custom_is_printed_checker") or 0) == 0
-        and item.get("status_kitchen") == "Already Send To Kitchen"
+        # if int(item.get("custom_is_printed_checker") or 0) == 0
+        if item.get("status_kitchen") == "Already Send To Kitchen"
     ])
     
     if not items:
@@ -1789,86 +1643,3 @@ def _enqueue_checker_worker(name: str, printer_name: str):
     })
 
     return job_id
-
-@frappe.whitelist(allow_guest=True)
-def preview_receipt(name: str):
-
-    if not frappe.db.exists("POS Invoice", name):
-        return {"error": f"POS Invoice {name} tidak ditemukan"}
-
-    receipt_bytes = build_escpos_bill(name)
-
-    text = receipt_bytes.decode("utf-8", "ignore")
-
-    # Hapus control ESC/POS TANPA hapus newline
-    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
-
-    return {
-        "preview": text,
-        "invoice": name,
-        "timestamp": now_datetime()
-    }
-    
-@frappe.whitelist(allow_guest=True)
-def preview_checker(name: str):
-
-    if not frappe.db.exists("POS Invoice", name):
-        return {"error": f"POS Invoice {name} tidak ditemukan"}
-
-    receipt_bytes = build_escpos_checker(name)
-
-    text = receipt_bytes.decode("utf-8", "ignore")
-
-    # Hapus control ESC/POS TANPA hapus newline
-    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
-
-    return {
-        "preview": text,
-        "invoice": name,
-        "timestamp": now_datetime()
-    }
-
-@frappe.whitelist(allow_guest=True)
-def preview_kitchen_receipt_simple(invoice_name: str):
-    """
-    Preview kitchen receipt via GET hanya dengan invoice_name.
-    """
-
-    import re
-    from frappe.utils import now_datetime
-
-    # ===== VALIDASI =====
-    if not frappe.db.exists("POS Invoice", invoice_name):
-        return {"error": f"POS Invoice {invoice_name} tidak ditemukan"}
-
-    doc = frappe.get_doc("POS Invoice", invoice_name)
-
-    # ===== SIAPKAN ENTRY SESUAI FORMAT build_kitchen_receipt_from_payload =====
-    entry = {
-        "kitchen_station": doc.branch or "Kitchen",
-        "pos_invoice": doc.name,
-        "transaction_date": f"{doc.posting_date} {doc.posting_time}",
-        "items": []
-    }
-
-    for it in doc.items:
-        entry["items"].append({
-            "resto_menu": it.get("resto_menu") or it.get("item_name"),
-            "short_name": it.get("item_name"),
-            "qty": it.get("qty"),
-            "add_ons": it.get("add_ons"),
-            "quick_notes": it.get("quick_notes")
-        })
-
-    # ===== BUILD RECEIPT (TANPA KITCHEN ORDER) =====
-    receipt_bytes = build_kitchen_receipt_from_payload(entry)
-
-    # ===== CONVERT KE TEXT =====
-    text = receipt_bytes.decode("utf-8", "ignore")
-    text = re.sub(r'[\x00-\x09\x0B-\x1F\x7F-\x9F]', '', text)
-
-    return {
-        "preview": text.strip(),
-        "invoice": invoice_name,
-        "timestamp": now_datetime()
-    }
