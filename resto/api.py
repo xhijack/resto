@@ -554,45 +554,49 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
         })
     return doc.insert(ignore_permissions=True)
 
+from resto.printing import kitchen_print_from_payload
+
 def print_to_ks_now(pos_invoice):
-
-    from resto.printing import kitchen_print_from_payload
-
-    for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-
-        # LOCK ITEM BEFORE BUILD PAYLOAD
+    """
+    Mengirim item ke kitchen station untuk dicetak.
+    Mencari ID item di database berdasarkan data yang diterima,
+    lalu menandai sebagai sudah dicetak sebelum mencetak.
+    """
+    for group in get_branch_menu_for_kitchen_printing(pos_invoice):
         locked_items = []
 
-        for it in item.get("items", []):
+        for item_data in group.get("items", []):
+            # Filter untuk mencari item yang cocok di tabel POS Invoice Item
+            filters = {
+                "parent": pos_invoice,
+                "parenttype": "POS Invoice",
+                "resto_menu": item_data.get("resto_menu"),
+                "qty": item_data.get("qty"),
+                "quick_notes": item_data.get("quick_notes", ""),
+                "add_ons": item_data.get("add_ons", ""),
+                "is_print_kitchen": 0
+            }
+            # Hapus filter yang bernilai None (jika ada)
+            filters = {k: v for k, v in filters.items() if v is not None}
 
-            name = it.get("name")
+            # Cari nama item pertama yang cocok
+            item_name = frappe.db.get_value("POS Invoice Item", filters, "name")
 
-            if not name:
-                continue
-
-            status = frappe.db.get_value(
-                "POS Invoice Item",
-                name,
-                "is_print_kitchen"
-            )
-
-            if int(status or 0) == 0:
-
-                frappe.db.set_value(
-                    "POS Invoice Item",
-                    name,
-                    "is_print_kitchen",
-                    1
-                )
-
-                locked_items.append(it)
+            if item_name:
+                # Tandai sebagai sudah dicetak
+                frappe.db.set_value("POS Invoice Item", item_name, "is_print_kitchen", 1)
+                locked_items.append(item_data)  # simpan data untuk dicetak
+            else:
+                # Jika tidak ditemukan, kemungkinan sudah dicetak atau data tidak cocok
+                frappe.log_error(f"Item not found for printing: {item_data}", "Print to KS")
 
         if not locked_items:
-            continue
+            continue  # tidak ada item baru untuk station ini
 
+        # Siapkan payload untuk pencetakan
         payload = {
-            "kitchen_station": item.get("kitchen_station"),
-            "printer_name": item.get("printer_name"),
+            "kitchen_station": group.get("kitchen_station"),
+            "printer_name": group.get("printer_name"),  # pastikan ada di data
             "pos_invoice": pos_invoice,
             "items": locked_items
         }
