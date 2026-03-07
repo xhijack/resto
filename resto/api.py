@@ -556,47 +556,42 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
 
 from resto.printing import kitchen_print_from_payload
 
+import frappe
+from resto.printing import kitchen_print_from_payload
+
 def print_to_ks_now(pos_invoice):
     """
     Mengirim item ke kitchen station untuk dicetak.
-    Mencari ID item di database berdasarkan data yang diterima,
-    lalu menandai sebagai sudah dicetak sebelum mencetak.
+    Mengunci item berdasarkan nama dokumen, lalu mencetak.
     """
-    for group in get_branch_menu_for_kitchen_printing(pos_invoice):
+    groups = get_branch_menu_for_kitchen_printing(pos_invoice)
+
+    for group in groups:
         locked_items = []
 
         for item_data in group.get("items", []):
-            # Filter untuk mencari item yang cocok di tabel POS Invoice Item
-            filters = {
-                "parent": pos_invoice,
-                "parenttype": "POS Invoice",
-                "resto_menu": item_data.get("resto_menu"),
-                "qty": item_data.get("qty"),
-                "quick_notes": item_data.get("quick_notes", ""),
-                "add_ons": item_data.get("add_ons", ""),
-                "is_print_kitchen": 0
-            }
-            # Hapus filter yang bernilai None (jika ada)
-            filters = {k: v for k, v in filters.items() if v is not None}
+            item_name = item_data.get("name")
+            if not item_name:
+                frappe.log_error(f"Item tanpa name: {item_data}", "Print to KS")
+                continue
 
-            # Cari nama item pertama yang cocok
-            item_name = frappe.db.get_value("POS Invoice Item", filters, "name")
-
-            if item_name:
+            # Cek apakah sudah pernah dicetak (untuk keamanan)
+            status = frappe.db.get_value("POS Invoice Item", item_name, "is_print_kitchen")
+            if int(status or 0) == 0:
                 # Tandai sebagai sudah dicetak
                 frappe.db.set_value("POS Invoice Item", item_name, "is_print_kitchen", 1)
-                locked_items.append(item_data)  # simpan data untuk dicetak
+                locked_items.append(item_data)
             else:
-                # Jika tidak ditemukan, kemungkinan sudah dicetak atau data tidak cocok
-                frappe.log_error(f"Item not found for printing: {item_data}", "Print to KS")
+                # Item sudah dicetak sebelumnya, lewati
+                continue
 
         if not locked_items:
-            continue  # tidak ada item baru untuk station ini
+            continue
 
         # Siapkan payload untuk pencetakan
         payload = {
             "kitchen_station": group.get("kitchen_station"),
-            "printer_name": group.get("printer_name"),  # pastikan ada di data
+            "printer_name": group.get("printer_name"),   # sudah disediakan oleh fungsi grouping
             "pos_invoice": pos_invoice,
             "items": locked_items
         }
@@ -605,16 +600,20 @@ def print_to_ks_now(pos_invoice):
 
     frappe.db.commit()
 
+
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):
     """
-    Return list of tickets grouped by kitchen_station:
+    Return list of tickets grouped by kitchen_station, each with printer_name.
+    Struktur output:
     [
       {
         "kitchen_station": "HOTKITCHEN",
+        "printer_name": "Printer Dapur",
         "pos_invoice": "POSINVOICE00001",
         "items": [
           {
+            "name": "POS Invoice Item ID",   # <-- ditambahkan
             "resto_menu": "Nasi Goreng Spesial",
             "short_name": "NGS",
             "qty": 2,
@@ -629,7 +628,7 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
     # Ambil branch dari POS Invoice agar pencarian Branch Menu relevan
     branch = frappe.db.get_value("POS Invoice", pos_name, "branch")
 
-    # Ambil item dari POS Invoice Item (asumsi ada custom fields quick_notes & add_ons)
+    # Ambil item dari POS Invoice Item
     pos_items = frappe.get_all(
         "POS Invoice Item",
         filters={"parent": pos_name},
@@ -639,16 +638,18 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
     if not pos_items:
         return []
 
-    # Group hasil per kitchen_station
-    tickets_by_station = {}  # station -> list[items]
-    short_name_cache = {}    # resto_menu -> short_name
+    # Cache untuk short_name
+    short_name_cache = {}
+
+    # Struktur sementara: station -> {printer_name, items[]}
+    station_map = {}
 
     for it in pos_items:
         resto_menu = it.get("resto_menu")
         if not resto_menu:
             continue
 
-        # Ambil short_name dari Resto Menu (cache biar hemat query)
+        # Ambil short_name dari Resto Menu (cache)
         if resto_menu not in short_name_cache:
             short_name_cache[resto_menu] = frappe.db.get_value(
                 "Resto Menu", resto_menu, "short_name"
@@ -659,53 +660,69 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
         if branch:
             bm_filters["branch"] = branch
 
-        branch_menus = frappe.get_all(
-            "Branch Menu",
-            filters=bm_filters,
-            fields=["name"]
-        )
+        branch_menus = frappe.get_all("Branch Menu", filters=bm_filters, fields=["name"])
 
         if not branch_menus:
-            # Jika tidak ada Branch Menu yang cocok, skip item ini
-            # (atau bisa diarahkan ke station default jika ada requirement)
             continue
 
-        # Kumpulkan station yang punya printer aktif (deduplicate)
-        stations = set()
+        # Kumpulkan station dan printer_name dari semua Branch Menu yang cocok
+        station_printer = {}  # station -> printer_name (pertama ditemukan)
         for bm in branch_menus:
             bm_doc = frappe.get_doc("Branch Menu", bm.name)
             for ks in (bm_doc.printers or []):
-                # Hanya station yang benar-benar punya printer_name
-                if getattr(ks, "printer_name", None):
-                    stations.add(getattr(ks, "kitchen_station", None))
+                printer = getattr(ks, "printer_name", None)
+                station = getattr(ks, "kitchen_station", None)
+                if station and printer:
+                    # Simpan printer pertama untuk station ini
+                    if station not in station_printer:
+                        station_printer[station] = printer
 
-        # Tambahkan item ini ke setiap station terkait
-        for station in stations:
+        # Tambahkan item ke setiap station yang terdaftar
+        for station, printer in station_printer.items():
             if not station:
                 continue
 
-            tickets_by_station.setdefault(station, []).append({
+            # Inisialisasi entry station jika belum ada
+            if station not in station_map:
+                station_map[station] = {
+                    "printer_name": printer,
+                    "items": []
+                }
+            else:
+                # Jika printer berbeda, catat konflik (tidak mengganggu proses)
+                if station_map[station]["printer_name"] != printer:
+                    frappe.log_error(
+                        f"Konflik printer untuk station {station}: "
+                        f"{station_map[station]['printer_name']} vs {printer}",
+                        "Print to KS"
+                    )
+
+            # Tambahkan item dengan menyertakan name (ID dokumen)
+            station_map[station]["items"].append({
+                "name": it.get("name"),          # <-- kunci utama
                 "resto_menu": resto_menu,
-                "short_name": short_name_cache.get(resto_menu, ""),
+                "short_name": short_name_cache[resto_menu],
                 "qty": it.get("qty") or 0,
                 "quick_notes": it.get("quick_notes") or "",
                 "add_ons": it.get("add_ons") or "",
             })
 
-    # Susun output list dengan field pos_invoice
+    # Susun output list
     result = []
-    for station, items in tickets_by_station.items():
-        if not items:
+    for station, data in station_map.items():
+        if not data["items"]:
             continue
         result.append({
             "kitchen_station": station,
+            "printer_name": data["printer_name"],
             "pos_invoice": pos_name,
-            "items": items
+            "items": data["items"]
         })
 
-    # (Opsional) urutkan biar stabil
+    # Urutkan agar stabil
     result.sort(key=lambda x: x["kitchen_station"] or "")
     return result
+
 
 @frappe.whitelist(allow_guest=True)
 def get_all_tables_with_details():
