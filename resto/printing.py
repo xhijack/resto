@@ -13,7 +13,7 @@ import re
 
 # ========== Konstanta & Util ==========
 LINE_WIDTH = 32           # ganti ke 42 jika printer 42 kolom
-ITEM_HEIGHT_MULT = 2      # 2 = aman di banyak printer; coba 3 kalau masih kecil
+ITEM_HEIGHT_MULT = 4      # 2 = aman di banyak printer; coba 3 kalau masih kecil
 
 ESC = b"\x1b"
 GS  = b"\x1d"
