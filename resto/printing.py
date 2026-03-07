@@ -739,7 +739,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
-    out += _esc_char_size(0, 3)
+    
     for it in items:
         qty_s      = _fmt_qty(it.get("qty") or 0)
         item_name  = _safe_str(it.get("item_name"))
@@ -750,11 +750,11 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         
         # title = short_name or menu_name or "-"
         title = item_name or short_name or menu_name or "-"
-        mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
-        if mandarin_name:
-            display_line = f"{qty_s} x {title} ({mandarin_name})"
-        else:
-            display_line = f"{qty_s} x {title}"
+        # mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
+        # if mandarin_name:
+        #     display_line = f"{qty_s} x {title} ({mandarin_name})"
+        # else:
+        display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
         out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
@@ -784,7 +784,6 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
         out += b"\n"  # spacer
 
-    out += _esc_char_size(0, 0)
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     # ==== FEED TAMBAHAN sebelum cut supaya tidak "kepotong cepat" ====
