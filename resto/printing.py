@@ -199,11 +199,13 @@ def sanitize_kitchen_payload(items):
 
     for it in items:
         for field in ["add_ons", "quick_notes", "item_name"]:
-            if it.get(field):
-                val = it[field]
-                for b in blacklist:
-                    val = val.replace(b, "").strip()
-                it[field] = val
+            val = str(it.get(field) or "")
+
+            for b in blacklist:
+                val = val.replace(b, "")
+
+            it[field] = val.strip()
+
         clean_items.append(it)
 
     return clean_items
@@ -663,7 +665,9 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    items   = entry.get("items") or []
+    # items_raw = entry.get("items") or []
+    # items = sanitize_kitchen_payload(items_raw)
+    items = entry.get("items") or []
     
     resto_menus = list(set([
         i.get("resto_menu")
