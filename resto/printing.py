@@ -193,19 +193,21 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
     job_id = conn.printFile(printer_name, tmp_path, "POS_Invoice", {})
     return job_id
 
-def sanitize_kitchen_payload(items): 
-    blacklist = ["tambahan", "Tambahan", "TAMBAHAN"] 
-    clean_items = [] 
-    
-    for it in items: 
-        for field in ["add_ons", "quick_notes", "item_name"]: 
-            if it.get(field): 
-                val = it[field] 
-            for b in blacklist: 
-                val = val.replace(b, "").strip() 
-            it[field] = val 
-        clean_items.append(it) 
-        
+def sanitize_kitchen_payload(items):
+    blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
+    clean_items = []
+
+    for it in items:
+        for field in ["add_ons", "quick_notes", "item_name"]:
+            val = str(it.get(field) or "")
+
+            for b in blacklist:
+                val = val.replace(b, "")
+
+            it[field] = val.strip()
+
+        clean_items.append(it)
+
     return clean_items
 
 # ========== Normalisasi POS Invoice ==========
