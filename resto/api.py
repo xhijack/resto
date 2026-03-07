@@ -555,49 +555,41 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
     return doc.insert(ignore_permissions=True)
 
 def print_to_ks_now(pos_invoice):
-
     from resto.printing import kitchen_print_from_payload
 
+    # Kumpulkan semua payload per station
+    station_payloads = []
+    items_to_lock = set()  # menyimpan nama item yang akan dikunci setelah cetak
+
     for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-
-        # LOCK ITEM BEFORE BUILD PAYLOAD
-        locked_items = []
-
+        items_to_send = []
         for it in item.get("items", []):
-
             name = it.get("name")
-
             if not name:
                 continue
 
-            status = frappe.db.get_value(
-                "POS Invoice Item",
-                name,
-                "is_print_kitchen"
-            )
-
+            # Cek apakah item sudah pernah dicetak (0 = belum)
+            status = frappe.db.get_value("POS Invoice Item", name, "is_print_kitchen")
             if int(status or 0) == 0:
+                items_to_send.append(it)
+                items_to_lock.add(name)  # tandai untuk dikunci nanti
 
-                frappe.db.set_value(
-                    "POS Invoice Item",
-                    name,
-                    "is_print_kitchen",
-                    1
-                )
+        if items_to_send:
+            payload = {
+                "kitchen_station": item.get("kitchen_station"),
+                "printer_name": item.get("printer_name"),
+                "pos_invoice": pos_invoice,
+                "items": items_to_send
+            }
+            station_payloads.append(payload)
 
-                locked_items.append(it)
-
-        if not locked_items:
-            continue
-
-        payload = {
-            "kitchen_station": item.get("kitchen_station"),
-            "printer_name": item.get("printer_name"),
-            "pos_invoice": pos_invoice,
-            "items": locked_items
-        }
-
+    # Kirim semua instruksi cetak ke masing-masing station
+    for payload in station_payloads:
         kitchen_print_from_payload(payload)
+
+    # Setelah semua terkirim, kunci semua item yang sudah diproses
+    for name in items_to_lock:
+        frappe.db.set_value("POS Invoice Item", name, "is_print_kitchen", 1)
 
     frappe.db.commit()
 
@@ -686,7 +678,6 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
                 "qty": it.get("qty") or 0,
                 "quick_notes": it.get("quick_notes") or "",
                 "add_ons": it.get("add_ons") or "",
-                "name": it.get("name")  # penting untuk update status print kitchen nanti
             })
 
     # Susun output list dengan field pos_invoice
