@@ -1618,7 +1618,7 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
-
+    out += _esc_char_size(0, 4) 
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
@@ -1655,6 +1655,7 @@ def build_escpos_checker(name: str) -> bytes:
         if notes:
             out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
+    out += _esc_char_size(0, 0)
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
