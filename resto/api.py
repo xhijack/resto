@@ -686,6 +686,7 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
                 "qty": it.get("qty") or 0,
                 "quick_notes": it.get("quick_notes") or "",
                 "add_ons": it.get("add_ons") or "",
+                "name": it.get("name")  # penting untuk update status print kitchen nanti
             })
 
     # Susun output list dengan field pos_invoice
