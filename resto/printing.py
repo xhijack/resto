@@ -483,7 +483,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += _esc_init()
     out += _esc_font_a()
-    out += _esc_char_size(0, 3)
+    out += _esc_char_size(0, 4)
 
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station_name}\n").encode("ascii", "ignore")
@@ -539,10 +539,10 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
         # ===== ITEM UTAMA =====
-        if mandarin_name:
-            line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            line = f"{qty} x {item_name}"
+        # if mandarin_name:
+        #     line = f"{qty} x {item_name} ({mandarin_name})"
+        # else:
+        line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
             out += (w + "\n").encode("utf-8")
