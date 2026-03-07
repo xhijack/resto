@@ -109,8 +109,7 @@
   {
    "fieldname": "short_name",
    "fieldtype": "Data",
-   "label": "Short Name",
-   "length": 24
+   "label": "Short Name"
   },
   {
    "fieldname": "printers",
@@ -165,11 +164,11 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-02-03 13:02:48.545218",
+ "modified": "2026-03-07 07:59:30.742274",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Resto Menu",
- "naming_rule": "Expression",
+ "naming_rule": "Expression (old style)",
  "owner": "Administrator",
  "permissions": [
   {
