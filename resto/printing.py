@@ -193,36 +193,19 @@ def cups_print_pdf(pdf_bytes: bytes, printer_name: str) -> int:
     job_id = conn.printFile(printer_name, tmp_path, "POS_Invoice", {})
     return job_id
 
-def sanitize_kitchen_payload(items):
-    """
-    Bersihkan payload item kitchen:
-    - Hilangkan kata tambahan
-    - Pastikan field is_checked dan status_kitchen ada
-    """
-    blacklist = ["tambahan", "Tambahan", "TAMBAHAN"]
-    clean_items = []
-
-    for it in items:
-        # copy supaya tidak overwrite input
-        item = it.copy()
-
-        for field in ["add_ons", "quick_notes", "item_name"]:
-            if item.get(field):
-                val = item[field]
-                for b in blacklist:
-                    val = val.replace(b, "").strip()
-                item[field] = val
-
-        # pastikan status_kitchen ada
-        item["status_kitchen"] = (item.get("status_kitchen") or "").strip()
-        # pastikan is_checked integer
-        try:
-            item["is_checked"] = int(item.get("is_checked") or 0)
-        except:
-            item["is_checked"] = 0
-
-        clean_items.append(item)
-
+def sanitize_kitchen_payload(items): 
+    blacklist = ["tambahan", "Tambahan", "TAMBAHAN"] 
+    clean_items = [] 
+    
+    for it in items: 
+        for field in ["add_ons", "quick_notes", "item_name"]: 
+            if it.get(field): 
+                val = it[field] 
+            for b in blacklist: 
+                val = val.replace(b, "").strip() 
+            it[field] = val 
+        clean_items.append(it) 
+        
     return clean_items
 
 # ========== Normalisasi POS Invoice ==========
@@ -661,8 +644,9 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    items_raw = entry.get("items") or []
-    items = sanitize_kitchen_payload(items_raw)
+    # items_raw = entry.get("items") or []
+    # items = sanitize_kitchen_payload(items_raw)
+    items = entry.get("items") or []
     
     resto_menus = list(set([
         i.get("resto_menu")
