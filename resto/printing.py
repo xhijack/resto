@@ -1724,10 +1724,13 @@ def _enqueue_checker_worker(name: str, printer_name: str):
 
 
 import cups
+import tempfile
+import os
 from frappe import _
-from frappe.utils import flt, now_datetime, get_datetime
+import frappe
+from frappe.utils import flt
 
-def print_shift_report(closing_name, printer_name):
+def print_shift_report(closing_name, printer_name=None):
     """
     Mencetak laporan shift dari POS Closing Entry menggunakan printer thermal 75mm.
     """
@@ -1764,7 +1767,6 @@ def print_shift_report(closing_name, printer_name):
         return f"{flt(amt):,.0f}".replace(",", ".")
     
     # Header
-    # Tanggal
     posting_date = closing.posting_date
     bulan_indonesia = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
                        "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
@@ -1848,27 +1850,34 @@ def print_shift_report(closing_name, printer_name):
     text = "\n".join(lines)
     
     # --- Cetak dengan CUPS ---
+    # Buat file sementara
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+        f.write(text)
+        temp_filename = f.name
+    
     try:
         conn = cups.Connection()
-        # printers = conn.getPrinters()
         
-        # # Cari printer yang namanya mengandung "thermal" atau "TM"
-        # printer_name = None
-        # for p in printers:
-        #     if 'thermal' in p.lower() or 'tm' in p.lower():
-        #         printer_name = p
-        #         break
-        # if not printer_name:
-        #     # Ambil printer default pertama
-        #     printer_name = list(printers.keys())[0] if printers else None
+        # Tentukan printer
+        if not printer_name:
+            printer_name = conn.getDefault()
+        if not printer_name:
+            printers = conn.getPrinters()
+            printer_name = list(printers.keys())[0] if printers else None
+        if not printer_name:
+            frappe.throw(_("Tidak ada printer terdeteksi."))
         
-        # if not printer_name:
-        #     frappe.throw(_("Tidak ada printer terdeteksi."))
-        
-        # Kirim job cetak
-        job_id = conn.printText(printer_name, text, f"Shift Report {closing.name}", {})
+        # Opsi pencetakan (bisa ditambahkan sesuai kebutuhan)
+        options = {}
+        job_id = conn.printFile(printer_name, temp_filename, f"Shift Report {closing.name}", options)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
         frappe.log_error(f"Gagal mencetak laporan shift: {str(e)}", "Print Error")
         raise
+    finally:
+        # Hapus file sementara
+        try:
+            os.unlink(temp_filename)
+        except:
+            pass
