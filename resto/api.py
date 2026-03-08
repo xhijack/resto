@@ -1369,8 +1369,7 @@ def end_shift():
             "docstatus": 1,
             "is_pos": 1,
             "status": "Paid",
-            "pos_profile": opening.pos_profile,
-            "owner": opening.user
+            "pos_profile": opening.pos_profile
         },
         fields=[
             "name",
