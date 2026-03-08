@@ -1287,6 +1287,8 @@ def get_end_day_report_v2():
 
 @frappe.whitelist()
 def end_shift():
+    from .printing import print_shift_report
+
     user = frappe.session.user
 
     # POS Opening Entry aktif
@@ -1427,6 +1429,11 @@ def end_shift():
     # Save & Submit
     closing.insert(ignore_permissions=True)
     closing.submit()
+
+    try:
+        print_shift_report(closing.name)
+    except Exception as e:
+        frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
 
     # Response
     return {

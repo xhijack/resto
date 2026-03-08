@@ -483,7 +483,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += _esc_init()
     out += _esc_font_a()
-    out += _esc_char_size(0, 4)
+    out += _esc_char_size(0, )
 
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station_name}\n").encode("ascii", "ignore")
@@ -539,10 +539,10 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
         # ===== ITEM UTAMA =====
-        # if mandarin_name:
-        #     line = f"{qty} x {item_name} ({mandarin_name})"
-        # else:
-        line = f"{qty} x {item_name}"
+        if mandarin_name:
+            line = f"{qty} x {item_name} ({mandarin_name})"
+        else:
+            line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
             out += (w + "\n").encode("utf-8")
@@ -1721,3 +1721,154 @@ def _enqueue_checker_worker(name: str, printer_name: str):
     })
 
     return job_id
+
+
+import cups
+from frappe import _
+from frappe.utils import flt, now_datetime, get_datetime
+
+def print_shift_report(closing_name):
+    """
+    Mencetak laporan shift dari POS Closing Entry menggunakan printer thermal 75mm.
+    """
+    closing = frappe.get_doc("POS Closing Entry", closing_name)
+    
+    # Ambil semua invoice yang terkait
+    invoices = [frappe.get_doc("POS Invoice", t.pos_invoice) for t in closing.pos_transactions]
+    
+    # Kumpulkan data item per invoice
+    items_summary = {}  # key: (item_code, item_name, item_group)
+    total_discount = 0
+    for inv in invoices:
+        total_discount += flt(inv.discount_amount)
+        for item in inv.items:
+            key = (item.item_code, item.item_name, item.item_group)
+            if key not in items_summary:
+                items_summary[key] = {
+                    "qty": 0,
+                    "amount": 0,
+                    "item_name": item.item_name,
+                    "item_group": item.item_group
+                }
+            items_summary[key]["qty"] += flt(item.qty)
+            items_summary[key]["amount"] += flt(item.amount)
+    
+    # Urutkan berdasarkan item_group dan nama item
+    sorted_items = sorted(items_summary.values(), key=lambda x: (x["item_group"], x["item_name"]))
+    
+    # --- Persiapan teks ---
+    lines = []
+    
+    # Fungsi bantu format angka ribuan (titik)
+    def fmt_amt(amt):
+        return f"{flt(amt):,.0f}".replace(",", ".")
+    
+    # Header
+    # Tanggal
+    posting_date = closing.posting_date
+    bulan_indonesia = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
+                       "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
+    tgl = posting_date.day
+    bln = bulan_indonesia[posting_date.month - 1]
+    thn = posting_date.year
+    lines.append(f"{tgl} {bln} {thn}")
+    
+    # Waktu tutup
+    posting_time = closing.posting_time
+    lines.append(f"End Time {posting_time}")
+    
+    # Nama toko / profil POS
+    pos_profile = closing.pos_profile
+    lines.append(f"Shop: {pos_profile}")
+    lines.append(f"PVJ: {pos_profile}")  # bisa disesuaikan dengan cabang
+    lines.append("# PAID SALES")
+    lines.append("")
+    
+    # --- Tabel Item ---
+    lines.append("Item                 Qty   Price")
+    lines.append("-" * 32)
+    
+    current_group = None
+    for item in sorted_items:
+        if item["item_group"] != current_group:
+            current_group = item["item_group"]
+            lines.append(f"* {current_group}")
+        # Potong nama item maks 18 karakter
+        name = item["item_name"][:18]
+        qty = f"{item['qty']:.0f}"
+        price = fmt_amt(item["amount"])
+        lines.append(f"{name:<18} {qty:>5} {price:>9}")
+    
+    # Sub total dan ringkasan
+    net_total = closing.net_total
+    total_qty = closing.total_quantity
+    lines.append("-" * 32)
+    lines.append(f"Sub Total          {total_qty:>5} {fmt_amt(net_total):>9}")
+    lines.append(f"Discount                    {fmt_amt(total_discount):>9}")
+    lines.append(f"Total Dine In :    {total_qty:>5} {fmt_amt(net_total):>9}")
+    lines.append("")
+    
+    # --- Grand Total ---
+    lines.append("Item                 Qty   Price")
+    lines.append("-" * 32)
+    lines.append(f"Sub Total                     {fmt_amt(net_total):>9}")
+    lines.append(f"Discount                       {fmt_amt(total_discount):>9}")
+    grand_total = closing.grand_total
+    lines.append(f"Grand Total :      {total_qty:>5} {fmt_amt(grand_total):>9}")
+    lines.append("")
+    
+    # --- Rincian Pajak ---
+    lines.append("Item                 Qty   Price")
+    lines.append("-" * 32)
+    lines.append(f"PVJ: {pos_profile}")
+    lines.append(f"Discount                          0")  # asumsi tidak ada diskon di sini
+    lines.append(f"Sub Total                     {fmt_amt(net_total):>9}")
+    # Tampilkan semua pajak dari child table taxes
+    for tax in closing.taxes:
+        # Ambil nama akun (misal "SVC - Toko")
+        tax_name = tax.account_head.split(" - ")[0]  # ambil bagian sebelum kode perusahaan
+        lines.append(f"{tax_name:<24} {fmt_amt(tax.amount):>9}")
+    # Total Sales (mungkin net total)
+    lines.append(f"Total Sales                   {fmt_amt(net_total):>9}")
+    lines.append("")
+    
+    # --- Pembayaran ---
+    lines.append("Item                 Qty   Price")
+    lines.append("-" * 32)
+    lines.append("TYPE PAYMENT")
+    for pay in closing.payment_reconciliation:
+        mop = pay.mode_of_payment
+        amount = pay.expected_amount
+        lines.append(f"{mop:<24} {fmt_amt(amount):>9}")
+    
+    # Akhir
+    lines.append("")
+    lines.append("")
+    
+    text = "\n".join(lines)
+    
+    # --- Cetak dengan CUPS ---
+    try:
+        conn = cups.Connection()
+        printers = conn.getPrinters()
+        
+        # Cari printer yang namanya mengandung "thermal" atau "TM"
+        printer_name = None
+        for p in printers:
+            if 'thermal' in p.lower() or 'tm' in p.lower():
+                printer_name = p
+                break
+        if not printer_name:
+            # Ambil printer default pertama
+            printer_name = list(printers.keys())[0] if printers else None
+        
+        if not printer_name:
+            frappe.throw(_("Tidak ada printer terdeteksi."))
+        
+        # Kirim job cetak
+        job_id = conn.printText(printer_name, text, f"Shift Report {closing.name}", {})
+        frappe.logger().info(f"Print job sent: {job_id}")
+        return job_id
+    except Exception as e:
+        frappe.log_error(f"Gagal mencetak laporan shift: {str(e)}", "Print Error")
+        raise
