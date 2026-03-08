@@ -318,7 +318,8 @@ def create_pos_invoice(payload):
         "additional_discount_percentage": additional_discount_percentage,
         "discount_amount": discount_amount,
         "discount_for_bank": discount_for_bank,
-        "discount_name": discount_name
+        "discount_name": discount_name,
+        "ordered_by": frappe.session.user
     })
 
     # Tambahkan item utama
@@ -1378,6 +1379,11 @@ def end_shift():
         ],
         order_by="posting_date asc, posting_time asc"
     )
+
+    for invoice in invoices:
+        frappe.db.set_value("POS Invoice", invoice.name, "owner", opening.user)
+
+    frappe.db.commit()
 
     if not invoices:
         frappe.throw("Tidak ada POS Invoice")
