@@ -1868,8 +1868,7 @@ def print_shift_report(closing_name, printer_name=None):
             frappe.throw(_("Tidak ada printer terdeteksi."))
         
         # Opsi pencetakan (bisa ditambahkan sesuai kebutuhan)
-        options = {}
-        job_id = conn.printFile(printer_name, temp_filename, f"Shift Report {closing.name}", options)
+        job_id = cups_print_raw(temp_filename, printer_name)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
