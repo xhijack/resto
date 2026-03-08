@@ -201,14 +201,15 @@ def after_migrate():
             "options": "Dine In\nTake Away",
             "insert_after": "branch",
         }).insert(ignore_permissions=True)
-        
+
     if not frappe.db.exists("Custom Field", {'fieldname': "ordered_by", "dt": "POS Invoice"}):
         frappe.get_doc({
             "doctype": "Custom Field",
             "dt": "POS Invoice",
             "fieldname": "ordered_by",
             "label": "Ordered By",
-            "fieldtype": "User",
+            "fieldtype": "Link",
+            "options": "User",
             "insert_after": "order_type",
         }).insert(ignore_permissions=True)
 
