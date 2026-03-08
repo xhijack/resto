@@ -478,7 +478,14 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
         return None
 
 @frappe.whitelist()
-def send_to_kitchen(payload, table_name=None):
+def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
+                    customer=None, type_customer=None, orders=None, checked=None):
+    """
+    payload: POS invoice payload
+    table_name: name of the Table
+    status, taken_by, pax, customer, type_customer, orders, checked: 
+        semua field Table yang dikirim dari FE
+    """
     try:
         if isinstance(payload, str):
             payload = json.loads(payload)
@@ -490,12 +497,41 @@ def send_to_kitchen(payload, table_name=None):
 
         # ✅ update table dulu sebelum print
         if table_name:
-            table_update_result = update_table_status(
-                name=table_name,
-                status="Terisi",
-                orders=[{"invoice_name": pos_name}]
+            # normalize orders dari FE
+            if orders is None:
+                orders = []
+            elif isinstance(orders, str):
+                try:
+                    orders = json.loads(orders)
+                except Exception:
+                    frappe.log_error("Gagal parse orders JSON", orders)
+                    orders = []
+
+            if not isinstance(orders, list):
+                orders = []
+
+            # cek apakah invoice sudah ada dalam list orders
+            exists = any(
+                isinstance(o, dict) and o.get("invoice_name") == pos_name
+                for o in orders
             )
 
+            # kalau belum ada → append
+            if not exists:
+                orders.append({"invoice_name": pos_name})
+
+            table_update_result = update_table_status(
+                name=table_name,
+                status=status or "Terisi",
+                taken_by=taken_by,
+                pax=pax,
+                customer=customer,
+                type_customer=type_customer,
+                orders=orders,
+                checked=checked
+            )
+
+        # print kitchen
         try:
             print_to_ks_now(pos_name)
             printing_status = "Printing queued"
@@ -741,9 +777,13 @@ def get_all_tables_with_details():
     return result
 
 @frappe.whitelist()
-def print_bill_now(invoice_name: str, branch: str):
+def print_bill_now(invoice_name: str, branch: str, table_name=None,
+                   status=None, taken_by=None, pax=0,
+                   customer=None, type_customer=None, orders=None, checked=None):
+
     from resto.printing import _enqueue_bill_worker
     import frappe
+    import json
 
     try:
         printer = frappe.db.get_value(
@@ -755,9 +795,35 @@ def print_bill_now(invoice_name: str, branch: str):
         if not printer:
             frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
 
-        # Enqueue print job
+        # update table snapshot state jika ada table
+        if table_name:
+            if orders is None:
+                orders = []
+            elif isinstance(orders, str):
+                try:
+                    orders = json.loads(orders)
+                except Exception:
+                    frappe.log_error("Gagal parse orders JSON", orders)
+
+            if not isinstance(orders, list):
+                orders = []
+
+            update_table_status(
+                name=table_name,
+                status="Print Bill",
+                taken_by=taken_by,
+                pax=pax,
+                customer=customer,
+                type_customer=type_customer,
+                orders=orders,
+                checked=checked
+            )
+
+        # enqueue print job
         job_id = _enqueue_bill_worker(invoice_name, printer)
+
         frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
+
         return {"ok": True, "job_id": job_id}
 
     except Exception as e:
