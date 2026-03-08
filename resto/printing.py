@@ -1619,7 +1619,7 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_char_size(0, 4) 
+    out += _esc_char_size(0, 3) 
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
