@@ -1850,33 +1850,21 @@ def print_shift_report(closing_name, printer_name=None):
     text = "\n".join(lines)
     
     # --- Cetak dengan CUPS ---
-    # Buat file sementara
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-        f.write(text)
-        temp_filename = f.name
-    
     try:
-        conn = cups.Connection()
-        
-        # Tentukan printer
+        # Jika printer_name tidak diberikan, gunakan default
         if not printer_name:
+            conn = cups.Connection()
             printer_name = conn.getDefault()
-        if not printer_name:
-            printers = conn.getPrinters()
-            printer_name = list(printers.keys())[0] if printers else None
-        if not printer_name:
-            frappe.throw(_("Tidak ada printer terdeteksi."))
+            if not printer_name:
+                printers = conn.getPrinters()
+                printer_name = list(printers.keys())[0] if printers else None
+            if not printer_name:
+                frappe.throw(_("Tidak ada printer terdeteksi."))
         
-        # Opsi pencetakan (bisa ditambahkan sesuai kebutuhan)
-        job_id = cups_print_raw(temp_filename, printer_name)
+        # Kirim job cetak (langsung bytes)
+        job_id = cups_print_raw(text.encode('utf-8'), printer_name)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
         frappe.log_error(f"Gagal mencetak laporan shift: {str(e)}", "Print Error")
         raise
-    finally:
-        # Hapus file sementara
-        try:
-            os.unlink(temp_filename)
-        except:
-            pass
