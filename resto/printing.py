@@ -1727,7 +1727,7 @@ import cups
 from frappe import _
 from frappe.utils import flt, now_datetime, get_datetime
 
-def print_shift_report(closing_name):
+def print_shift_report(closing_name, printer_name):
     """
     Mencetak laporan shift dari POS Closing Entry menggunakan printer thermal 75mm.
     """
@@ -1850,20 +1850,20 @@ def print_shift_report(closing_name):
     # --- Cetak dengan CUPS ---
     try:
         conn = cups.Connection()
-        printers = conn.getPrinters()
+        # printers = conn.getPrinters()
         
-        # Cari printer yang namanya mengandung "thermal" atau "TM"
-        printer_name = None
-        for p in printers:
-            if 'thermal' in p.lower() or 'tm' in p.lower():
-                printer_name = p
-                break
-        if not printer_name:
-            # Ambil printer default pertama
-            printer_name = list(printers.keys())[0] if printers else None
+        # # Cari printer yang namanya mengandung "thermal" atau "TM"
+        # printer_name = None
+        # for p in printers:
+        #     if 'thermal' in p.lower() or 'tm' in p.lower():
+        #         printer_name = p
+        #         break
+        # if not printer_name:
+        #     # Ambil printer default pertama
+        #     printer_name = list(printers.keys())[0] if printers else None
         
-        if not printer_name:
-            frappe.throw(_("Tidak ada printer terdeteksi."))
+        # if not printer_name:
+        #     frappe.throw(_("Tidak ada printer terdeteksi."))
         
         # Kirim job cetak
         job_id = conn.printText(printer_name, text, f"Shift Report {closing.name}", {})

@@ -1497,7 +1497,8 @@ def end_shift():
     closing.submit()
 
     try:
-        print_shift_report(closing.name)
+        default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
+        print_shift_report(closing.name, default_printer_receipt)
     except Exception as e:
         frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
 
