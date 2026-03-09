@@ -19,7 +19,10 @@ class POSDailySummary(Document):
 
 @frappe.whitelist()
 def end_day_from_shift(posting_date):
+    from resto.api import end_shift
     user = frappe.session.user
+
+    end_shift()
 
     shift_names = frappe.get_all(
         "POS Closing Entry",
