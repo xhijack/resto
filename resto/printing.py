@@ -1157,7 +1157,8 @@ def build_escpos_bill(name: str) -> bytes:
 
 
     # Nama kasir
-    cashier_name = get_cashier_name(data["name"])
+    # cashier_name = get_cashier_name(data["name"])
+    cashier_name = get_waiter_name(data["name"])
     out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
 
     # Customer
