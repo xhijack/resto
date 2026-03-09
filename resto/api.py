@@ -1690,7 +1690,7 @@ def check_pos_status_for_user(user=None):
 @frappe.whitelist()
 def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
     import frappe
-    from frappe.utils import today
+    from frappe.utils import today, now_datetime
 
     user = user or frappe.session.user
 
@@ -1719,7 +1719,7 @@ def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
         "user": user,
         "branch": branch,
         "status": "Open",
-        "period_start_date": today(),
+        "period_start_date": now_datetime(),
         "opening_balance": opening_balance
     })
 
