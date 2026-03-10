@@ -759,7 +759,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
-        out += _esc_char_size(0, ITEM_HEIGHT_MULT) + _esc_bold(True)
+        out += _esc_char_size(1, 6) + _esc_bold(True)
         big_line = _fit(display_line, LINE_WIDTH)
         out += (big_line + "\n").encode("utf-8", "ignore")
         out += _esc_bold(False) + _esc_char_size(0, 0)
