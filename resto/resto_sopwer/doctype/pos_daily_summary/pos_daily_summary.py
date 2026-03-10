@@ -69,7 +69,17 @@ def end_day_from_shift(posting_date):
     # ================================
     # GENERATE END DAY REPORT
     # ================================
-    outlet = frappe.db.get_value("POS Closing Entry", shift_names[0], "branch")
+    pos_opening = frappe.db.get_value(
+        "POS Closing Entry",
+        shift_names[0],
+        "pos_opening_entry"
+    )
+
+    outlet = frappe.db.get_value(
+        "POS Opening Entry",
+        pos_opening,
+        "branch"
+    )
 
     frappe.form_dict.posting_date = posting_date
     frappe.form_dict.outlet = outlet
