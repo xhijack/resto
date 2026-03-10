@@ -498,39 +498,43 @@ def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
 
         # ✅ update table dulu sebelum print
         if table_name:
-            # normalize orders dari FE
-            if orders is None:
-                orders = []
-            elif isinstance(orders, str):
-                try:
-                    orders = json.loads(orders)
-                except Exception:
-                    frappe.log_error("Gagal parse orders JSON", orders)
+            if frappe.db.exists("Table", table_name):
+                # normalize orders dari FE
+                if orders is None:
+                    orders = []
+                elif isinstance(orders, str):
+                    try:
+                        orders = json.loads(orders)
+                    except Exception:
+                        frappe.log_error("Gagal parse orders JSON", orders)
+                        orders = []
+
+                if not isinstance(orders, list):
                     orders = []
 
-            if not isinstance(orders, list):
-                orders = []
+                # cek apakah invoice sudah ada dalam list orders
+                exists = any(
+                    isinstance(o, dict) and o.get("invoice_name") == pos_name
+                    for o in orders
+                )
 
-            # cek apakah invoice sudah ada dalam list orders
-            exists = any(
-                isinstance(o, dict) and o.get("invoice_name") == pos_name
-                for o in orders
-            )
+                # kalau belum ada → append
+                if not exists:
+                    orders.append({"invoice_name": pos_name})
 
-            # kalau belum ada → append
-            if not exists:
-                orders.append({"invoice_name": pos_name})
-
-            table_update_result = update_table_status(
-                name=table_name,
-                status=status or "Terisi",
-                taken_by=taken_by,
-                pax=pax,
-                customer=customer,
-                type_customer=type_customer,
-                orders=orders,
-                checked=checked
-            )
+                table_update_result = update_table_status(
+                    name=table_name,
+                    status=status or "Terisi",
+                    taken_by=taken_by,
+                    pax=pax,
+                    customer=customer,
+                    type_customer=type_customer,
+                    orders=orders,
+                    checked=checked
+                )
+            else:
+                # Take Away / table tidak ada → lewati update table
+                frappe.log_error(f"Take Away POS Invoice {pos_name} tidak terkait table", "send_to_kitchen")    
 
         # print kitchen
         try:
