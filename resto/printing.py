@@ -1218,7 +1218,7 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
-    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+    # out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
     sc_amount = 0
@@ -1232,13 +1232,8 @@ def build_escpos_bill(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-        
-    # 1️⃣ Print SC dulu
-    if sc_amount:
-        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
-    # 2️⃣ Lalu Subtotal
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line(f"{total_qty} Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
     if discount:
         if discount_name:
@@ -1247,14 +1242,16 @@ def build_escpos_bill(name: str) -> bytes:
             label = "Discount"
 
         out += (_format_line(f"{label}:", f"-{format_number(discount)}") + "\n").encode("ascii", "ignore")
+        
+    if sc_amount:
+        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
-    # 3️⃣ Lalu Tax
     if tax_amount:
         out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
     
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
-    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line("Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
     out += _esc_bold(False)
 
 
@@ -1450,7 +1447,7 @@ def build_escpos_receipt(name: str) -> bytes:
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
-    out += (f"{total_qty} items\n").encode("ascii", "ignore")
+    # out += (f"{total_qty} items\n").encode("ascii", "ignore")
 
     # ===== TOTALS =====
     sc_amount = 0
@@ -1464,13 +1461,8 @@ def build_escpos_receipt(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-            
-    # 1️⃣ Print SC dulu
-    if sc_amount:
-        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
-    # 2️⃣ Lalu Subtotal
-    out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line(f"{total_qty} Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
     if discount:
         if discount_name:
@@ -1479,14 +1471,16 @@ def build_escpos_receipt(name: str) -> bytes:
             label = "Discount"
 
         out += (_format_line(f"{label}:", f"-{format_number(discount)}") + "\n").encode("ascii", "ignore")
+            
+    if sc_amount:
+        out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
-    # 3️⃣ Lalu Tax
     if tax_amount:
         out += (_format_line("Tax:", format_number(tax_amount)) + "\n").encode("ascii", "ignore")
     
     out += (separator + "\n").encode("ascii", "ignore")
     out += _esc_bold(True)
-    out += (_format_line("Grand Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line("Total:", format_number(grand_total)) + "\n").encode("ascii", "ignore")
     out += _esc_bold(False)
     
     # ===== PAYMENT =====
