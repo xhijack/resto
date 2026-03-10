@@ -1143,8 +1143,11 @@ from frappe.utils import flt
 
 @frappe.whitelist()
 def get_end_day_report_v2():
+    from .printing import print_end_day_report_v2
+    
     posting_date = frappe.form_dict.get("posting_date")
     outlet = frappe.form_dict.get("outlet")
+    do_print = frappe.form_dict.get("print")
 
     if not posting_date or not outlet:
         frappe.throw("posting_date dan outlet wajib diisi")
@@ -1339,9 +1342,10 @@ def get_end_day_report_v2():
     # =====================================================
     # 10. RESPONSE
     # =====================================================
-    return {
+    result = {
         "posting_date": posting_date,
         "outlet_filter": outlet_filter,
+        "outlet": outlet,
         "summary": summary,
         "dine_in": dine_in,
         "take_away": take_away,
@@ -1351,6 +1355,24 @@ def get_end_day_report_v2():
         "draft": draft_summary,
         "void_bill": void_bill_summary
     }
+    
+    # =====================================================
+    # 11. PRINT (OPTIONAL)
+    # =====================================================
+    if do_print:
+
+        printer = frappe.db.get_value(
+            "Printer Settings",
+            {"branch": outlet},
+            "default_printer_receipt"
+        )
+
+        try:
+            print_end_day_report_v2(result, printer)
+        except Exception as e:
+            frappe.log_error(str(e), "End Day Report Print Error")
+
+    return result
 
 @frappe.whitelist()
 def end_shift():

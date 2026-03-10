@@ -292,6 +292,8 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "queue": doc.get("queue") or "",
         "currency": currency,
         "total": float(doc.get("total") or 0),
+        "discount_for_bank": doc.get("discount_for_bank") or "",
+        "discount_name": doc.get("discount_name") or "",
         "discount_amount": float(doc.get("discount_amount") or 0),
         "total_taxes_and_charges": float(doc.get("total_taxes_and_charges") or 0),
         "grand_total": float(doc.get("grand_total") or 0),
@@ -1030,6 +1032,8 @@ def build_escpos_bill(name: str) -> bytes:
     order_type = data.get("order_type") or ""
     customer = data.get("customer_name") or data.get("customer") or ""
     total = data.get("total", 0)
+    discount_for_bank = data.get("discount_for_bank", "")
+    discount_name = data.get("discount_name", "")
     discount = data.get("discount_amount", 0)
     tax_total = data.get("total_taxes_and_charges", 0)
     grand_total = data.get("grand_total", 0)
@@ -1228,13 +1232,21 @@ def build_escpos_bill(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-
+        
     # 1️⃣ Print SC dulu
     if sc_amount:
         out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
     # 2️⃣ Lalu Subtotal
     out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    
+    if discount:
+        if discount_name:
+            label = f"Discount {discount_name}"
+        else:
+            label = "Discount"
+
+        out += (_format_line(f"{label}:", f"-{format_number(discount)}") + "\n").encode("ascii", "ignore")
 
     # 3️⃣ Lalu Tax
     if tax_amount:
@@ -1308,6 +1320,8 @@ def build_escpos_receipt(name: str) -> bytes:
     order_type = data.get("order_type") or ""
     customer = data.get("customer_name") or data.get("customer") or ""
     total = data.get("total", 0)
+    discount_for_bank = data.get("discount_for_bank", "")
+    discount_name = data.get("discount_name", "")
     discount = data.get("discount_amount", 0)
     tax_total = data.get("total_taxes_and_charges", 0)
     grand_total = data.get("grand_total", 0)
@@ -1450,13 +1464,21 @@ def build_escpos_receipt(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-
+            
     # 1️⃣ Print SC dulu
     if sc_amount:
         out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
     # 2️⃣ Lalu Subtotal
     out += (_format_line("Subtotal:", format_number(total)) + "\n").encode("ascii", "ignore")
+    
+    if discount:
+        if discount_name:
+            label = f"Discount {discount_name}"
+        else:
+            label = "Discount"
+
+        out += (_format_line(f"{label}:", f"-{format_number(discount)}") + "\n").encode("ascii", "ignore")
 
     # 3️⃣ Lalu Tax
     if tax_amount:
@@ -1868,4 +1890,246 @@ def print_shift_report(closing_name, printer_name=None):
         return job_id
     except Exception as e:
         frappe.log_error(f"Gagal mencetak laporan shift: {str(e)}", "Print Error")
+        raise
+    
+def print_end_day_report_v2(report_data, printer_name=None):
+    """
+    Print End Day Report dari API get_end_day_report_v2
+    """
+
+    def fmt_amt(v):
+        return f"{round(flt(v)):,}".replace(",", ".")
+
+    WIDTH = 32
+
+    def line():
+        return "-" * WIDTH
+
+    def format_lr(left, right):
+        left = str(left)
+        right = str(right)
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+        return left + (" " * space) + right
+
+    lines = []
+
+    posting_date = report_data.get("posting_date")
+    outlet = report_data.get("outlet")
+
+    summary = report_data.get("summary", {})
+    dine_in = report_data.get("dine_in", {})
+    take_away = report_data.get("take_away", {})
+    payments = report_data.get("payments", {})
+    taxes = report_data.get("taxes", {})
+    discount_by_order_type = report_data.get("discount_by_order_type", {})
+    draft = report_data.get("draft", {})
+    void_bill = report_data.get("void_bill", {})
+
+    # ======================================
+    # HEADER
+    # ======================================
+
+    lines.append("END DAY REPORT")
+    lines.append(f"Date   : {posting_date}")
+    lines.append(f"Outlet : {outlet}")
+    lines.append(line())
+
+    # ======================================
+    # SALES SUMMARY
+    # ======================================
+
+    lines.append("SALES SUMMARY")
+    lines.append(line())
+
+    lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
+    lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
+
+    for tax_name, amt in taxes.items():
+        lines.append(format_lr(tax_name, fmt_amt(amt)))
+
+    lines.append(line())
+    lines.append(format_lr("GRAND TOTAL", fmt_amt(summary.get("grand_total", 0))))
+    lines.append("")
+
+    # ======================================
+    # ORDER SUMMARY
+    # ======================================
+
+    total_dine = sum(v["qty"] for v in dine_in.values()) if dine_in else 0
+    total_take = sum(v["qty"] for v in take_away.values()) if take_away else 0
+
+    lines.append("ORDER SUMMARY")
+    lines.append(line())
+    lines.append(format_lr("Dine In Item", total_dine))
+    lines.append(format_lr("Take Away Item", total_take))
+    lines.append("")
+
+    # ======================================
+    # DINE IN SALES
+    # ======================================
+
+    if dine_in:
+
+        lines.append("DINE IN SALES")
+        lines.append(line())
+
+        total_qty = 0
+        total_amount = 0
+
+        for group, val in dine_in.items():
+
+            qty = val["qty"]
+            amt = val["amount"]
+
+            total_qty += qty
+            total_amount += amt
+
+            lines.append(
+                f"{group[:16]:<16}{qty:>4} {fmt_amt(amt):>10}"
+            )
+
+        lines.append(line())
+        lines.append(
+            f"{'TOTAL':<16}{total_qty:>4} {fmt_amt(total_amount):>10}"
+        )
+        lines.append("")
+
+    # ======================================
+    # TAKE AWAY SALES
+    # ======================================
+
+    if take_away:
+
+        lines.append("TAKE AWAY SALES")
+        lines.append(line())
+
+        total_qty = 0
+        total_amount = 0
+
+        for group, val in take_away.items():
+
+            qty = val["qty"]
+            amt = val["amount"]
+
+            total_qty += qty
+            total_amount += amt
+
+            lines.append(
+                f"{group[:16]:<16}{qty:>4} {fmt_amt(amt):>10}"
+            )
+
+        lines.append(line())
+        lines.append(
+            f"{'TOTAL':<16}{total_qty:>4} {fmt_amt(total_amount):>10}"
+        )
+        lines.append("")
+
+    # ======================================
+    # PAYMENT SUMMARY
+    # ======================================
+
+    lines.append("PAYMENT SUMMARY")
+    lines.append(line())
+
+    for mop, amt in payments.items():
+        lines.append(format_lr(mop, fmt_amt(amt)))
+
+    lines.append("")
+
+    # ======================================
+    # DISCOUNT SUMMARY
+    # ======================================
+
+    if discount_by_order_type:
+
+        lines.append("DISCOUNT SUMMARY")
+        lines.append(line())
+
+        for typ, val in discount_by_order_type.items():
+
+            qty = val["total_qty"]
+            amt = val["total_amount"]
+
+            lines.append(
+                format_lr(
+                    f"{typ} ({qty})",
+                    f"-{fmt_amt(amt)}"
+                )
+            )
+
+        lines.append("")
+
+    # ======================================
+    # DRAFT BILL
+    # ======================================
+
+    if draft.get("total_bill"):
+
+        lines.append("DRAFT BILL")
+        lines.append(line())
+
+        for d in draft.get("details", []):
+            inv = d["invoice"]
+            amt = d["amount"]
+
+            lines.append(
+                f"{inv[-8:]:<12} {fmt_amt(amt):>18}"
+            )
+
+        lines.append(line())
+        lines.append(
+            format_lr("Total Bill", draft.get("total_bill"))
+        )
+        lines.append(
+            format_lr("Amount", fmt_amt(draft.get("total_amount")))
+        )
+        lines.append("")
+
+    # ======================================
+    # VOID BILL
+    # ======================================
+
+    lines.append("VOID BILL")
+    lines.append(line())
+
+    lines.append(
+        format_lr("Total Bill", void_bill.get("total_bill", 0))
+    )
+
+    lines.append(
+        format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0)))
+    )
+
+    lines.append("")
+    lines.append("END OF REPORT")
+    lines.append("")
+
+    text = "\n".join(lines)
+
+    # ======================================
+    # PRINT VIA CUPS
+    # ======================================
+
+    try:
+
+        if not printer_name:
+
+            conn = cups.Connection()
+            printer_name = conn.getDefault()
+
+            if not printer_name:
+                printers = conn.getPrinters()
+                printer_name = list(printers.keys())[0] if printers else None
+
+            if not printer_name:
+                frappe.throw("Tidak ada printer terdeteksi")
+
+        job_id = cups_print_raw(text.encode("utf-8"), printer_name)
+
+        return job_id
+
+    except Exception as e:
+        frappe.log_error(str(e), "Print End Day Report Error")
         raise
