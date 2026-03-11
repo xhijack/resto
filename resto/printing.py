@@ -735,19 +735,19 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         display_line = f"{qty_s} x {title}"
 
         # Pilih ukuran font berdasarkan jenis printer
-        if is_dotmatrix:
-            out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)   # double both (0x18)
-        else:
-            out += _esc_char_size(1, 6) + _esc_bold(True)             # tinggi 6x untuk thermal
+        # if is_dotmatrix:
+        out += _esc_char_size_dotmatrix(3, 3) + _esc_bold(True)   # double both (0x18)
+        # else:
+            # out += _esc_char_size(1, 6) + _esc_bold(True)             # tinggi 6x untuk thermal
 
         big_line = _fit(display_line, LINE_WIDTH)
         out += (big_line + "\n").encode("utf-8", "ignore")
 
         # Reset ukuran dan bold
-        if is_dotmatrix:
-            out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)  # normal
-        else:
-            out += _esc_bold(False) + _esc_char_size(0, 0)            # normal
+        # if is_dotmatrix:
+        out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)  # normal
+        # else:
+        #     out += _esc_bold(False) + _esc_char_size(0, 0)            # normal
 
         # Add-ons
         add_ons_str = it.get("add_ons", "")
