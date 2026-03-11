@@ -1607,7 +1607,6 @@ def build_escpos_checker(name: str) -> bytes:
     table_names = get_table_names_from_pos_invoice(data["name"])
 
     # ===== INFORMASI INVOICE =====
-    # out += (f"No : {data['name']}\n").encode("ascii", "ignore")
     out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
@@ -1620,13 +1619,12 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
+
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
         qty = item.get("qty") or 1
         resto_menu = item.get("resto_menu")
-        # print("MANDARIN MAP:", mandarin_map)
-        # Ambil dari mandarin_map (SUDAH di-query di atas)
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
         # Format qty
@@ -1635,14 +1633,13 @@ def build_escpos_checker(name: str) -> bytes:
         else:
             qty_str = f"{qty}x"
 
-        # Gabungkan dalam 1 baris
-        # if mandarin_name:
-        #     full_item_name = f"{item_name} ({mandarin_name})"
-        # else:
         full_item_name = item_name
-
         line = f"{qty_str.ljust(5)}{full_item_name}"
+
+        # ===== CETAK ITEM UTAMA DENGAN FONT LEBIH BESAR =====
+        out += _esc_char_size(1, 2)   # double-height, lebar normal
         out += (line + "\n").encode("utf-8")
+        out += _esc_char_size(0, 0)   # reset ke ukuran normal
 
         # ===== ADD ONS =====
         add_ons_str = item.get("add_ons") or ""
@@ -1655,6 +1652,9 @@ def build_escpos_checker(name: str) -> bytes:
         notes = (item.get("quick_notes") or "").strip()
         if notes:
             out += (" " * 7 + f"# {notes}\n").encode("utf-8")
+
+        # ===== SPASI ANTAR ITEM =====
+        out += b"\n"
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1672,12 +1672,11 @@ def build_escpos_checker(name: str) -> bytes:
             out += _esc_bold(False)
 
             # --- Font besar + center untuk nomor antrian ---
-            out += _esc_align_center()          # pastikan tetap di tengah
-            out += b"\x1b!\x38"                 # ESC ! 56 → double height & width
+            out += _esc_align_center()
+            out += _esc_char_size(2, 2)   # double width & height
             out += f"{queue_no}\n".encode("ascii", "ignore")
-            out += b"\x1b!\x00"                 # reset font ke normal
+            out += _esc_char_size(0, 0)
             out += _esc_feed(2)
-
 
     # Feed bawah + cut
     out += _esc_feed(8) + _esc_cut_full()
