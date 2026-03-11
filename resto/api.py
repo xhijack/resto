@@ -637,47 +637,34 @@ def print_to_ks_now(pos_invoice):
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):
     """
-    Return list of tickets grouped by kitchen_station:
-    [
-      {
-        "kitchen_station": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "items": [
-          {
-            "resto_menu": "Nasi Goreng Spesial",
-            "short_name": "NGS",
-            "qty": 2,
-            "quick_notes": "Tanpa Sambel",
-            "add_ons": "Extra Kerupuk"
-          }
-        ]
-      },
-      ...
-    ]
+    Return list of tickets grouped by kitchen_station, respecting printing_type.
+    For Combine: one ticket with all items for that station.
+    For Split: one ticket per item for that station.
     """
     # Ambil branch dari POS Invoice agar pencarian Branch Menu relevan
     branch = frappe.db.get_value("POS Invoice", pos_name, "branch")
 
-    # Ambil item dari POS Invoice Item (asumsi ada custom fields quick_notes & add_ons)
+    # Ambil item dari POS Invoice Item
     pos_items = frappe.get_all(
         "POS Invoice Item",
         filters={"parent": pos_name},
-        fields=["name", "resto_menu", "qty", "quick_notes", "add_ons"]
+        fields=["name", "resto_menu", "item_name", "qty", "quick_notes", "add_ons"]
     )
 
     if not pos_items:
         return []
 
-    # Group hasil per kitchen_station
-    tickets_by_station = {}  # station -> list[items]
-    short_name_cache = {}    # resto_menu -> short_name
+    # Dictionary untuk menyimpan data per station
+    # station_data[station] = {"items": [], "printing_type": ...}
+    station_data = {}
+    short_name_cache = {}
 
     for it in pos_items:
         resto_menu = it.get("resto_menu")
         if not resto_menu:
             continue
 
-        # Ambil short_name dari Resto Menu (cache biar hemat query)
+        # Ambil short_name dari Resto Menu (cache)
         if resto_menu not in short_name_cache:
             short_name_cache[resto_menu] = frappe.db.get_value(
                 "Resto Menu", resto_menu, "short_name"
@@ -695,46 +682,74 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
         )
 
         if not branch_menus:
-            # Jika tidak ada Branch Menu yang cocok, skip item ini
-            # (atau bisa diarahkan ke station default jika ada requirement)
             continue
 
-        # Kumpulkan station yang punya printer aktif (deduplicate)
-        stations = set()
+        # Untuk setiap Branch Menu yang cocok, ambil printer entries
         for bm in branch_menus:
             bm_doc = frappe.get_doc("Branch Menu", bm.name)
-            for ks in (bm_doc.printers or []):
-                # Hanya station yang benar-benar punya printer_name
-                if getattr(ks, "printer_name", None):
-                    stations.add(getattr(ks, "kitchen_station", None))
+            for printer_entry in (bm_doc.printers or []):
+                printer_name = printer_entry.get("printer_name")
+                if not printer_name:
+                    continue
+                station = printer_entry.get("kitchen_station")
+                if not station:
+                    continue
+                printing_type = printer_entry.get("printing_type") or "Combine"  # default Combine
 
-        # Tambahkan item ini ke setiap station terkait
-        for station in stations:
-            if not station:
-                continue
+                # Inisialisasi data station jika belum ada
+                if station not in station_data:
+                    station_data[station] = {
+                        "items": [],
+                        "printing_type": printing_type
+                    }
+                else:
+                    # Jika printing_type berbeda, log warning dan gunakan yang pertama
+                    if station_data[station]["printing_type"] != printing_type:
+                        frappe.logger("pos_print").warning(
+                            f"Inconsistent printing_type for station {station}: "
+                            f"{station_data[station]['printing_type']} vs {printing_type}. "
+                            f"Using {station_data[station]['printing_type']}"
+                        )
 
-            tickets_by_station.setdefault(station, []).append({
-                "resto_menu": resto_menu,
-                "short_name": short_name_cache.get(resto_menu, ""),
-                "qty": it.get("qty") or 0,
-                "quick_notes": it.get("quick_notes") or "",
-                "add_ons": it.get("add_ons") or "",
-                "name": it.get("name")
-            })
+                # Tambahkan item ke station ini
+                station_data[station]["items"].append({
+                    "resto_menu": resto_menu,
+                    "short_name": short_name_cache.get(resto_menu, ""),
+                    "item_name": it.get("item_name") or "",
+                    "qty": it.get("qty") or 0,
+                    "quick_notes": it.get("quick_notes") or "",
+                    "add_ons": it.get("add_ons") or "",
+                    "name": it.get("name")
+                })
 
-    # Susun output list dengan field pos_invoice
+    # Bangun hasil akhir berdasarkan printing_type
     result = []
-    for station, items in tickets_by_station.items():
+    for station, data in station_data.items():
+        items = data["items"]
         if not items:
             continue
-        result.append({
-            "kitchen_station": station,
-            "pos_invoice": pos_name,
-            "items": items
-        })
+        printing_type = data["printing_type"]
 
-    # (Opsional) urutkan biar stabil
-    result.sort(key=lambda x: x["kitchen_station"] or "")
+        if printing_type == "Combine":
+            # Satu tiket dengan semua item
+            result.append({
+                "kitchen_station": station,
+                "pos_invoice": pos_name,
+                "items": items,
+                "printing_type": printing_type  # opsional, untuk informasi
+            })
+        else:  # Split
+            # Satu tiket per item
+            for item in items:
+                result.append({
+                    "kitchen_station": station,
+                    "pos_invoice": pos_name,
+                    "items": [item],
+                    "printing_type": printing_type
+                })
+
+    # Urutkan hasil (opsional, untuk konsistensi)
+    result.sort(key=lambda x: (x["kitchen_station"] or "", len(x["items"])))
     return result
 
 @frappe.whitelist(allow_guest=True)
