@@ -7,7 +7,8 @@
  "engine": "InnoDB",
  "field_order": [
   "kitchen_station",
-  "printer_name"
+  "printer_name",
+  "printing_type"
  ],
  "fields": [
   {
@@ -26,13 +27,22 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Printer Name"
+  },
+  {
+   "default": "Combine",
+   "fieldname": "printing_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Printing Type",
+   "options": "Combine\nSplit"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2025-09-30 11:16:01.062661",
+ "modified": "2026-03-10 16:49:40.989770",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "Branch Kitchen Station",
