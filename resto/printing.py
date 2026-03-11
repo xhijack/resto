@@ -845,7 +845,8 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             entry["items"] = items_to_print
 
             # ===== BUILD ESC/POS =====
-            raw = build_kitchen_receipt_from_payload(entry)
+            for item in items_to_print:
+                raw = build_kitchen_receipt_from_payload([item])
 
             # jika builder menghasilkan kosong → skip
             if not raw:
