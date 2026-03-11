@@ -713,11 +713,16 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     table_name = get_table_names_from_pos_invoice(inv)
 
     # HEADER
+    out += _esc_char_size_dotmatrix(3, 3) + _esc_bold(True) 
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
+    out += _esc_char_size_dotmatrix(0, 0)
 
+    out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)   # double both (0x18)
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
+    out += _esc_char_size_dotmatrix(0, 0)
+
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
