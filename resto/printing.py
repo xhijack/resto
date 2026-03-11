@@ -685,9 +685,9 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
     printer_name = _safe_str(entry.get("printer_name")) or ""
-    # Daftar kata kunci untuk mendeteksi printer dot matrix
-    dotmatrix_keywords = ["U220", "BAR", "PANTRY", "DOT", "MATRIX", "EPSON"]
-    is_dotmatrix = any(kw in printer_name.upper() for kw in dotmatrix_keywords)
+    # # Daftar kata kunci untuk mendeteksi printer dot matrix
+    # dotmatrix_keywords = ["U220", "BAR", "PANTRY", "DOT", "MATRIX", "EPSON"]
+    # is_dotmatrix = any(kw in printer_name.upper() for kw in dotmatrix_keywords)
     
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name")
@@ -908,8 +908,8 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
         }    
     except Exception:
         frappe.log_error(
-        frappe.get_traceback(),
-        "Kitchen Print Error (from payload)"
+            frappe.get_traceback(),
+            "Kitchen Print Error (from payload)"
         )
         frappe.throw("Gagal print kitchen. Silakan cek error log.")
 
