@@ -750,7 +750,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         #     out += _esc_bold(False) + _esc_char_size(0, 0)            # normal
 
         # Add-ons
-        out += _esc_char_size_dotmatrix(2, 3) + _esc_bold(True) 
+        out += _esc_char_size_dotmatrix(2, 3)
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
@@ -1615,7 +1615,6 @@ def build_escpos_checker(name: str) -> bytes:
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
-    out += _esc_char_size(0, 3) 
     # ===== ITEMS =====
     for item in items:
         item_name = (item.get("item_name") or "").strip()
@@ -1652,7 +1651,6 @@ def build_escpos_checker(name: str) -> bytes:
         if notes:
             out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
-    out += _esc_char_size(0, 0)
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
     out += (f"{total_qty} items\n").encode("ascii", "ignore")
