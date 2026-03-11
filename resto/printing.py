@@ -690,6 +690,9 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         ]
       }
     """
+    printer_name = _safe_str(entry.get("printer_name")) or ""
+    is_u220 = "U220" in printer_name.upper()  # deteksi TM-U220
+    
     current_user = frappe.session.user
 
     full_name = frappe.db.get_value(
@@ -759,10 +762,18 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
-        out += _esc_char_size(1, 6) + _esc_bold(True)
+        if is_u220:
+            out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)
+        else:
+            out += _esc_char_size(1, 6) + _esc_bold(True)
+
         big_line = _fit(display_line, LINE_WIDTH)
         out += (big_line + "\n").encode("utf-8", "ignore")
-        out += _esc_bold(False) + _esc_char_size(0, 0)
+
+        if is_u220:
+            out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)
+        else:
+            out += _esc_bold(False) + _esc_char_size(0, 0)
 
         # Sub-informasi normal (opsional, 1 baris)
         # if short_name and menu_name and menu_name != short_name:
@@ -2127,3 +2138,15 @@ def print_end_day_report_v2(report_data, printer_name=None):
     except Exception as e:
         frappe.log_error(str(e), "Print End Day Report Error")
         raise
+
+def _esc_char_size_dotmatrix(width_mul: int = 1, height_mul: int = 1) -> bytes:
+    """
+    Set character size untuk printer dot matrix (ESC ! n)
+    width_mul, height_mul: 1 = normal, 2 = double
+    Nilai maksimal biasanya 2 untuk printer seperti TM-U220.
+    """
+    w = 1 if width_mul <= 1 else 2
+    h = 1 if height_mul <= 1 else 2
+    # bit 0-2: width (0=normal, 1=double), bit 3-4: height (0=normal, 1=double)
+    n = ((h-1) << 3) | (w-1)
+    return ESC + b'!' + bytes([n])
