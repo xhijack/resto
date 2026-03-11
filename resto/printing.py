@@ -782,7 +782,6 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += _esc_cut_full()
     return out
 
-# ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
 @frappe.whitelist()
 def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
     """
@@ -833,7 +832,6 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             ]
 
             if not items_to_print:
-
                 frappe.logger("pos_print").info({
                     "invoice": pos_invoice,
                     "printer": printer_name,
@@ -841,41 +839,42 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 })
                 continue
 
-            # ===== SET ITEMS YANG AKAN DI PRINT =====
-            entry["items"] = items_to_print
-
-            # ===== BUILD ESC/POS =====
+            # Cetak setiap item secara terpisah
             for item in items_to_print:
-                entry["items"] = [item]
-                raw = build_kitchen_receipt_from_payload(entry)
+                # Buat entry khusus untuk satu item
+                single_entry = {
+                    "kitchen_station": station,
+                    "printer_name": printer_name,
+                    "pos_invoice": pos_invoice,
+                    "transaction_date": entry.get("transaction_date"),
+                    "items": [item]
+                }
 
-            # jika builder menghasilkan kosong → skip
-            if not raw:
+                raw = build_kitchen_receipt_from_payload(single_entry)
 
-                frappe.logger("pos_print").info({
-                    "invoice": pos_invoice,
-                    "printer": printer_name,
-                    "message": "Builder menghasilkan raw kosong"
-                })
+                if not raw:
+                    frappe.logger("pos_print").warning({
+                        "invoice": pos_invoice,
+                        "printer": printer_name,
+                        "item": item.get("name"),
+                        "message": "Gagal membangun data cetak"
+                    })
+                    continue
 
-                continue
+                # ===== WRITE TEMP FILE =====
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(raw)
+                    tmp_path = tmp.name
 
-            # ===== WRITE TEMP FILE =====
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(raw)
-                tmp_path = tmp.name
+                # ===== PRINT KE CUPS =====
+                job_id = conn.printFile(
+                    printer_name,
+                    tmp_path,
+                    f"KITCHEN_{station}_{item.get('name', '')}",
+                    {"raw": "true"}
+                )
 
-            # ===== PRINT KE CUPS =====
-            job_id = conn.printFile(
-                printer_name,
-                tmp_path,
-                f"KITCHEN_{station}",
-                {"raw": "true"}
-            )
-
-            # ===== UPDATE STATUS PRINT =====
-            for item in items_to_print:
-
+                # ===== UPDATE STATUS PRINT UNTUK ITEM INI =====
                 if item.get("name"):
                     frappe.db.set_value(
                         "POS Invoice Item",
@@ -883,41 +882,37 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                         "is_print_kitchen",
                         1
                     )
+                    frappe.db.commit()  # commit setelah setiap item
 
-            frappe.db.commit()
+                # ===== LOG PRINT =====
+                frappe.logger("pos_print").info({
+                    "invoice": pos_invoice,
+                    "printer": printer_name,
+                    "job_id": job_id,
+                    "item": item.get("name"),
+                    "item_name": item.get("item_name") or item.get("resto_menu")
+                })
 
-            # ===== LOG PRINT =====
-            frappe.logger("pos_print").info({
-                "invoice": pos_invoice,
-                "printer": printer_name,
-                "job_id": job_id,
-                "items_printed": len(items_to_print)
-            })
-
-            results.append({
-                "station": station,
-                "printer": printer_name,
-                "job_id": job_id,
-                "pos_invoice": pos_invoice
-            })
-
-
+                results.append({
+                    "station": station,
+                    "printer": printer_name,
+                    "job_id": job_id,
+                    "pos_invoice": pos_invoice,
+                    "item_name": item.get("item_name") or item.get("resto_menu")
+                })
         frappe.msgprint(f"{len(results)} kitchen ticket dikirim ke printer")
 
         return {
             "ok": True,
             "jobs": results
-        }
-
-
+        }    
     except Exception:
-
         frappe.log_error(
-            frappe.get_traceback(),
-            "Kitchen Print Error (from payload)"
+        frappe.get_traceback(),
+        "Kitchen Print Error (from payload)"
         )
-
         frappe.throw("Gagal print kitchen. Silakan cek error log.")
+
 
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
