@@ -762,18 +762,18 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         display_line = f"{qty_s} x {title}"
 
         # Besarkan tinggi saja agar tidak pecah kolom
-        if is_u220:
-            out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)
-        else:
-            out += _esc_char_size(1, 6) + _esc_bold(True)
+        # if is_u220:
+        out += _esc_char_size_dotmatrix(4, 8) + _esc_bold(True)
+        # else:
+        #     out += _esc_char_size(1, 6) + _esc_bold(True)
 
         big_line = _fit(display_line, LINE_WIDTH)
         out += (big_line + "\n").encode("utf-8", "ignore")
 
-        if is_u220:
-            out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)
-        else:
-            out += _esc_bold(False) + _esc_char_size(0, 0)
+        # if is_u220:
+        out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)
+        # else:
+        #     out += _esc_bold(False) + _esc_char_size(0, 0)
 
         # Sub-informasi normal (opsional, 1 baris)
         # if short_name and menu_name and menu_name != short_name:
