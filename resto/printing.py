@@ -736,7 +736,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
         # Pilih ukuran font berdasarkan jenis printer
         # if is_dotmatrix:
-        out += _esc_char_size_dotmatrix(3, 3) + _esc_bold(True)   # double both (0x18)
+        out += _esc_char_size_dotmatrix(4, 4) + _esc_bold(True)   # double both (0x18)
         # else:
             # out += _esc_char_size(1, 6) + _esc_bold(True)             # tinggi 6x untuk thermal
 
