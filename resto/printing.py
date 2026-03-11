@@ -1637,7 +1637,7 @@ def build_escpos_checker(name: str) -> bytes:
         line = f"{qty_str.ljust(5)}{full_item_name}"
 
         # ===== CETAK ITEM UTAMA DENGAN FONT LEBIH BESAR =====
-        out += _esc_char_size(0, 2)   # double-height, lebar normal
+        out += _esc_char_size(1, 1)   # double-height, lebar normal
         out += (line + "\n").encode("utf-8")
         out += _esc_char_size(0, 0)   # reset ke ukuran normal
 
