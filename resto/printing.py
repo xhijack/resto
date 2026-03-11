@@ -136,6 +136,18 @@ def _pad_lr(left: str, right: str, width: int) -> str:
         return (left + " " + right)[0:width]
     return f"{left}{' ' * space}{right}"
 
+def _esc_char_size_dotmatrix(width_mul: int = 1, height_mul: int = 1) -> bytes:
+    """
+    Set character size untuk printer dot matrix (ESC ! n)
+    width_mul, height_mul: 1 = normal, 2 = double
+    Nilai maksimal biasanya 2 untuk printer seperti TM-U220.
+    """
+    w = 1 if width_mul <= 1 else 2
+    h = 1 if height_mul <= 1 else 2
+    # bit 3: double-height, bit 4: double-width
+    n = ((h-1) << 3) | ((w-1) << 4)
+    return ESC + b'!' + bytes([n])
+
 def _esc_print_image(image_path):
     """
     Convert logo ke ESC/POS format (bitmap)
@@ -672,47 +684,19 @@ def _append_wrapped(out: bytes, text: str, indent: int = 0) -> bytes:
     return out
 
 def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
-    """
-    entry:
-      {
-        "kitchen_station": "HOT KITCHEN",
-        "printer_name": "HOTKITCHEN",
-        "pos_invoice": "POSINVOICE00001",
-        "transaction_date": "2025-10-10 15:23:00",
-        "items": [
-          {
-            "resto_menu": "Nasi Goreng Spesial",
-            "short_name": "NGS",
-            "qty": 2,
-            "quick_notes": "Tanpa Sambel",
-            "add_ons": "Extra Kerupuk"
-          }
-        ]
-      }
-    """
     printer_name = _safe_str(entry.get("printer_name")) or ""
-    is_u220 = "U220" in printer_name.upper()  # deteksi TM-U220
+    # Daftar kata kunci untuk mendeteksi printer dot matrix
+    dotmatrix_keywords = ["U220", "BAR", "PANTRY", "DOT", "MATRIX", "EPSON"]
+    is_dotmatrix = any(kw in printer_name.upper() for kw in dotmatrix_keywords)
     
     current_user = frappe.session.user
-
-    full_name = frappe.db.get_value(
-        "User",
-        current_user,
-        "full_name"
-    )
-
+    full_name = frappe.db.get_value("User", current_user, "full_name")
     station = _safe_str(entry.get("kitchen_station")) or "-"
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
-    # items_raw = entry.get("items") or []
-    # items = sanitize_kitchen_payload(items_raw)
     items = entry.get("items") or []
     
-    resto_menus = list(set([
-        i.get("resto_menu")
-        for i in items
-        if i.get("resto_menu")
-    ]))
+    resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
     mandarin_map = {}
     if resto_menus:
         menu_data = frappe.get_all(
@@ -720,11 +704,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
             filters={"name": ["in", resto_menus]},
             fields=["name", "custom_mandarin_name"]
         )
-        mandarin_map = {
-            d.name: d.custom_mandarin_name
-            for d in menu_data
-            if d.custom_mandarin_name
-        }
+        mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
 
     out = b""
     out += _esc_init()
@@ -732,7 +712,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     table_name = get_table_names_from_pos_invoice(inv)
 
-    # HEADER (tanpa garis/feed di atas)
+    # HEADER
     out += _esc_align_center() + _esc_bold(True)
     out += (f"{station}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
@@ -740,11 +720,9 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
-    
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
-    # ITEMS (height besar, width normal -> 1 baris; truncate bila kepanjangan)
-    
+    # ITEMS
     for it in items:
         qty_s      = _fmt_qty(it.get("qty") or 0)
         item_name  = _safe_str(it.get("item_name"))
@@ -753,32 +731,25 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
         
-        # title = short_name or menu_name or "-"
         title = item_name or short_name or menu_name or "-"
-        # mandarin_name = mandarin_map.get(it.get("resto_menu")) or ""
-        # if mandarin_name:
-        #     display_line = f"{qty_s} x {title} ({mandarin_name})"
-        # else:
         display_line = f"{qty_s} x {title}"
 
-        # Besarkan tinggi saja agar tidak pecah kolom
-        # if is_u220:
-        out += _esc_char_size_dotmatrix(4, 8) + _esc_bold(True)
-        # else:
-        #     out += _esc_char_size(1, 6) + _esc_bold(True)
+        # Pilih ukuran font berdasarkan jenis printer
+        if is_dotmatrix:
+            out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)   # double both (0x18)
+        else:
+            out += _esc_char_size(1, 6) + _esc_bold(True)             # tinggi 6x untuk thermal
 
         big_line = _fit(display_line, LINE_WIDTH)
         out += (big_line + "\n").encode("utf-8", "ignore")
 
-        # if is_u220:
-        out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)
-        # else:
-        #     out += _esc_bold(False) + _esc_char_size(0, 0)
+        # Reset ukuran dan bold
+        if is_dotmatrix:
+            out += _esc_bold(False) + _esc_char_size_dotmatrix(1, 1)  # normal
+        else:
+            out += _esc_bold(False) + _esc_char_size(0, 0)            # normal
 
-        # Sub-informasi normal (opsional, 1 baris)
-        # if short_name and menu_name and menu_name != short_name:
-        #     out += (f"  Menu : {_fit(menu_name, LINE_WIDTH-8)}\n").encode("ascii", "ignore")
-        
+        # Add-ons
         add_ons_str = it.get("add_ons", "")
         if add_ons_str:
             add_ons_list = [a.strip() for a in add_ons_str.split(",")]
@@ -789,24 +760,19 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
                     name = name.strip()
                     add_line = f"  {name}".ljust(LINE_WIDTH - 12)
                     out += (add_line + "\n").encode("ascii", "ignore")
-    
+                else:
+                    out += (f"  {add}\n").encode("utf-8", "ignore")
+
         # Notes
         notes = it.get("quick_notes", "")
         if notes:
             out += (f"  # {notes}\n").encode("ascii", "ignore")
 
-        out += b"\n"  # spacer
+        out += b"\n"  # spacer antar item
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
-
-    # ==== FEED TAMBAHAN sebelum cut supaya tidak "kepotong cepat" ====
-    out += _esc_feed(5)        # atur 4-7 sesuai perilaku printermu
-
-    # Cut: pilih salah satu—kebanyakan _esc_cut_full() sudah cukup
+    out += _esc_feed(5)
     out += _esc_cut_full()
-    # Kalau printer mendukung cut-with-feed, ini alternatif yang rapi:
-    # out += _esc_cut_full_with_feed()
-
     return out
 
 # ========== API: print kitchen dari payload (menerima dict/list atau string JSON) ==========
@@ -2138,15 +2104,3 @@ def print_end_day_report_v2(report_data, printer_name=None):
     except Exception as e:
         frappe.log_error(str(e), "Print End Day Report Error")
         raise
-
-def _esc_char_size_dotmatrix(width_mul: int = 1, height_mul: int = 1) -> bytes:
-    """
-    Set character size untuk printer dot matrix (ESC ! n)
-    width_mul, height_mul: 1 = normal, 2 = double
-    Nilai maksimal biasanya 2 untuk printer seperti TM-U220.
-    """
-    w = 1 if width_mul <= 1 else 2
-    h = 1 if height_mul <= 1 else 2
-    # bit 0-2: width (0=normal, 1=double), bit 3-4: height (0=normal, 1=double)
-    n = ((h-1) << 3) | (w-1)
-    return ESC + b'!' + bytes([n])
