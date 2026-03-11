@@ -626,7 +626,7 @@ def print_to_ks_now(pos_invoice):
 
     # Kirim semua instruksi cetak ke masing-masing station
     for payload in station_payloads:
-        kitchen_print_from_payload(payload)
+        kitchen_print_from_payload(payload, use_pdf=1)
 
     # Setelah semua terkirim, kunci semua item yang sudah diproses
     for name in items_to_lock:

@@ -783,11 +783,17 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     return out
 
 @frappe.whitelist()
-def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
+def kitchen_print_from_payload(payload, title_prefix: str = "", use_pdf: int = 1) -> dict:
+    """
+    Kitchen print dengan pilihan mode:
+    - use_pdf=1: Generate PDF dengan Chinese support (recommended)
+    - use_pdf=0: Raw ESC/POS (tanpa Chinese)
+    """
     import json
     import cups
+    
     try:
-        # ===== NORMALIZE PAYLOAD =====
+        # Normalize payload
         if isinstance(payload, list):
             entries = payload
         elif isinstance(payload, dict):
@@ -809,20 +815,19 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
             station = _safe_str(entry.get("kitchen_station"))
             printer_name = _safe_str(entry.get("printer_name")) or station
             pos_invoice = _safe_str(entry.get("pos_invoice"))
+            
             if not station:
                 raise ValueError("Setiap entry wajib memiliki 'kitchen_station'")
             if not printer_name:
                 raise ValueError("Setiap entry wajib memiliki 'printer_name'")
 
             if printer_name not in printers:
-                raise frappe.ValidationError(
-                    f"Printer '{printer_name}' tidak ditemukan di CUPS"
-                )
+                raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
 
             entry.setdefault("transaction_date", frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S"))
             entry.setdefault("items", [])
 
-            # ===== FILTER ITEM BELUM DI PRINT =====
+            # Filter item belum di print
             items_to_print = [
                 item for item in entry["items"]
                 if int(item.get("is_print_kitchen") or 0) == 0
@@ -836,39 +841,44 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 })
                 continue
 
-            # 🔥 HAPUS LOOP PER ITEM, LANGSUNG CETAK SEMUA ITEM SEKALIGUS 🔥
             single_entry = {
                 "kitchen_station": station,
                 "printer_name": printer_name,
                 "pos_invoice": pos_invoice,
                 "transaction_date": entry.get("transaction_date"),
-                "items": items_to_print   # semua item yang belum dicetak
+                "items": items_to_print
             }
 
-            raw = build_kitchen_receipt_from_payload(single_entry)
+            # PILIH MODE PRINT
+            if int(use_pdf) == 1:
+                # MODE PDF dengan Chinese support
+                pdf_bytes = build_kitchen_receipt_from_payload_pdf(single_entry, title_prefix)
+                
+                if not pdf_bytes:
+                    continue
+                
+                # Print PDF
+                job_id = print_pdf_to_printer(pdf_bytes, printer_name)
+                
+            else:
+                # MODE RAW ESC/POS (legacy, tanpa Chinese)
+                raw = build_kitchen_receipt_from_payload(single_entry)
+                
+                if not raw:
+                    continue
+                
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(raw)
+                    tmp_path = tmp.name
+                
+                job_id = conn.printFile(
+                    printer_name,
+                    tmp_path,
+                    f"KITCHEN_{station}_{pos_invoice}",
+                    {"raw": "true"}
+                )
 
-            if not raw:
-                frappe.logger("pos_print").warning({
-                    "invoice": pos_invoice,
-                    "printer": printer_name,
-                    "message": "Gagal membangun data cetak"
-                })
-                continue
-
-            # ===== WRITE TEMP FILE =====
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(raw)
-                tmp_path = tmp.name
-
-            # ===== PRINT KE CUPS =====
-            job_id = conn.printFile(
-                printer_name,
-                tmp_path,
-                f"KITCHEN_{station}_{pos_invoice}",
-                {"raw": "true"}
-            )
-
-            # ===== UPDATE STATUS PRINT UNTUK SEMUA ITEM =====
+            # Update status print
             for item in items_to_print:
                 if item.get("name"):
                     frappe.db.set_value(
@@ -879,31 +889,193 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                     )
             frappe.db.commit()
 
-            # ===== LOG PRINT =====
-            frappe.logger("pos_print").info({
-                "invoice": pos_invoice,
-                "printer": printer_name,
-                "job_id": job_id,
-                "items_printed": len(items_to_print)
-            })
-
             results.append({
                 "station": station,
                 "printer": printer_name,
                 "job_id": job_id,
                 "pos_invoice": pos_invoice,
-                "items_printed": len(items_to_print)
+                "items_printed": len(items_to_print),
+                "mode": "pdf" if int(use_pdf) == 1 else "raw"
             })
 
         frappe.msgprint(f"{len(results)} kitchen ticket dikirim ke printer")
         return {"ok": True, "jobs": results}
 
     except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            "Kitchen Print Error (from payload)"
-        )
+        frappe.log_error(frappe.get_traceback(), "Kitchen Print Error")
         frappe.throw("Gagal print kitchen. Silakan cek error log.")
+
+
+# ========== ALTERNATIF: Image-based Chinese Printing ==========
+
+def build_kitchen_receipt_image(entry: Dict[str, Any]) -> bytes:
+    """
+    Alternative: Render receipt sebagai gambar PNG, lalu print sebagai image.
+    Lebih compatible dengan printer thermal yang support image printing.
+    """
+    from PIL import Image, ImageDraw, ImageFont
+    import textwrap
+    
+    printer_name = _safe_str(entry.get("printer_name")) or ""
+    current_user = frappe.session.user
+    full_name = frappe.db.get_value("User", current_user, "full_name")
+    station = _safe_str(entry.get("kitchen_station")) or "-"
+    inv = _safe_str(entry.get("pos_invoice")) or "-"
+    tdate = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    items = entry.get("items") or []
+    
+    # Ambil mandarin names
+    resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
+    
+    # Setup image dimensions (80mm width @ 203dpi = ~640px)
+    width = 640
+    line_height = 30
+    header_height = 120
+    item_block_height = 80  # per item (latin + chinese + spacing)
+    
+    height = header_height + (len(items) * item_block_height) + 100
+    
+    # Create image
+    img = Image.new('RGB', (width, height), 'white')
+    draw = ImageDraw.Draw(img)
+    
+    # Load fonts
+    try:
+        # Try to load Chinese font
+        font_chinese = ImageFont.truetype("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc", 28)
+    except:
+        try:
+            font_chinese = ImageFont.truetype("/usr/share/fonts/truetype/arphic/uming.ttc", 28)
+        except:
+            font_chinese = ImageFont.load_default()
+    
+    try:
+        font_latin = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+        font_info = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+    except:
+        font_latin = ImageFont.load_default()
+        font_info = ImageFont.load_default()
+    
+    y = 10
+    
+    # Header
+    draw.text((width//2, y), station, fill='black', font=font_latin, anchor="mm")
+    y += 35
+    
+    table_name = get_table_names_from_pos_invoice(inv)
+    draw.text((10, y), f"No Meja: {table_name}", fill='black', font=font_info)
+    y += 25
+    draw.text((10, y), f"Tanggal: {tdate}", fill='black', font=font_info)
+    y += 25
+    draw.text((10, y), f"Petugas: {full_name}", fill='black', font=font_info)
+    y += 35
+    
+    # Separator
+    draw.line([(10, y), (width-10, y)], fill='black', width=2)
+    y += 20
+    
+    # Items
+    for it in items:
+        qty_val = it.get("qty", 0)
+        qty = int(qty_val) if isinstance(qty_val, float) and qty_val.is_integer() else qty_val
+        
+        item_name = _safe_str(it.get("item_name"))
+        menu_name = _safe_str(it.get("resto_menu"))
+        mandarin_name = mandarin_map.get(menu_name) or ""
+        
+        # Qty + Item Name (Latin) - BOLD & BIG
+        latin_text = f"{qty} x {item_name}"
+        draw.text((10, y), latin_text, fill='black', font=font_latin)
+        y += 30
+        
+        # Chinese Name - CENTER & BIG
+        if mandarin_name:
+            draw.text((width//2, y), mandarin_name, fill='black', font=font_chinese, anchor="mm")
+            y += 35
+        
+        # Add-ons
+        add_ons = _safe_str(it.get("add_ons"))
+        if add_ons:
+            for add in [a.strip() for a in add_ons.split(",")]:
+                if "(" in add:
+                    add = add.rsplit("(", 1)[0].strip()
+                draw.text((30, y), f"+ {add}", fill='black', font=font_info)
+                y += 22
+        
+        # Notes
+        notes = _safe_str(it.get("quick_notes"))
+        if notes:
+            draw.text((30, y), f"# {notes}", fill='black', font=font_info)
+            y += 22
+        
+        y += 15  # spacing antar item
+    
+    # Separator
+    draw.line([(10, y), (width-10, y)], fill='black', width=2)
+    
+    # Save to bytes
+    img_buffer = BytesIO()
+    img.save(img_buffer, format='PNG')
+    img_bytes = img_buffer.getvalue()
+    img_buffer.close()
+    
+    return img_bytes
+
+
+def print_image_escpos(image_bytes: bytes, printer_name: str) -> int:
+    """
+    Convert image ke ESC/POS bitmap command dan print.
+    """
+    from PIL import Image
+    import io
+    
+    # Load image
+    img = Image.open(io.BytesIO(image_bytes)).convert('L')
+    
+    # Resize jika terlalu lebar (max 576 dots untuk 80mm printer)
+    max_width = 576
+    if img.width > max_width:
+        ratio = max_width / img.width
+        img = img.resize((max_width, int(img.height * ratio)))
+    
+    # Convert ke 1-bit (black/white)
+    img = img.point(lambda x: 0 if x < 128 else 255, '1')
+    
+    # Generate ESC/POS commands
+    width_bytes = (img.width + 7) // 8
+    bytes_out = b""
+    
+    # Initialize printer
+    bytes_out += ESC + b'@'
+    bytes_out += ESC + b'a' + b'\x01'  # center align
+    
+    for y in range(img.height):
+        line = b""
+        for x in range(0, img.width, 8):
+            byte = 0
+            for bit in range(8):
+                if x + bit < img.width and img.getpixel((x + bit, y)) == 0:
+                    byte |= (1 << (7 - bit))
+            line += bytes([byte])
+        
+        # ESC * command: print raster bit image
+        bytes_out += ESC + b'*' + b'\x21'  # 24-dot double density
+        bytes_out += bytes([width_bytes % 256, width_bytes // 256])
+        bytes_out += line + b'\n'
+    
+    bytes_out += ESC + b'd' + b'\x03'  # feed 3 lines
+    bytes_out += GS + b'V' + b'\x00'   # cut
+    
+    # Print via CUPS raw
+    return cups_print_raw(bytes_out, printer_name)
         
 # ========== API: masuk antrian (async) ==========
 @frappe.whitelist()
@@ -2095,4 +2267,220 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     except Exception as e:
         frappe.log_error(str(e), "Print End Day Report Error")
+        raise
+
+
+def build_kitchen_receipt_from_payload_pdf(entry: Dict[str, Any], title_prefix: str = "") -> bytes:
+    """
+    Build kitchen receipt sebagai PDF dengan support Chinese characters.
+    Menggunakan ReportLab dengan SimHei/SimSun font untuk Chinese.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import mm
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.lib.units import mm
+    
+    printer_name = _safe_str(entry.get("printer_name")) or ""
+    current_user = frappe.session.user
+    full_name = frappe.db.get_value("User", current_user, "full_name")
+    station = _safe_str(entry.get("kitchen_station")) or "-"
+    inv = _safe_str(entry.get("pos_invoice")) or "-"
+    tdate = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    items = entry.get("items") or []
+    
+    # Ambil mandarin names
+    resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
+    mandarin_map = {}
+    if resto_menus:
+        menu_data = frappe.get_all(
+            "Resto Menu",
+            filters={"name": ["in", resto_menus]},
+            fields=["name", "custom_mandarin_name"]
+        )
+        mandarin_map = {d.name: d.custom_mandarin_name for d in menu_data if d.custom_mandarin_name}
+    
+    # Setup PDF - ukuran kertas thermal 80mm
+    page_width = 80 * mm
+    # Hitung tinggi dinamis berdasarkan jumlah item
+    base_height = 60 * mm  # header + footer
+    item_height = 25 * mm  # per item (latin + chinese + addons + notes)
+    page_height = base_height + (len(items) * item_height)
+    page_height = max(page_height, 100 * mm)  # minimum 100mm
+    
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=(page_width, page_height),
+        rightMargin=2*mm,
+        leftMargin=2*mm,
+        topMargin=2*mm,
+        bottomMargin=2*mm
+    )
+    
+    # Register Chinese fonts
+    try:
+        # Coba register font yang umum ada di Linux
+        pdfmetrics.registerFont(TTFont('SimHei', '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'))
+        pdfmetrics.registerFont(TTFont('SimSun', '/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc'))
+    except:
+        try:
+            pdfmetrics.registerFont(TTFont('SimHei', '/usr/share/fonts/truetype/arphic/uming.ttc'))
+        except:
+            # Fallback ke font default, tapi Chinese mungkin tidak muncul
+            pass
+    
+    styles = getSampleStyleSheet()
+    
+    # Style untuk Chinese text
+    chinese_style = ParagraphStyle(
+        'Chinese',
+        parent=styles['Normal'],
+        fontName='SimHei',
+        fontSize=14,
+        leading=18,
+        alignment=1  # center
+    )
+    
+    # Style untuk Latin text (item name)
+    latin_style = ParagraphStyle(
+        'Latin',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=12,
+        leading=14,
+        alignment=0  # left
+    )
+    
+    # Style untuk header
+    header_style = ParagraphStyle(
+        'Header',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=16,
+        leading=20,
+        alignment=1  # center
+    )
+    
+    # Style untuk info text
+    info_style = ParagraphStyle(
+        'Info',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        leading=12,
+        alignment=0
+    )
+    
+    story = []
+    
+    # HEADER
+    story.append(Paragraph(f"<b>{station}</b>", header_style))
+    story.append(Spacer(1, 3*mm))
+    
+    # Info
+    table_name = get_table_names_from_pos_invoice(inv)
+    story.append(Paragraph(f"No Meja: {table_name}", info_style))
+    story.append(Paragraph(f"Tanggal: {tdate}", info_style))
+    story.append(Paragraph(f"Petugas: {full_name}", info_style))
+    story.append(Spacer(1, 3*mm))
+    
+    # Separator line
+    story.append(Table([['']], colWidths=[76*mm], style=TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+    ])))
+    story.append(Spacer(1, 3*mm))
+    
+    # ITEMS
+    for it in items:
+        qty_val = it.get("qty", 0)
+        qty = int(qty_val) if isinstance(qty_val, float) and qty_val.is_integer() else qty_val
+        
+        item_name = _safe_str(it.get("item_name"))
+        short_name = _safe_str(it.get("short_name"))
+        menu_name = _safe_str(it.get("resto_menu"))
+        add_ons = _safe_str(it.get("add_ons"))
+        qnotes = _safe_str(it.get("quick_notes"))
+        
+        title = item_name or short_name or menu_name or "-"
+        mandarin_name = mandarin_map.get(menu_name) or ""
+        
+        # Qty + Item Name (Latin) - BESAR
+        qty_line = f"<b>{qty} x {title}</b>"
+        story.append(Paragraph(qty_line, latin_style))
+        
+        # Chinese Name - BESAR & CENTER
+        if mandarin_name:
+            story.append(Paragraph(f"{mandarin_name}", chinese_style))
+        
+        # Add-ons dengan indent
+        if add_ons:
+            add_ons_list = [a.strip() for a in add_ons.split(",")]
+            for add in add_ons_list:
+                if "(" in add and ")" in add:
+                    name, price = add.rsplit("(", 1)
+                    name = name.strip()
+                    story.append(Paragraph(f"&nbsp;&nbsp;+ {name}", info_style))
+                else:
+                    story.append(Paragraph(f"&nbsp;&nbsp;+ {add}", info_style))
+        
+        # Notes
+        if qnotes:
+            story.append(Paragraph(f"&nbsp;&nbsp;# {qnotes}", info_style))
+        
+        story.append(Spacer(1, 4*mm))
+    
+    # Separator
+    story.append(Table([['']], colWidths=[76*mm], style=TableStyle([
+        ('LINEBELOW', (0,0), (-1,0), 1, colors.black),
+    ])))
+    
+    # Build PDF
+    doc.build(story)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_bytes
+
+
+def print_pdf_to_printer(pdf_bytes: bytes, printer_name: str) -> int:
+    """
+    Print PDF ke printer thermal via CUPS.
+    Menggunakan filter untuk convert ke format printer.
+    """
+    import cups
+    import tempfile
+    import os
+    
+    conn = cups.Connection()
+    printers = conn.getPrinters()
+    
+    if printer_name not in printers:
+        raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
+    
+    # Simpan PDF temp
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+        tmp_pdf.write(pdf_bytes)
+        pdf_path = tmp_pdf.name
+    
+    try:
+        # Print PDF ke printer
+        # CUPS akan otomatis convert ke format printer yang sesuai
+        job_id = conn.printFile(
+            printer_name,
+            pdf_path,
+            "Kitchen_Order",
+            {}  # options
+        )
+        
+        # Cleanup
+        os.unlink(pdf_path)
+        
+        return job_id
+        
+    except Exception as e:
+        if os.path.exists(pdf_path):
+            os.unlink(pdf_path)
         raise
