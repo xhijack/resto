@@ -239,11 +239,13 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "price_list_rate"
         ) or it.get("rate") 
 
+        short_name = frappe.db.get_value("Resto Menu", item_code, "short_name") or it.get("item_name") or item_code
 
         items.append({
             "name": it.get("name"),
             "item_code": it.get("item_code"),
             "item_name": it.get("item_name") or it.get("item_code"),
+            "short_name": short_name,
             "resto_menu": it.get("resto_menu"),
             "qty": float(it.get("qty") or 0),
             "rate": float(standard_price or 0),
@@ -1145,7 +1147,7 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
-        item_name = (item.get("item_name") or "").strip()
+        item_name = (item.get("short_name") or "").strip()
         qty = int(item.get("qty") or 0)
         rate = float(item.get("rate") or 0)
         amount = qty * rate
@@ -1390,7 +1392,7 @@ def build_escpos_receipt(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
-        item_name = item.get("item_name", "")
+        item_name = item.get("short_name", "")
         qty = int(item.get("qty", 0))
         rate = item.get("rate", 0)
         amount = rate * qty
@@ -1610,7 +1612,7 @@ def build_escpos_checker(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
-        item_name = (item.get("item_name") or "").strip()
+        item_name = (item.get("short_name") or "").strip()
         qty = item.get("qty") or 1
         resto_menu = item.get("resto_menu")
         mandarin_name = mandarin_map.get(resto_menu) or ""
