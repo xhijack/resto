@@ -1858,12 +1858,13 @@ def print_shift_report(closing_name, printer_name=None):
 def print_end_day_report_v2(report_data, printer_name=None):
     """
     Print End Day Report dari API get_end_day_report_v2
+    Layout aman untuk printer thermal 58mm (32 char)
     """
+
+    WIDTH = 32
 
     def fmt_amt(v):
         return f"{round(flt(v)):,}".replace(",", ".")
-
-    WIDTH = 32
 
     def line():
         return "-" * WIDTH
@@ -1871,10 +1872,23 @@ def print_end_day_report_v2(report_data, printer_name=None):
     def format_lr(left, right):
         left = str(left)
         right = str(right)
+
+        if len(left) > WIDTH - 10:
+            left = left[:WIDTH - 10]
+
         space = WIDTH - len(left) - len(right)
         if space < 1:
             space = 1
+
         return left + (" " * space) + right
+
+    # FORMAT ITEM TABLE
+    # 18 char item | 4 qty | 9 amount
+    def format_item(name, qty, amt):
+        name = str(name)[:18]
+        qty = str(int(qty))[:4]
+        amt = fmt_amt(amt)
+        return f"{name:<18}{qty:>4} {amt:>9}"
 
     lines = []
 
@@ -1890,18 +1904,18 @@ def print_end_day_report_v2(report_data, printer_name=None):
     draft = report_data.get("draft", {})
     void_bill = report_data.get("void_bill", {})
 
-    # ======================================
+    # =========================
     # HEADER
-    # ======================================
+    # =========================
 
-    lines.append("END DAY REPORT")
+    lines.append("END DAY REPORT".center(WIDTH))
     lines.append(f"Date   : {posting_date}")
     lines.append(f"Outlet : {outlet}")
     lines.append(line())
 
-    # ======================================
+    # =========================
     # SALES SUMMARY
-    # ======================================
+    # =========================
 
     lines.append("SALES SUMMARY")
     lines.append(line())
@@ -1916,9 +1930,9 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append(format_lr("GRAND TOTAL", fmt_amt(summary.get("grand_total", 0))))
     lines.append("")
 
-    # ======================================
+    # =========================
     # ORDER SUMMARY
-    # ======================================
+    # =========================
 
     total_dine = sum(v["qty"] for v in dine_in.values()) if dine_in else 0
     total_take = sum(v["qty"] for v in take_away.values()) if take_away else 0
@@ -1929,13 +1943,15 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append(format_lr("Take Away Item", total_take))
     lines.append("")
 
-    # ======================================
+    # =========================
     # DINE IN SALES
-    # ======================================
+    # =========================
 
     if dine_in:
 
         lines.append("DINE IN SALES")
+        lines.append(line())
+        lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
         lines.append(line())
 
         total_qty = 0
@@ -1949,23 +1965,21 @@ def print_end_day_report_v2(report_data, printer_name=None):
             total_qty += qty
             total_amount += amt
 
-            lines.append(
-                f"{group[:16]:<16}{qty:>4} {fmt_amt(amt):>10}"
-            )
+            lines.append(format_item(group, qty, amt))
 
         lines.append(line())
-        lines.append(
-            f"{'TOTAL':<16}{total_qty:>4} {fmt_amt(total_amount):>10}"
-        )
+        lines.append(format_item("TOTAL", total_qty, total_amount))
         lines.append("")
 
-    # ======================================
+    # =========================
     # TAKE AWAY SALES
-    # ======================================
+    # =========================
 
     if take_away:
 
         lines.append("TAKE AWAY SALES")
+        lines.append(line())
+        lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
         lines.append(line())
 
         total_qty = 0
@@ -1979,19 +1993,15 @@ def print_end_day_report_v2(report_data, printer_name=None):
             total_qty += qty
             total_amount += amt
 
-            lines.append(
-                f"{group[:16]:<16}{qty:>4} {fmt_amt(amt):>10}"
-            )
+            lines.append(format_item(group, qty, amt))
 
         lines.append(line())
-        lines.append(
-            f"{'TOTAL':<16}{total_qty:>4} {fmt_amt(total_amount):>10}"
-        )
+        lines.append(format_item("TOTAL", total_qty, total_amount))
         lines.append("")
 
-    # ======================================
+    # =========================
     # PAYMENT SUMMARY
-    # ======================================
+    # =========================
 
     lines.append("PAYMENT SUMMARY")
     lines.append(line())
@@ -2001,9 +2011,9 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     lines.append("")
 
-    # ======================================
+    # =========================
     # DISCOUNT SUMMARY
-    # ======================================
+    # =========================
 
     if discount_by_order_type:
 
@@ -2015,18 +2025,13 @@ def print_end_day_report_v2(report_data, printer_name=None):
             qty = val["total_qty"]
             amt = val["total_amount"]
 
-            lines.append(
-                format_lr(
-                    f"{typ} ({qty})",
-                    f"-{fmt_amt(amt)}"
-                )
-            )
+            lines.append(format_lr(f"{typ} ({qty})", f"-{fmt_amt(amt)}"))
 
         lines.append("")
 
-    # ======================================
+    # =========================
     # DRAFT BILL
-    # ======================================
+    # =========================
 
     if draft.get("total_bill"):
 
@@ -2034,46 +2039,36 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append(line())
 
         for d in draft.get("details", []):
-            inv = d["invoice"]
-            amt = d["amount"]
 
-            lines.append(
-                f"{inv[-8:]:<12} {fmt_amt(amt):>18}"
-            )
+            inv = d["invoice"][-8:]
+            amt = fmt_amt(d["amount"])
+
+            lines.append(format_lr(inv, amt))
 
         lines.append(line())
-        lines.append(
-            format_lr("Total Bill", draft.get("total_bill"))
-        )
-        lines.append(
-            format_lr("Amount", fmt_amt(draft.get("total_amount")))
-        )
+        lines.append(format_lr("Total Bill", draft.get("total_bill")))
+        lines.append(format_lr("Amount", fmt_amt(draft.get("total_amount"))))
         lines.append("")
 
-    # ======================================
+    # =========================
     # VOID BILL
-    # ======================================
+    # =========================
 
     lines.append("VOID BILL")
     lines.append(line())
 
-    lines.append(
-        format_lr("Total Bill", void_bill.get("total_bill", 0))
-    )
-
-    lines.append(
-        format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0)))
-    )
+    lines.append(format_lr("Total Bill", void_bill.get("total_bill", 0)))
+    lines.append(format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0))))
 
     lines.append("")
-    lines.append("END OF REPORT")
+    lines.append("END OF REPORT".center(WIDTH))
     lines.append("")
 
     text = "\n".join(lines)
 
-    # ======================================
-    # PRINT VIA CUPS
-    # ======================================
+    # =========================
+    # PRINT
+    # =========================
 
     try:
 
@@ -2089,10 +2084,11 @@ def print_end_day_report_v2(report_data, printer_name=None):
             if not printer_name:
                 frappe.throw("Tidak ada printer terdeteksi")
 
-        job_id = cups_print_raw(text.encode("utf-8"), printer_name)
+        job_id = cups_print_raw(text.encode("ascii", "ignore"), printer_name)
 
         return job_id
 
     except Exception as e:
         frappe.log_error(str(e), "Print End Day Report Error")
         raise
+    
