@@ -1153,13 +1153,13 @@ def build_escpos_bill(name: str) -> bytes:
         amount = qty * rate
         resto_menu = item.get("resto_menu")
 
-        mandarin_name = mandarin_map.get(resto_menu) or ""
+        # mandarin_name = mandarin_map.get(resto_menu) or ""
 
-        # ===== NAMA ITEM =====
-        if mandarin_name:
-            display_name = f"{item_name} ({mandarin_name})"
-        else:
-            display_name = item_name
+        # # ===== NAMA ITEM =====
+        # if mandarin_name:
+        #     display_name = f"{item_name} ({mandarin_name})"
+        # else:
+        display_name = item_name
 
         out += (display_name + "\n").encode("utf-8")
 
