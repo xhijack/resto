@@ -746,7 +746,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
             # out += _esc_char_size(1, 6) + _esc_bold(True)             # tinggi 6x untuk thermal
 
         big_line = _fit(display_line, LINE_WIDTH)
-        out += (big_line + "\n").encode("utf-8", "ignore")
+        out += (big_line + "\n").encode("ascii", "ignore")
 
         # Reset ukuran dan bold
         # if is_dotmatrix:
@@ -767,7 +767,7 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
                     add_line = f"  {name}".ljust(LINE_WIDTH - 12)
                     out += (add_line + "\n").encode("ascii", "ignore")
                 else:
-                    out += (f"  {add}\n").encode("utf-8", "ignore")
+                    out += (f"  {add}\n").encode("ascii", "ignore")
 
         # Notes
         notes = it.get("quick_notes", "")
