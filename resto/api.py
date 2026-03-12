@@ -264,6 +264,7 @@ def create_pos_invoice(payload):
     queue            = payload.get("queue")
     additional_items = payload.get("additional_items", [])
     order_type       = payload.get("order_type")
+    apply_discount_on = "Net Total"
     additional_discount_percentage = payload.get("additional_discount_percentage")
     discount_amount  = payload.get("discount_amount")
     discount_for_bank  = payload.get("discount_for_bank") or ""
@@ -315,6 +316,7 @@ def create_pos_invoice(payload):
         "additional_items": [],   # ✅ gunakan fieldname yang sesuai
         # "taxes": taxes,   # ⭐ masukkan auto pajak di sini
         "taxes_and_charges": tax_template_name,
+        "apply_discount_on": apply_discount_on,
         "additional_discount_percentage": additional_discount_percentage,
         "discount_amount": discount_amount,
         "discount_for_bank": discount_for_bank,
