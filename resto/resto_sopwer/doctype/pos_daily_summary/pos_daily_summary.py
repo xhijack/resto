@@ -15,7 +15,21 @@ class POSDailySummary(Document):
 	
 		self.total_quantity = total_qty
 		self.grand_total = grand_total
-			
+
+	def validate(self):
+		if not self.pos_transactions:
+			frappe.throw("POS Transactions cannot be empty")
+
+		for row in self.pos_transactions:
+			is_closed = frappe.db.get_value(
+				"POS Closing Entry",
+				row.pos_closing_entry,
+				"end_day_processed"
+			)
+			if int(is_closed) == 1:
+				frappe.throw(f"POS Closing Entry {row.pos_closing_entry} has already been processed for End Day")
+
+
 	def on_cancel(self):
 		# ketika POS daily summary di batalkan maka update seluruh field end_day_processed pos closing yang ada di pos daily 
 		for row in self.pos_transactions:
