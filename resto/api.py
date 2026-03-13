@@ -162,13 +162,15 @@ def create_customer(name, mobile_no=None):
     return doc.as_dict()
 
 @frappe.whitelist()
-def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, orders=None, checked=None):
+def update_table_status(name, status=None, taken_by=None, pax=0, customer=None, type_customer=None, orders=None, checked=None):
     doc = frappe.get_doc("Table", name)
 
     if checked is not None:
         doc.checked = int(checked)
 
-    doc.status = status
+    if status:
+        doc.status = status
+        
     doc.taken_by = taken_by or None
     doc.pax = int(pax) if pax else 0
     doc.customer = None if not customer else customer
