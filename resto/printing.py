@@ -723,6 +723,12 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)   # double both (0x18)
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(inv)
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out += (f"Pax     : {pax_int}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
     out += _esc_char_size_dotmatrix(0, 0)
 
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
@@ -1747,6 +1753,21 @@ def print_shift_report(closing_name, printer_name=None):
     # Urutkan berdasarkan item_group dan nama item
     sorted_items = sorted(items_summary.values(), key=lambda x: (x["item_group"], x["item_name"]))
     
+    WIDTH = 32
+    def format_row(name, qty, price):
+        name = str(name)[:18]
+        qty = str(qty)
+        price = str(price)
+        return f"{name:<18}{qty:>4} {price:>9}"
+    
+    def format_lr(left, right):
+        left = str(left)
+        right = str(right)
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+        return left + (" " * space) + right
+    
     # --- Persiapan teks ---
     lines = []
     
@@ -1775,7 +1796,7 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("")
     
     # --- Tabel Item ---
-    lines.append("Item                 Qty   Price")
+    lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     
     current_group = None
@@ -1784,52 +1805,52 @@ def print_shift_report(closing_name, printer_name=None):
             current_group = item["item_group"]
             lines.append(f"* {current_group}")
         # Potong nama item maks 18 karakter
-        name = item["item_name"][:18]
+        name = item["item_name"].strip()[:18]
         qty = f"{item['qty']:.0f}"
         price = fmt_amt(item["amount"])
-        lines.append(f"{name:<18} {qty:>5} {price:>9}")
+        lines.append(format_row(name, qty, price))
     
     # Sub total dan ringkasan
     net_total = closing.net_total
     total_qty = closing.total_quantity
     lines.append("-" * 32)
-    lines.append(f"Sub Total          {total_qty:>5} {fmt_amt(net_total):>9}")
-    lines.append(f"Discount                    {fmt_amt(total_discount):>9}")
-    lines.append(f"Total Dine In :    {total_qty:>5} {fmt_amt(net_total):>9}")
+    lines.append(format_row("Sub Total", total_qty, fmt_amt(net_total)))
+    lines.append(format_lr("Discount", fmt_amt(total_discount)))
+    lines.append(format_row("Total Dine In", total_qty, fmt_amt(net_total)))
     lines.append("")
     
     # --- Grand Total ---
-    lines.append("Item                 Qty   Price")
+    lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
-    lines.append(f"Sub Total                     {fmt_amt(net_total):>9}")
-    lines.append(f"Discount                       {fmt_amt(total_discount):>9}")
+    lines.append(format_lr("Sub Total", fmt_amt(net_total)))
+    lines.append(format_lr("Discount", fmt_amt(total_discount)))
     grand_total = closing.grand_total
-    lines.append(f"Grand Total :      {total_qty:>5} {fmt_amt(grand_total):>9}")
+    lines.append(format_row("Grand Total", total_qty, fmt_amt(grand_total)))
     lines.append("")
     
     # --- Rincian Pajak ---
-    lines.append("Item                 Qty   Price")
+    lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     lines.append(f"PVJ: {pos_profile}")
-    lines.append(f"Discount                          0")  # asumsi tidak ada diskon di sini
-    lines.append(f"Sub Total                     {fmt_amt(net_total):>9}")
+    lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
+    lines.append(format_lr("Sub Total", fmt_amt(net_total)))
     # Tampilkan semua pajak dari child table taxes
     for tax in closing.taxes:
         # Ambil nama akun (misal "SVC - Toko")
         tax_name = tax.account_head.split(" - ")[0]  # ambil bagian sebelum kode perusahaan
-        lines.append(f"{tax_name:<24} {fmt_amt(tax.amount):>9}")
+        lines.append(format_lr(tax_name[:20], fmt_amt(tax.amount)))
     # Total Sales (mungkin net total)
-    lines.append(f"Total Sales                   {fmt_amt(net_total):>9}")
+    lines.append(format_lr("Total Sales", fmt_amt(net_total)))
     lines.append("")
     
     # --- Pembayaran ---
-    lines.append("Item                 Qty   Price")
+    lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     lines.append("TYPE PAYMENT")
     for pay in closing.payment_reconciliation:
         mop = pay.mode_of_payment
         amount = pay.expected_amount
-        lines.append(f"{mop:<24} {fmt_amt(amount):>9}")
+        lines.append(format_lr(mop[:20], fmt_amt(amount)))
     
     # Akhir
     lines.append("")
