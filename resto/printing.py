@@ -723,6 +723,12 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
 
     out += _esc_char_size_dotmatrix(2, 2) + _esc_bold(True)   # double both (0x18)
     out += (f"No Meja : {table_name}\n").encode("ascii", "ignore")
+    pax = get_total_pax_from_pos_invoice(inv)
+    if pax:
+        pax_int = int(pax) if isinstance(pax, (int, float)) else pax
+        out += _esc_bold(True)
+        out += (f"Pax     : {pax_int}\n").encode("ascii", "ignore")
+        out += _esc_bold(False)
     out += _esc_char_size_dotmatrix(0, 0)
 
     out += (f"Tanggal : {tdate}\n").encode("ascii", "ignore")
