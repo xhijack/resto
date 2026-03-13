@@ -170,20 +170,21 @@ def update_table_status(name, status=None, taken_by=None, pax=None, customer=Non
 
     if status is not None:
         doc.status = status
-    
+
     if taken_by is not None:
         doc.taken_by = taken_by
-    
+
     if pax is not None:
         doc.pax = int(pax)
-        
+
     if customer is not None:
-        doc.customer =  customer
-        
+        doc.customer = customer
+
     if type_customer is not None:
         doc.type_customer = type_customer
 
     if orders is not None:
+
         if isinstance(orders, str):
             try:
                 orders = json.loads(orders)
@@ -194,18 +195,23 @@ def update_table_status(name, status=None, taken_by=None, pax=None, customer=Non
         if not isinstance(orders, list):
             orders = []
 
-        # reset child table
-        doc.set("orders", [])
+        # ambil invoice yang sudah ada
+        existing_invoices = {d.invoice_name for d in doc.orders}
 
         for o in orders:
             invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
-            if invoice_name:
+
+            if invoice_name and invoice_name not in existing_invoices:
                 doc.append("orders", {"invoice_name": invoice_name})
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
-    return {"success": True, "message": f"Table {doc.name} updated successfully", "checked": getattr(doc, "checked", None)}
+    return {
+        "success": True,
+        "message": f"Table {doc.name} updated successfully",
+        "checked": getattr(doc, "checked", None)
+    }
 
 @frappe.whitelist()
 def add_table_order(table_name, order):
