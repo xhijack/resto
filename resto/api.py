@@ -165,44 +165,47 @@ def create_customer(name, mobile_no=None):
 def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
     doc = frappe.get_doc("Table", name)
 
-    if checked is not None:
-        doc.checked = int(checked)
+    if status == "Kosong":
+        doc.status = "Kosong"
+        doc.taken_by = ""
+        doc.pax = 0
+        doc.customer = ""
+        doc.type_customer = ""
+        doc.checked = 0
+        doc.orders = []
+    else:
+        if checked is not None:
+            doc.checked = int(checked)
+        if status is not None:
+            doc.status = status
+        if taken_by is not None:
+            doc.taken_by = taken_by
+        if pax is not None:
+            doc.pax = int(pax)
+        if customer is not None:
+            doc.customer = customer
+        if type_customer is not None:
+            doc.type_customer = type_customer
+        if orders is not None:
 
-    if status is not None:
-        doc.status = status
+            if isinstance(orders, str):
+                try:
+                    orders = json.loads(orders)
+                except Exception:
+                    frappe.log_error("Gagal parse orders JSON", orders)
+                    orders = []
 
-    if taken_by is not None:
-        doc.taken_by = taken_by
-
-    if pax is not None:
-        doc.pax = int(pax)
-
-    if customer is not None:
-        doc.customer = customer
-
-    if type_customer is not None:
-        doc.type_customer = type_customer
-
-    if orders is not None:
-
-        if isinstance(orders, str):
-            try:
-                orders = json.loads(orders)
-            except Exception:
-                frappe.log_error("Gagal parse orders JSON", orders)
+            if not isinstance(orders, list):
                 orders = []
 
-        if not isinstance(orders, list):
-            orders = []
+            # ambil invoice yang sudah ada
+            existing_invoices = {d.invoice_name for d in doc.orders}
 
-        # ambil invoice yang sudah ada
-        existing_invoices = {d.invoice_name for d in doc.orders}
+            for o in orders:
+                invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
 
-        for o in orders:
-            invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
-
-            if invoice_name and invoice_name not in existing_invoices:
-                doc.append("orders", {"invoice_name": invoice_name})
+                if invoice_name and invoice_name not in existing_invoices:
+                    doc.append("orders", {"invoice_name": invoice_name})
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
