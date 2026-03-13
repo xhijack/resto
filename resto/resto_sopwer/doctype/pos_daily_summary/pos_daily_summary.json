@@ -95,14 +95,16 @@
  "index_web_pages_for_search": 1,
  "is_submittable": 1,
  "links": [],
- "modified": "2025-12-29 16:13:57.132876",
+ "modified": "2026-03-13 09:24:27.206937",
  "modified_by": "Administrator",
  "module": "Resto Sopwer",
  "name": "POS Daily Summary",
- "naming_rule": "Expression (old style)",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
+   "amend": 1,
+   "cancel": 1,
    "create": 1,
    "delete": 1,
    "email": 1,
