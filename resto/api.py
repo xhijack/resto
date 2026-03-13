@@ -162,33 +162,41 @@ def create_customer(name, mobile_no=None):
     return doc.as_dict()
 
 @frappe.whitelist()
-def update_table_status(name, status=None, taken_by=None, pax=0, customer=None, type_customer=None, orders=None, checked=None):
+def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
     doc = frappe.get_doc("Table", name)
 
     if checked is not None:
         doc.checked = int(checked)
 
-    if status:
+    if status is not None:
         doc.status = status
+    
+    if taken_by is not None:
+        doc.taken_by = taken_by
+    
+    if pax is not None:
+        doc.pax = int(pax)
         
-    doc.taken_by = taken_by or None
-    doc.pax = int(pax) if pax else 0
-    doc.customer = None if not customer else customer
-    doc.type_customer = None if not type_customer else type_customer
+    if customer is not None:
+        doc.customer =  customer
+        
+    if type_customer is not None:
+        doc.type_customer = type_customer
 
-    if isinstance(orders, str):
-        try:
-            orders = json.loads(orders)
-        except Exception:
-            frappe.log_error("Gagal parse orders JSON", orders)
+    if orders is not None:
+        if isinstance(orders, str):
+            try:
+                orders = json.loads(orders)
+            except Exception:
+                frappe.log_error("Gagal parse orders JSON", orders)
+                orders = []
+
+        if not isinstance(orders, list):
             orders = []
 
-    elif not isinstance(orders, list):
-        orders = []
+        # reset child table
+        doc.set("orders", [])
 
-    doc.set("orders", [])
-
-    if orders:
         for o in orders:
             invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
             if invoice_name:
