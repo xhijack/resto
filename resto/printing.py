@@ -1207,7 +1207,7 @@ def build_escpos_bill(name: str) -> bytes:
         elif "VAT" in tax_name:
             tax_amount += amount
 
-    out += (_format_line(f"{total_qty} Item:", format_number(total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
     if discount:
         if discount_name:
@@ -1436,7 +1436,7 @@ def build_escpos_receipt(name: str) -> bytes:
         elif "VAT" in tax_name:
             tax_amount += amount
 
-    out += (_format_line(f"{total_qty} Item:", format_number(total)) + "\n").encode("ascii", "ignore")
+    out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
     if discount:
         if discount_name:
@@ -2067,6 +2067,8 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("")
 
     text = "\n".join(lines)
+    esc_commads = _esc_feed(3) + _esc_cut_full()
+    out = text.encode("ascii", "ignore") + esc_commads
 
     # =========================
     # PRINT
@@ -2086,7 +2088,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
             if not printer_name:
                 frappe.throw("Tidak ada printer terdeteksi")
 
-        job_id = cups_print_raw(text.encode("ascii", "ignore"), printer_name)
+        job_id = cups_print_raw(out, printer_name)
 
         return job_id
 
