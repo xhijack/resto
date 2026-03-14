@@ -555,10 +555,10 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
         mandarin_name = mandarin_map.get(resto_menu) or ""
 
         # ===== ITEM UTAMA =====
-        if mandarin_name:
-            line = f"{qty} x {item_name} ({mandarin_name})"
-        else:
-            line = f"{qty} x {item_name}"
+        # if mandarin_name:
+        #     line = f"{qty} x {item_name} ({mandarin_name})"
+        # else:
+        line = f"{qty} x {item_name}"
 
         for w in _wrap_text(line, LINE_WIDTH):
             out += (w + "\n").encode("utf-8")
