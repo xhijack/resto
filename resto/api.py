@@ -1832,7 +1832,7 @@ def print_void_item(pos_invoice: str):
     printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "printer_checker_name") or "Void Printer"
 
     raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
-    job_id = cups_print_pdf(raw, printer_name, f"VOID_{pos_invoice}")
+    job_id = cups_print_pdf(raw, printer_name)
 
     # conn = cups.Connection()
     # job_id = conn.printFile(
