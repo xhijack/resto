@@ -163,24 +163,30 @@ def validate_discount_account(doc, method):
     # cek apakah ada discount
     if not doc.apply_discount_on:
         return
-    
-    discount_amount = 0
 
-    # hitung discount
+    charge_type = None
+    tax_rate = 0
+    tax_amount = 0
+
+    # CASE 1: Discount Percentage
     if doc.additional_discount_percentage:
-        discount_amount = doc.grand_total * (doc.additional_discount_percentage / 100)
-    elif doc.discount_amount:
-        discount_amount = doc.discount_amount
+        charge_type = "On Net Total"
+        tax_rate = -abs(doc.additional_discount_percentage)
 
-    if not discount_amount:
+    # CASE 2: Discount Amount
+    elif doc.discount_amount:
+        charge_type = "Actual"
+        tax_amount = -abs(doc.discount_amount)
+
+    else:
         return
 
-    # hapus discount dari field standard
+    # reset discount bawaan ERPNext
     doc.apply_discount_on = None
     doc.additional_discount_percentage = 0
     doc.discount_amount = 0
 
-    # cek apakah sudah ada row discount
+    # cek apakah sudah ada baris discount
     discount_row = None
     for tax in doc.taxes:
         if tax.description == "Discount":
@@ -188,12 +194,14 @@ def validate_discount_account(doc, method):
             break
 
     if discount_row:
-        discount_row.tax_amount = -abs(discount_amount)
+        discount_row.charge_type = charge_type
+        discount_row.rate = tax_rate
+        discount_row.tax_amount = tax_amount
     else:
         doc.append("taxes", {
-            "charge_type": "Actual",
-            "account_head": "4-40100 - Diskon Penjualan - M",  # ganti sesuai COA
-            "description": "4-40100 - Diskon Penjualan - M",
-            "tax_amount": -abs(discount_amount)
+            "charge_type": charge_type,
+            "account_head": "Discount Allowed - COA",  # ganti sesuai chart of account
+            "description": "Discount",
+            "rate": tax_rate,
+            "tax_amount": tax_amount
         })
-
