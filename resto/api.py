@@ -1816,7 +1816,7 @@ def print_void_item(pos_invoice: str):
     items_to_print = [
         {
             "name": item.name,
-            "item_name": item.item_name,
+            "item_name": frappe.db.get_value("Resto Menu", item.item_code, "short_name") or item.item_name,
             "qty": item.qty,
             "add_ons": item.add_ons,
             "quick_notes": getattr(item, "quick_notes", ""),
