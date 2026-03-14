@@ -1857,3 +1857,24 @@ def print_void_to_other_station(pos_invoice, items_to_print, branch):
         for printer in branch_menu.printers:
             raw = build_void_item_receipt(pos_invoice, items_to_print)
             cups_print_raw(raw, printer.printer_name)
+
+
+@frappe.whitelist()
+def move_table(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def merge_table(pos_invoice, source_table, target_table):
+    pass
+
+@frappe.whitelist()
+def move_item(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def split_bill(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def apply_discount(pos_invoice, discount_percentage=None, discount_amount=None):
+    pass
