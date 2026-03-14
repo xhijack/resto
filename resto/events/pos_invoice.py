@@ -157,3 +157,43 @@ def rollback_kitchen_stock_on_cancel(doc, method):
         if row.kitchen_stock_consumed and row.resto_menu:
             rollback_resto_menu_stock(row.resto_menu, row.qty)
             row.kitchen_stock_consumed = 0
+
+
+def validate_discount_account(doc, method):
+    # cek apakah ada discount
+    if not doc.apply_discount_on:
+        return
+    
+    discount_amount = 0
+
+    # hitung discount
+    if doc.additional_discount_percentage:
+        discount_amount = doc.grand_total * (doc.additional_discount_percentage / 100)
+    elif doc.discount_amount:
+        discount_amount = doc.discount_amount
+
+    if not discount_amount:
+        return
+
+    # hapus discount dari field standard
+    doc.apply_discount_on = None
+    doc.additional_discount_percentage = 0
+    doc.discount_amount = 0
+
+    # cek apakah sudah ada row discount
+    discount_row = None
+    for tax in doc.taxes:
+        if tax.description == "Discount":
+            discount_row = tax
+            break
+
+    if discount_row:
+        discount_row.tax_amount = -abs(discount_amount)
+    else:
+        doc.append("taxes", {
+            "charge_type": "Actual",
+            "account_head": "4-40100 - Diskon Penjualan - M",  # ganti sesuai COA
+            "description": "4-40100 - Diskon Penjualan - M",
+            "tax_amount": -abs(discount_amount)
+        })
+

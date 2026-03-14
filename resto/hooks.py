@@ -145,6 +145,7 @@ doc_events = {
             "resto.events.pos_invoice.exclude_void_items_from_total",
             "resto.events.pos_invoice.handle_kitchen_stock"
         ],
+        "validate": "resto.events.pos_invoice.validate_discount_account",
         "on_submit": "resto.events.pos_invoice.lock_void_value_after_submit",
         "on_cancel": "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel"
     }
