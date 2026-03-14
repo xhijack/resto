@@ -212,6 +212,6 @@ def validate_on_submit(doc, method):
         if doc.is_pos and not doc.payments:
             frappe.throw("Payment is required for POS Invoice")
 
-        tos = frappe.get_all("Table Order", filters={"invoice_name": doc.name}, pluck="name")
+        tos = frappe.get_all("Table Order", filters={"invoice_name": doc.name}, fields=["name", "parent"])
         for to in tos:
             update_table_status(to['parent'], "Kosong")

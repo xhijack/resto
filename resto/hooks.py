@@ -148,7 +148,7 @@ doc_events = {
         "validate": "resto.events.pos_invoice.validate_discount_account",
         "on_submit": [
             "resto.events.pos_invoice.lock_void_value_after_submit",
-            # "resto.events.pos_invoice.validate_on_submit"
+            "resto.events.pos_invoice.validate_on_submit"
             ],
         "on_cancel": "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel"
     }
