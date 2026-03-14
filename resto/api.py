@@ -1834,14 +1834,8 @@ def print_void_item(pos_invoice: str):
     raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
     job_id = cups_print_raw(raw, printer_name)
 
-    # conn = cups.Connection()
-    # job_id = conn.printFile(
-    #     printer_name,
-    #     tempfile.NamedTemporaryFile(delete=False, suffix=".txt").name,
-    #     f"VOID_{pos_invoice}",
-    #     {"raw": "true"}
-    # )
-
+    print_void_to_other_station(pos_invoice, items_to_print, invoice.branch)
+    
     # Update status is_print_kitchen
     for it in items_to_print:
         frappe.db.set_value("POS Invoice Item", it["name"], "is_void_printed", 1)
@@ -1850,3 +1844,15 @@ def print_void_item(pos_invoice: str):
     frappe.logger("pos_print").info({"invoice": pos_invoice, "printer": printer_name, "job_id": job_id, "items_printed": len(items_to_print)})
 
     return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}
+
+
+def print_void_to_other_station(pos_invoice, items_to_print, branch):
+    import cups
+    from .printing import build_void_item_receipt, cups_print_raw
+    import tempfile
+
+    for item in items_to_print:
+        branch_menu = frappe.get_doc("Branch Menu", {"branch": branch, "sell_item": item.name})
+        for printer in branch_menu.printers:
+            raw = build_void_item_receipt(pos_invoice, items_to_print)
+            cups_print_raw(raw, printer.printer_name)
