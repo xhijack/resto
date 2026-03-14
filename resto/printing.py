@@ -1612,7 +1612,7 @@ def build_escpos_checker(name: str) -> bytes:
     if pax:
         pax_int = int(pax) if isinstance(pax, (int, float)) else pax
         out += _esc_bold(True)
-        out += (f"Pax : {pax_int}").encode("ascii", "ignore")
+        out += (f"Pax : {pax_int}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1646,9 +1646,9 @@ def build_escpos_checker(name: str) -> bytes:
                 out += (" " * 7 + add + "\n").encode("utf-8")
 
         # ===== QUICK NOTES =====
-        # notes = (item.get("quick_notes") or "").strip()
-        # if notes:
-        #     out += (" " * 7 + f"# {notes}\n").encode("utf-8")
+        notes = (item.get("quick_notes") or "").strip()
+        if notes:
+            out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
         # ===== SPASI ANTAR ITEM =====
         out += b"\n"
