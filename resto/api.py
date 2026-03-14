@@ -1810,7 +1810,7 @@ def print_void_item(pos_invoice: str):
     Print semua item VOID MENU yang belum dicetak
     """
     import cups
-    from printing import build_void_item_receipt
+    from printing import build_void_item_receipt, cups_print_pdf
     import tempfile
     invoice = frappe.get_doc("POS Invoice", pos_invoice)
     items_to_print = [
@@ -1832,13 +1832,15 @@ def print_void_item(pos_invoice: str):
     printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "printer_checker_name") or "Void Printer"
 
     raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
-    conn = cups.Connection()
-    job_id = conn.printFile(
-        printer_name,
-        tempfile.NamedTemporaryFile(delete=False, suffix=".txt").name,
-        f"VOID_{pos_invoice}",
-        {"raw": "true"}
-    )
+    job_id = cups_print_pdf(raw, printer_name, f"VOID_{pos_invoice}")
+
+    # conn = cups.Connection()
+    # job_id = conn.printFile(
+    #     printer_name,
+    #     tempfile.NamedTemporaryFile(delete=False, suffix=".txt").name,
+    #     f"VOID_{pos_invoice}",
+    #     {"raw": "true"}
+    # )
 
     # Update status is_print_kitchen
     for it in items_to_print:
