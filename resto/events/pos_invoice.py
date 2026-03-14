@@ -200,7 +200,7 @@ def validate_discount_account(doc, method):
     else:
         doc.append("taxes", {
             "charge_type": charge_type,
-            "account_head": "Discount Allowed - COA",  # ganti sesuai chart of account
+            "account_head": "4-40100 - Diskon Penjualan - M",  # ganti sesuai chart of account
             "description": "Discount",
             "rate": tax_rate,
             "tax_amount": tax_amount
