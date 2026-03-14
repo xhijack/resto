@@ -2131,6 +2131,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+    table_name = get_table_names_from_pos_invoice(pos_invoice)
 
     out = b""
     out += _esc_init()
@@ -2141,6 +2142,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    out += (f"Table : {table_name}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
