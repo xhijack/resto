@@ -1422,9 +1422,9 @@ def build_escpos_receipt(name: str) -> bytes:
                     out += (add_line + "\n").encode("ascii", "ignore")
 
         # Notes
-        notes = item.get("quick_notes", "")
-        if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+        # notes = item.get("quick_notes", "")
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("ascii", "ignore")
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
