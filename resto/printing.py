@@ -744,7 +744,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
         
-        title = item_name or short_name or menu_name or "-"
+        # title = item_name or short_name or menu_name or "-"
+        title = short_name or item_name
         display_line = f"{qty_s} x {title}"
 
         # Pilih ukuran font berdasarkan jenis printer
@@ -1192,9 +1193,9 @@ def build_escpos_bill(name: str) -> bytes:
                     out += (f"  {add}\n").encode("utf-8")
 
         # ===== NOTES =====
-        notes = (item.get("quick_notes") or "").strip()
-        if notes:
-            out += (f"  # {notes}\n").encode("utf-8")
+        # notes = (item.get("quick_notes") or "").strip()
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("utf-8")
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1645,9 +1646,9 @@ def build_escpos_checker(name: str) -> bytes:
                 out += (" " * 7 + add + "\n").encode("utf-8")
 
         # ===== QUICK NOTES =====
-        notes = (item.get("quick_notes") or "").strip()
-        if notes:
-            out += (" " * 7 + f"# {notes}\n").encode("utf-8")
+        # notes = (item.get("quick_notes") or "").strip()
+        # if notes:
+        #     out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
         # ===== SPASI ANTAR ITEM =====
         out += b"\n"
