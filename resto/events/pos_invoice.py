@@ -169,7 +169,7 @@ def validate_discount_account(doc, method):
     tax_amount = 0
 
     # CASE 1: Discount Percentage
-    if doc.additional_discount_percentage:
+    if doc.additional_discount_percentage > 0:
         charge_type = "On Net Total"
         tax_rate = -abs(doc.additional_discount_percentage)
 
