@@ -1816,6 +1816,7 @@ def print_void_item(pos_invoice: str):
     items_to_print = [
         {
             "name": item.name,
+            "item_code": item.item_code,
             "item_name": frappe.db.get_value("Resto Menu", {"sell_item": item.item_code}, "short_name") or item.item_name,
             "qty": item.qty,
             "add_ons": item.add_ons,
@@ -1852,7 +1853,7 @@ def print_void_to_other_station(pos_invoice, items_to_print, branch):
     import tempfile
 
     for item in items_to_print:
-        branch_menu = frappe.get_doc("Branch Menu", {"branch": branch, "sell_item": item['name']})
+        branch_menu = frappe.get_doc("Branch Menu", {"branch": branch, "sell_item": item['item_code']})
         for printer in branch_menu.printers:
             raw = build_void_item_receipt(pos_invoice, items_to_print)
             cups_print_raw(raw, printer.printer_name)
