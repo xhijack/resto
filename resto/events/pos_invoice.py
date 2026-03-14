@@ -205,3 +205,13 @@ def validate_discount_account(doc, method):
             "rate": tax_rate,
             "tax_amount": tax_amount
         })
+
+def validate_on_submit(doc, method):
+    if doc.status == "Paid":
+        from resto.api import update_table_status
+        if doc.is_pos and not doc.payments:
+            frappe.throw("Payment is required for POS Invoice")
+
+        tos = frappe.get_all("Table Order", filters={"invoice_name": doc.name}, pluck="name")
+        for to in tos:
+            update_table_status(to['parent'], "Kosong")

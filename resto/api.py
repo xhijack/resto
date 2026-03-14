@@ -34,6 +34,7 @@ def login_with_pin(pin):
         frappe.db.commit()  # Commit dulu agar benar-benar bersih
 
         # 🚪 Login baru pakai LoginManager
+        
         login_manager = LoginManager()
         login_manager.user = user.get("name")
         login_manager.post_login()
