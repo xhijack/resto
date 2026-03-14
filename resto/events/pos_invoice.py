@@ -69,7 +69,7 @@ def exclude_void_items_from_total(doc, method):
     # =====================
     if has_void:
         doc.ignore_pricing_rule = 1
-        doc.apply_discount_on = "Grand Total"
+        doc.apply_discount_on = "Net Total"
 
     # =====================
     # TAX ENGINE (ERPNext)

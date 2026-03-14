@@ -1803,3 +1803,47 @@ def get_company_name():
     )
 
     return company
+
+@frappe.whitelist()
+def print_void_item(pos_invoice: str):
+    """
+    Print semua item VOID MENU yang belum dicetak
+    """
+    import cups
+
+    invoice = frappe.get_doc("POS Invoice", pos_invoice)
+    items_to_print = [
+        {
+            "name": item.name,
+            "item_name": item.item_name,
+            "qty": item.qty,
+            "add_ons": item.add_ons,
+            "quick_notes": getattr(item, "quick_notes", ""),
+        }
+        for item in invoice.items
+        if getattr(item, "status_kitchen", "") == "Void Menu" and getattr(item, "is_print_kitchen", 0) == 0
+    ]
+
+    if not items_to_print:
+        frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
+        return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
+
+    printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "printer_checker_name") or "Void Printer"
+
+    raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
+    conn = cups.Connection()
+    job_id = conn.printFile(
+        printer_name,
+        tempfile.NamedTemporaryFile(delete=False, suffix=".txt").name,
+        f"VOID_{pos_invoice}",
+        {"raw": "true"}
+    )
+
+    # Update status is_print_kitchen
+    for it in items_to_print:
+        frappe.db.set_value("POS Invoice Item", it["name"], "is_print_kitchen", 1)
+    frappe.db.commit()
+
+    frappe.logger("pos_print").info({"invoice": pos_invoice, "printer": printer_name, "job_id": job_id, "items_printed": len(items_to_print)})
+
+    return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}
