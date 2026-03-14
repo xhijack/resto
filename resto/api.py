@@ -1844,7 +1844,7 @@ def print_void_item(pos_invoice: str):
 
     # Update status is_print_kitchen
     for it in items_to_print:
-        frappe.db.set_value("POS Invoice Item", it["name"], "is_print_kitchen", 1)
+        frappe.db.set_value("POS Invoice Item", it["name"], "is_void_printed", 1)
     frappe.db.commit()
 
     frappe.logger("pos_print").info({"invoice": pos_invoice, "printer": printer_name, "job_id": job_id, "items_printed": len(items_to_print)})
