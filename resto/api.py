@@ -162,40 +162,59 @@ def create_customer(name, mobile_no=None):
     return doc.as_dict()
 
 @frappe.whitelist()
-def update_table_status(name, status, taken_by=None, pax=0, customer=None, type_customer=None, orders=None, checked=None):
+def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
     doc = frappe.get_doc("Table", name)
 
-    if checked is not None:
-        doc.checked = int(checked)
+    if status == "Kosong":
+        doc.status = "Kosong"
+        doc.taken_by = ""
+        doc.pax = 0
+        doc.customer = ""
+        doc.type_customer = ""
+        doc.checked = 0
+        doc.orders = []
+    else:
+        if checked is not None:
+            doc.checked = int(checked)
+        if status is not None:
+            doc.status = status
+        if taken_by is not None:
+            doc.taken_by = taken_by
+        if pax is not None:
+            doc.pax = int(pax)
+        if customer is not None:
+            doc.customer = customer
+        if type_customer is not None:
+            doc.type_customer = type_customer
+        if orders is not None:
 
-    doc.status = status
-    doc.taken_by = taken_by or None
-    doc.pax = int(pax) if pax else 0
-    doc.customer = None if not customer else customer
-    doc.type_customer = None if not type_customer else type_customer
+            if isinstance(orders, str):
+                try:
+                    orders = json.loads(orders)
+                except Exception:
+                    frappe.log_error("Gagal parse orders JSON", orders)
+                    orders = []
 
-    if isinstance(orders, str):
-        try:
-            orders = json.loads(orders)
-        except Exception:
-            frappe.log_error("Gagal parse orders JSON", orders)
-            orders = []
+            if not isinstance(orders, list):
+                orders = []
 
-    elif not isinstance(orders, list):
-        orders = []
+            # ambil invoice yang sudah ada
+            existing_invoices = {d.invoice_name for d in doc.orders}
 
-    doc.set("orders", [])
+            for o in orders:
+                invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
 
-    if orders:
-        for o in orders:
-            invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
-            if invoice_name:
-                doc.append("orders", {"invoice_name": invoice_name})
+                if invoice_name and invoice_name not in existing_invoices:
+                    doc.append("orders", {"invoice_name": invoice_name})
 
     doc.save(ignore_permissions=True)
     frappe.db.commit()
 
-    return {"success": True, "message": f"Table {doc.name} updated successfully", "checked": getattr(doc, "checked", None)}
+    return {
+        "success": True,
+        "message": f"Table {doc.name} updated successfully",
+        "checked": getattr(doc, "checked", None)
+    }
 
 @frappe.whitelist()
 def add_table_order(table_name, order):
@@ -1784,3 +1803,47 @@ def get_company_name():
     )
 
     return company
+
+@frappe.whitelist()
+def print_void_item(pos_invoice: str):
+    """
+    Print semua item VOID MENU yang belum dicetak
+    """
+    import cups
+
+    invoice = frappe.get_doc("POS Invoice", pos_invoice)
+    items_to_print = [
+        {
+            "name": item.name,
+            "item_name": item.item_name,
+            "qty": item.qty,
+            "add_ons": item.add_ons,
+            "quick_notes": getattr(item, "quick_notes", ""),
+        }
+        for item in invoice.items
+        if getattr(item, "status_kitchen", "") == "Void Menu" and getattr(item, "is_print_kitchen", 0) == 0
+    ]
+
+    if not items_to_print:
+        frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
+        return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
+
+    printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "printer_checker_name") or "Void Printer"
+
+    raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
+    conn = cups.Connection()
+    job_id = conn.printFile(
+        printer_name,
+        tempfile.NamedTemporaryFile(delete=False, suffix=".txt").name,
+        f"VOID_{pos_invoice}",
+        {"raw": "true"}
+    )
+
+    # Update status is_print_kitchen
+    for it in items_to_print:
+        frappe.db.set_value("POS Invoice Item", it["name"], "is_print_kitchen", 1)
+    frappe.db.commit()
+
+    frappe.logger("pos_print").info({"invoice": pos_invoice, "printer": printer_name, "job_id": job_id, "items_printed": len(items_to_print)})
+
+    return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}

@@ -744,7 +744,8 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         add_ons    = _safe_str(it.get("add_ons"))
         qnotes     = _safe_str(it.get("quick_notes"))
         
-        title = item_name or short_name or menu_name or "-"
+        # title = item_name or short_name or menu_name or "-"
+        title = short_name or item_name
         display_line = f"{qty_s} x {title}"
 
         # Pilih ukuran font berdasarkan jenis printer
@@ -1192,9 +1193,9 @@ def build_escpos_bill(name: str) -> bytes:
                     out += (f"  {add}\n").encode("utf-8")
 
         # ===== NOTES =====
-        notes = (item.get("quick_notes") or "").strip()
-        if notes:
-            out += (f"  # {notes}\n").encode("utf-8")
+        # notes = (item.get("quick_notes") or "").strip()
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("utf-8")
 
     # ===== TOTAL QTY =====
     out += (separator + "\n").encode("ascii", "ignore")
@@ -1645,9 +1646,9 @@ def build_escpos_checker(name: str) -> bytes:
                 out += (" " * 7 + add + "\n").encode("utf-8")
 
         # ===== QUICK NOTES =====
-        notes = (item.get("quick_notes") or "").strip()
-        if notes:
-            out += (" " * 7 + f"# {notes}\n").encode("utf-8")
+        # notes = (item.get("quick_notes") or "").strip()
+        # if notes:
+        #     out += (" " * 7 + f"# {notes}\n").encode("utf-8")
 
         # ===== SPASI ANTAR ITEM =====
         out += b"\n"
@@ -2117,3 +2118,46 @@ def print_end_day_report_v2(report_data, printer_name=None):
         frappe.log_error(str(e), "Print End Day Report Error")
         raise
     
+def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=None) -> bytes:
+    """
+    Build ESC/POS print data untuk Void Menu
+    """
+    
+    current_user = frappe.session.user
+    full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_align_center() + _esc_bold(True)
+    out += b"VOID MENU\n"
+    out += _esc_bold(False)
+    out += _esc_align_left()
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+
+    for it in items:
+        qty_s = str(it.get("qty") or 0)
+        item_name = it.get("item_name") or it.get("resto_menu") or "-"
+        display_line = f"{qty_s} x {item_name}"
+        out += (display_line + "\n").encode("ascii", "ignore")
+
+        # Add-ons
+        add_ons = it.get("add_ons") or ""
+        if add_ons:
+            add_ons_list = [a.strip() for a in add_ons.split(",")]
+            for a in add_ons_list:
+                out += (f"  + {a}\n").encode("ascii", "ignore")
+
+        # Notes
+        notes = it.get("quick_notes") or ""
+        if notes:
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
+
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _esc_feed(5)
+    out += _esc_cut_full()
+
+    return out
