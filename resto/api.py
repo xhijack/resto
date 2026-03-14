@@ -1829,7 +1829,7 @@ def print_void_item(pos_invoice: str):
         frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
         return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
 
-    printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "printer_receipt_name") or "Void Printer"
+    printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "default_printer_checker") or "Void Printer"
 
     raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
     job_id = cups_print_raw(raw, printer_name)
