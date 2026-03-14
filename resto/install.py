@@ -120,6 +120,19 @@ def after_migrate():
                 "allow_on_submit": 1,
                 "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
             }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {'fieldname': 'is_void_printed', 'dt': 'POS Invoice Item'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "is_void_printed",
+                "label": "Is Void Printed",
+                "fieldtype": "Check",
+                "insert_after": "void_qty",
+                "default": 0,
+                "allow_on_submit": 1,
+                "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+            }).insert(ignore_permissions=True)
 
         if not frappe.db.exists("Custom Field", {'fieldname': 'void_rate', 'dt': 'POS Invoice Item'}):
             frappe.get_doc({

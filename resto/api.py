@@ -1822,7 +1822,7 @@ def print_void_item(pos_invoice: str):
             "quick_notes": getattr(item, "quick_notes", ""),
         }
         for item in invoice.items
-        if getattr(item, "status_kitchen", "") == "Void Menu" and getattr(item, "is_print_kitchen", 0) == 0
+        if getattr(item, "status_kitchen", "") == "Void Menu" and getattr(item, "is_void_printed", 0) == 0
     ]
 
     if not items_to_print:
