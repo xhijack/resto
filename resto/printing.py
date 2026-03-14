@@ -1154,6 +1154,9 @@ def build_escpos_bill(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
+        if item.get("status_kitchen") == "Void Menu":
+            continue
+        
         item_name = (item.get("short_name") or "").strip()
         qty = int(item.get("qty") or 0)
         rate = float(item.get("rate") or 0)
@@ -1399,6 +1402,9 @@ def build_escpos_receipt(name: str) -> bytes:
 
     # ===== ITEMS =====
     for item in items:
+        if item.get("status_kitchen") == "Void Menu":
+            continue
+        
         item_name = item.get("short_name", "")
         qty = int(item.get("qty", 0))
         rate = item.get("rate", 0)
