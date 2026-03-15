@@ -1207,15 +1207,18 @@ def build_escpos_bill(name: str) -> bytes:
     # ===== TOTALS =====
     sc_amount = 0
     tax_amount = 0
+    discount = 0
 
     for tax in taxes:
         tax_name = tax.get("description", "")
-        amount = tax.get("amount", 0)
+        amount = tax.get("tax_amount", 0)
 
         if "Pendapatan Service" in tax_name:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
+        elif "Diskon Penjualan" in tax_name:
+            discount += abs(amount)
 
     out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
@@ -1226,7 +1229,7 @@ def build_escpos_bill(name: str) -> bytes:
             label = "Discount"
 
         out += (_format_line(f"{label}:", f"-{format_number(discount)}") + "\n").encode("ascii", "ignore")
-        
+            
     if sc_amount:
         out += (_format_line("Sc:", format_number(sc_amount)) + "\n").encode("ascii", "ignore")
 
@@ -1439,15 +1442,18 @@ def build_escpos_receipt(name: str) -> bytes:
     # ===== TOTALS =====
     sc_amount = 0
     tax_amount = 0
+    discount = 0
 
     for tax in taxes:
         tax_name = tax.get("description", "")
-        amount = tax.get("amount", 0)
+        amount = tax.get("tax_amount", 0)
 
         if "Pendapatan Service" in tax_name:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
+        elif "Diskon Penjualan" in tax_name:
+            discount += abs(amount)
 
     out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
     
