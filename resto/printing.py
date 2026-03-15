@@ -1211,7 +1211,7 @@ def build_escpos_bill(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "")
-        amount = tax.get("tax_amount", 0)
+        amount = tax.get("amount", 0)
 
         if "Pendapatan Service" in tax_name:
             sc_amount += amount
@@ -1446,7 +1446,7 @@ def build_escpos_receipt(name: str) -> bytes:
 
     for tax in taxes:
         tax_name = tax.get("description", "")
-        amount = tax.get("tax_amount", 0)
+        amount = tax.get("amount", 0)
 
         if "Pendapatan Service" in tax_name:
             sc_amount += amount
