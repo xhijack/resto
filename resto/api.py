@@ -1981,24 +1981,42 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
     doc = frappe.get_doc("POS Invoice", pos_invoice)
     current_pos_profile = get_active_pos_profile_for_user(user)
     pos_profile = frappe.get_doc("POS Profile", current_pos_profile['pos_profile'], "taxes_and_charges")
-    taxes_and_charges = frappe.get_doc("Sales Taxes and Charges Template", pos_profile.taxes_and_charges)
+    # taxes_and_charges = frappe.get_doc("Sales Taxes and Charges Template", pos_profile.taxes_and_charges)
 
-    if doc.taxes_and_charges == None:
-        doc.taxes_and_charges = taxes_and_charges.taxes
-        doc.save()
+    # if doc.taxes_and_charges == None:
+    #     doc.taxes_and_charges = taxes_and_charges.taxes
+    #     doc.save()
+    
+    if not doc.taxes_and_charges:
+        doc.taxes_and_charges = pos_profile.taxes_and_charges
+        doc.set_taxes()
 
     charge_type = None
     tax_rate = 0
     tax_amount = 0
 
     # CASE 1: Discount Percentage
+    # if discount_percentage > 0:
+    #     charge_type = "On Net Total"
+    #     tax_rate = -abs(discount_percentage)
+    # CASE 2: Discount Amount
+    # elif discount_amount:
+    #     charge_type = "Actual"
+    #     tax_amount = -abs(discount_amount)
+    discount_percentage = float(discount_percentage or 0)
+    discount_amount = float(discount_amount or 0)
+
     if discount_percentage > 0:
         charge_type = "On Net Total"
         tax_rate = -abs(discount_percentage)
-    # CASE 2: Discount Amount
-    elif discount_amount:
+    elif discount_amount > 0:
         charge_type = "Actual"
         tax_amount = -abs(discount_amount)
+    elif discount_percentage == 0 and discount_amount == 0:
+        # reset discount
+        charge_type = "Actual"
+        taxt_rate = 0
+        tax_amount = 0
     else:
         frappe.throw("Tidak ada discount yang diterapkan. Mohon isi discount_percentage atau discount_amount")
 
@@ -2008,6 +2026,16 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
         if tax.description == "Discount":
             discount_row = tax
             break
+    # cek account head
+    account_head = None
+    tax_template = frappe.get_doc(
+        "Sales Taxes and Charges Template",
+        pos_profile.taxes_and_charges
+    )
+    for t in tax_template.taxes:
+        if t.description == "Discount":
+            account_head = t.account_head
+            break
 
     if discount_row:
         discount_row.charge_type = charge_type
@@ -2015,10 +2043,19 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
         discount_row.tax_amount = tax_amount
     else:
         doc.append("taxes", {
+            "description": "Discount",
             "charge_type": charge_type,
+            "account_head": account_head,
             "rate": tax_rate,
             "tax_amount": tax_amount
         })
+        
+    # 🔧 FIX row reference error
+    for tax in doc.taxes:
+        if tax.charge_type not in ["On Previous Row Amount", "On Previous Row Total"]:
+            tax.row_id = None
+    
+    doc.calculate_taxes_and_totals()
     doc.save()
     frappe.db.commit()
     return {"ok": True, "message": "Diskon berhasil diterapkan", "pos_invoice": pos_invoice}
