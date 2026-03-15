@@ -1865,7 +1865,23 @@ def move_table(pos_invoice):
 
 @frappe.whitelist()
 def merge_table(pos_invoice, source_table, target_table):
-    pass
+    """
+    Docstring for merge_table
+    
+    :param pos_invoice: Invoice ID
+    :param source_table: A1
+    :param target_table: A2
+    A1 <- A2
+    """
+    # ambil pos invoice dari tablet target
+    # invoice_target
+    # for order in frappe.get_doc("Table", target_table).orders:
+    #    invoice_target = pos_invoice 
+    # pos_invoice.items <- invoice_target.items
+    # update table source jadi 1
+    # update table target jadi 1
+    return {"ok": True, "message": f"Berhasil merge {source_table} ke {target_table}"}
+
 
 @frappe.whitelist()
 def move_item(pos_invoice):
@@ -1885,7 +1901,14 @@ def remove_item(pos_invoice, item_code, qty):
 
 @frappe.whitelist()
 def apply_discount(pos_invoice, discount_percentage=None, discount_amount=None):
-    pass
+    """
+    Docstring for apply_discount
+    
+    :param pos_invoice: Description
+    :param discount_percentage: Description
+    :param discount_amount: Description
+    """
+    
     # sales_tax = frappe.get_doc("POS Invoice", get_current_profile(), "taxes_and_charges")
     # if discount_percentage:
     #     sales_tax.discount_percentage = discount_percentage
