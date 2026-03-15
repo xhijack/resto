@@ -2075,6 +2075,7 @@ def create_payment(pos_invoice, amount, mode_of_payment):
     })
     doc.save()
     clear_table_merged(pos_invoice)
+    delete_merge_invoice(pos_invoice)
     frappe.db.commit()
     return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
 
@@ -2094,6 +2095,16 @@ def clear_table_merged(pos_invoice):
     for table in tables.split(", "):
         clear_table(table)
 
+def delete_merge_invoice(pos_invoice):
+    """Fungsi untuk menghapus invoice setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
+    invoices = frappe.get_all(
+        "POS Invoice",
+        filters={"merge_invoice": pos_invoice},
+        fields=["name"]
+    )
+    for inv in invoices:
+        inv.delete()
+    
 def clear_table(table_name):
     """Hati-hati menggunakan fungsi ini, pastikan table_name benar-benar tabel yang ingin dikosongkan"""
     table = frappe.get_doc("Table", table_name)
