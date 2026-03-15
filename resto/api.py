@@ -2076,6 +2076,7 @@ def create_payment(pos_invoice, amount, mode_of_payment):
     doc.save()
     clear_table_merged(pos_invoice)
     delete_merge_invoice(pos_invoice)
+    
     frappe.db.commit()
     return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
 
