@@ -1217,7 +1217,7 @@ def build_escpos_bill(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-        elif "Diskon Penjualan" in tax_name:
+        elif "Diskon Penjualan" or "Discount" in tax_name:
             discount += abs(amount)
 
     out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
@@ -1452,7 +1452,7 @@ def build_escpos_receipt(name: str) -> bytes:
             sc_amount += amount
         elif "VAT" in tax_name:
             tax_amount += amount
-        elif "Diskon Penjualan" in tax_name:
+        elif "Diskon Penjualan" or "Discount" in tax_name:
             discount += abs(amount)
 
     out += (_format_line(f"Total Item:", format_number(total)) + "\n").encode("ascii", "ignore")
