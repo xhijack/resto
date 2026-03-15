@@ -1876,5 +1876,32 @@ def split_bill(pos_invoice):
     pass
 
 @frappe.whitelist()
+def remove_item(pos_invoice, item_code, qty):
+    pass
+    # removeitem dengan status VOID MENU
+    # pi = frappe.get_doc("POS Invoice", pos_invoice)
+    # pi.save()
+    # return pi.as_dict()
+
+@frappe.whitelist()
 def apply_discount(pos_invoice, discount_percentage=None, discount_amount=None):
     pass
+    # sales_tax = frappe.get_doc("POS Invoice", get_current_profile(), "taxes_and_charges")
+    # if discount_percentage:
+    #     sales_tax.discount_percentage = discount_percentage
+    #     sales_tax.discount_amount = 0
+    # elif discount_amount:
+    #     sales_tax.discount_amount = discount_amount
+    #     sales_tax.discount_percentage = 0
+    # else:
+    #     frappe.throw("discount_percentage atau discount_amount harus diisi")
+
+    # pi = frappe.get_doc("POS Invoice", pos_invoice)
+    # pi.taxes_and_charges = sales_tax.name
+    # pi.save()
+    # return pi.as_dict()
+
+@frappe.whitelist()
+def create_payment(pos_invoice, amount, mode_of_payment):
+    # do submit
+    # apakah ada merge table. kalo ada harus di
