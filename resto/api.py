@@ -2057,15 +2057,30 @@ def remove_discount(pos_invoice):
     return {"ok": False, "message": "Tidak ditemukan diskon untuk dihapus"}
 
 @frappe.whitelist()
-def create_payment(pos_invoice, amount, mode_of_payment):
+def create_payment(pos_invoice, amount, mode_of_payment, paid_by):
+    if not frappe.db.exists("POS Invoice", pos_invoice):
+        frappe.throw(f"Invoice {pos_invoice} tidak ditemukan")
+
     doc = frappe.get_doc("POS Invoice", pos_invoice)
+    if amount < doc.grand_total:
+        frappe.throw("Pembayaran tidak mencukupi")
+
     doc.append("payments", {
         "mode_of_payment": mode_of_payment,
         "amount": amount
     })
+
+    doc.custom_paid_amount_pos = amount
+    doc.paid_amount = amount
+    doc.base_paid_amount = amount
+    doc.paid_by = paid_by
+
     doc.save()
+
+    if doc.docstatus == 0:
+        doc.submit()
     
-    clear_table_merged(pos_invoice)
+    # clear_table_merged(pos_invoice)
 
     frappe.db.commit()
     return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
