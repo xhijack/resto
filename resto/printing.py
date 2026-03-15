@@ -2149,7 +2149,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
     out += (f"Table : {table_name}\n").encode("ascii", "ignore")
-    out += (f"Pax : {pax}\n").encode("ascii", "ignore")
+    out += (f"Pax : {int(flt(pax))}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
@@ -2158,9 +2158,11 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
         item_name = it.get("item_name") or it.get("resto_menu") or "-"
 
         out += _esc_char_size(1, 2)   # double-height, lebar normal
+        out += _esc_char_size_dotmatrix(3, 3) + _esc_bold(True)
         display_line = f"{int(flt(qty_s))} x {item_name}"
         out += (display_line + "\n").encode("ascii", "ignore")
         out += _esc_char_size(0, 0)   # reset ke ukuran normal
+        out += _esc_char_size_dotmatrix(0, 0)
 
         # Add-ons
         add_ons = it.get("add_ons") or ""
