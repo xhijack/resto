@@ -1918,6 +1918,7 @@ def merge_table(pos_invoice, source_table, target_table=[]):
         # Simpan perubahan meja target
         target_table_doc.save()
 
+    delete_merge_invoice(pos_invoice)
     return {
         "ok": True,
         "message": f"Berhasil menggabungkan {len(target_table)} meja ke {source_table}"
@@ -2076,7 +2077,6 @@ def create_payment(pos_invoice, amount, mode_of_payment):
     doc.save()
     
     clear_table_merged(pos_invoice)
-    delete_merge_invoice(pos_invoice)
 
     frappe.db.commit()
     return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
