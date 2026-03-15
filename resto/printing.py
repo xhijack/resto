@@ -2157,7 +2157,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
         qty_s = str(it.get("qty") or 0)
         item_name = it.get("item_name") or it.get("resto_menu") or "-"
 
-        out += _esc_char_size(0, 1)   # double-height, lebar normal
+        out += _esc_char_size(1, 2)   # double-height, lebar normal
         display_line = f"{int(flt(qty_s))} x {item_name}"
         out += (display_line + "\n").encode("ascii", "ignore")
         out += _esc_char_size(0, 0)   # reset ke ukuran normal
