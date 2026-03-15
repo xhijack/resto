@@ -1864,7 +1864,7 @@ def move_table(pos_invoice):
     pass
 
 @frappe.whitelist()
-def merge_table(pos_invoice, source_table, target_table):
+def merge_table(pos_invoice, source_table, target_table=[]):
     """
     Docstring for merge_table
     
@@ -1900,31 +1900,75 @@ def remove_item(pos_invoice, item_code, qty):
     # return pi.as_dict()
 
 @frappe.whitelist()
-def apply_discount(pos_invoice, discount_percentage=None, discount_amount=None):
+def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=None):
     """
     Docstring for apply_discount
     
     :param pos_invoice: Description
     :param discount_percentage: Description
     :param discount_amount: Description
+    :param user: Description
     """
-    
-    # sales_tax = frappe.get_doc("POS Invoice", get_current_profile(), "taxes_and_charges")
-    # if discount_percentage:
-    #     sales_tax.discount_percentage = discount_percentage
-    #     sales_tax.discount_amount = 0
-    # elif discount_amount:
-    #     sales_tax.discount_amount = discount_amount
-    #     sales_tax.discount_percentage = 0
-    # else:
-    #     frappe.throw("discount_percentage atau discount_amount harus diisi")
+    user = frappe.session.user or user
+    doc = frappe.get_doc("POS Invoice", pos_invoice)
+    current_pos_profile = get_active_pos_profile_for_user(user)
+    pos_profile = frappe.get_doc("POS Profile", current_pos_profile['pos_profile'], "taxes_and_charges")
+    taxes_and_charges = frappe.get_doc("Sales Taxes and Charges Template", pos_profile.taxes_and_charges)
 
-    # pi = frappe.get_doc("POS Invoice", pos_invoice)
-    # pi.taxes_and_charges = sales_tax.name
-    # pi.save()
-    # return pi.as_dict()
+    if doc.taxes_and_charges == None:
+        doc.taxes_and_charges = taxes_and_charges.taxes
+        doc.save()
+
+    charge_type = None
+    tax_rate = 0
+    tax_amount = 0
+
+    # CASE 1: Discount Percentage
+    if discount_percentage > 0:
+        charge_type = "On Net Total"
+        tax_rate = -abs(discount_percentage)
+    # CASE 2: Discount Amount
+    elif discount_amount:
+        charge_type = "Actual"
+        tax_amount = -abs(discount_amount)
+    else:
+        frappe.throw("Tidak ada discount yang diterapkan. Mohon isi discount_percentage atau discount_amount")
+
+    # cek apakah sudah ada baris discount
+    discount_row = None
+    for tax in doc.taxes:
+        if tax.description == "Discount":
+            discount_row = tax
+            break
+
+    if discount_row:
+        discount_row.charge_type = charge_type
+        discount_row.rate = tax_rate
+        discount_row.tax_amount = tax_amount
+    else:
+        doc.append("taxes", {
+            "charge_type": charge_type,
+            "rate": tax_rate,
+            "tax_amount": tax_amount
+        })
+    doc.save()
+    frappe.db.commit()
+    return {"ok": True, "message": "Diskon berhasil diterapkan", "pos_invoice": pos_invoice}
+        
+@frappe.whitelist()
+def remove_discount(pos_invoice):
+    doc = frappe.get_doc("POS Invoice", pos_invoice)
+    taxes = doc.taxes
+    for tax in taxes:
+        if tax.description == "Discount":
+            doc.remove(tax)
+            doc.save()
+            frappe.db.commit()
+            return {"ok": True, "message": "Diskon berhasil dihapus", "pos_invoice": pos_invoice}
+    return {"ok": False, "message": "Tidak ditemukan diskon untuk dihapus"}
 
 @frappe.whitelist()
 def create_payment(pos_invoice, amount, mode_of_payment):
+    pass
     # do submit
     # apakah ada merge table. kalo ada harus di
