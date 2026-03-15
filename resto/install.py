@@ -182,6 +182,29 @@ def after_migrate():
                 "fieldtype": "Data",
                 "insert_after": "status_kitchen"
             }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {'fieldname': 'is_merged', 'dt': 'POS Invoice'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "is_merged",
+                "label": "Is Merged",
+                "fieldtype": "Check",
+                "insert_after": "queue",
+                "default": 0,
+                "read_only": 1,
+            }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {'fieldname': 'merge_invoice', 'dt': 'POS Invoice'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "merge_invoice",
+                "label": "Merge Invoice",
+                "fieldtype": "Data",
+                "insert_after": "is_merged",
+                "read_only": 1,
+            }).insert(ignore_permissions=True)
 
         if not frappe.db.exists("Custom Field", {'fieldname': "branch", "dt": "POS Invoice"}):
             frappe.get_doc({

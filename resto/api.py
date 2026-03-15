@@ -1911,7 +1911,6 @@ def merge_table(pos_invoice, source_table, target_table=[]):
             for row in target_table_doc.get("orders"):
                 if row.invoice_name == inv_name:
                     row.invoice_name = pos_invoice
-            _cancel_invoice(inv_name)
 
             # Opsional: Batalkan invoice target (misal ubah status jadi Cancelled)
             # cancel_invoice(inv_name)
@@ -1940,16 +1939,11 @@ def move_items_from_invoice(source_invoice_name, target_invoice_name):
         target_invoice.append("items", new_item)
 
     # Simpan target invoice
+    source_invoice.is_merged = 1
+    source_invoice.merge_invoice = target_invoice_name
+    source_invoice.save()
     target_invoice.save()
 
-def _cancel_invoice(invoice_name):
-    invoice = frappe.get_doc("POS Invoice", invoice_name)
-    if invoice.docstatus == 1:          # Submitted
-        invoice.items()                 # Gunakan method bawaan
-    elif invoice.docstatus == 0:         # Draft
-        invoice.docstatus = 2             # Langsung set ke Cancelled
-        invoice.save()
-    # Jika sudah cancelled, tidak perlu tindakan
 
 @frappe.whitelist()
 def move_item(pos_invoice):
