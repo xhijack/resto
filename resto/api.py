@@ -1639,30 +1639,37 @@ def get_select_options(doctype, fieldname):
 
 @frappe.whitelist()
 def get_active_pos_profile_for_user(user):
-    pos_profiles = frappe.get_all(
-        "POS Profile User",
-        filters={"user": user},
-        pluck="parent"
-    )
+    try:
+        pos_profiles = frappe.get_all(
+            "POS Profile User",
+            filters={"user": user},
+            pluck="parent"
+        )
 
-    if not pos_profiles:
-        frappe.throw("User tidak punya POS Profile")
+        if not pos_profiles:
+            frappe.log_error(f"User {user} tidak punya POS Profile", "get_active_pos_profile_for_user")
+            frappe.throw("User tidak punya POS Profile")
 
-    opening = frappe.get_all(
-        "POS Opening Entry",
-        filters={
-            "pos_profile": ["in", pos_profiles],
-            "status": "Open"
-        },
-        fields=["name", "pos_profile", "user", "branch"],
-        order_by="creation desc",
-        limit=1
-    )
+        opening = frappe.get_all(
+            "POS Opening Entry",
+            filters={
+                "pos_profile": ["in", pos_profiles],
+                "status": "Open"
+            },
+            fields=["name", "pos_profile", "user", "branch"],
+            order_by="creation desc",
+            limit=1
+        )
 
-    if not opening:
-        frappe.throw("POS belum dibuka")
+        if not opening:
+            frappe.log_error(f"POS belum dibuka untuk user {user}, pos_profiles: {pos_profiles}", "get_active_pos_profile_for_user")
+            frappe.throw("POS belum dibuka")
 
-    return opening[0]
+        return opening[0]
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), f"Error get_active_pos_profile_for_user for user {user}")
+        frappe.throw(title="POS Profile Fetch Error", msg=str(e))
 
 import frappe
 
