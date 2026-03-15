@@ -1963,7 +1963,7 @@ def remove_item(pos_invoice, item_code, qty):
     # return pi.as_dict()
 
 @frappe.whitelist()
-def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=None):
+def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None,  user=None):
     """
     Docstring for apply_discount
     
@@ -1976,12 +1976,7 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
     doc = frappe.get_doc("POS Invoice", pos_invoice)
     current_pos_profile = get_active_pos_profile_for_user(user)
     pos_profile = frappe.get_doc("POS Profile", current_pos_profile['pos_profile'], "taxes_and_charges")
-    # taxes_and_charges = frappe.get_doc("Sales Taxes and Charges Template", pos_profile.taxes_and_charges)
 
-    # if doc.taxes_and_charges == None:
-    #     doc.taxes_and_charges = taxes_and_charges.taxes
-    #     doc.save()
-    
     if not doc.taxes_and_charges:
         doc.taxes_and_charges = pos_profile.taxes_and_charges
         doc.set_taxes()
@@ -1990,14 +1985,6 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
     tax_rate = 0
     tax_amount = 0
 
-    # CASE 1: Discount Percentage
-    # if discount_percentage > 0:
-    #     charge_type = "On Net Total"
-    #     tax_rate = -abs(discount_percentage)
-    # CASE 2: Discount Amount
-    # elif discount_amount:
-    #     charge_type = "Actual"
-    #     tax_amount = -abs(discount_amount)
     discount_percentage = float(discount_percentage or 0)
     discount_amount = float(discount_amount or 0)
 
@@ -2051,6 +2038,8 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, user=N
             tax.row_id = None
     
     doc.calculate_taxes_and_totals()
+    doc.discount_name = discount_name
+    doc.discount_for_bank = discount_for_bank
     doc.save()
     frappe.db.commit()
     return {"ok": True, "message": "Diskon berhasil diterapkan", "pos_invoice": pos_invoice}
