@@ -2085,6 +2085,32 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append(format_lr("Total Bill", draft.get("total_bill")))
         lines.append(format_lr("Amount", fmt_amt(draft.get("total_amount"))))
         lines.append("")
+        
+    # =========================
+    # VOID MENU
+    # =========================
+    lines.append("VOID MENU")
+    lines.append(line())
+    lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
+    lines.append(line())
+
+    total_qty = 0
+    total_amount = 0
+
+    for v in void_menu.get("items", []):
+
+        name = v.get("item_name")
+        qty = v.get("qty")
+        amt = v.get("amount")
+
+        total_qty += qty
+        total_amount += amt
+
+        lines.append(format_item(name, qty, amt))
+
+    lines.append(line())
+    lines.append(format_item("TOTAL", total_qty, total_amount))
+    lines.append("")
 
     # =========================
     # VOID BILL
@@ -2101,7 +2127,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("")
 
     text = "\n".join(lines)
-    esc_commads = _esc_feed(3) + _esc_cut_full()
+    esc_commads = _esc_feed(8) + _esc_cut_full()
     out = text.encode("ascii", "ignore") + esc_commads
 
     # =========================

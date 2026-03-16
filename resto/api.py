@@ -1358,9 +1358,33 @@ def get_end_day_report_v2():
             for d in draft_invoices
         ]
     }
+    
+    # =====================================================
+    # 9. VOID MENU
+    # =====================================================
+    void_menu_items = frappe.db.sql("""
+        SELECT
+            pii.parent AS invoice,
+            pii.item_name,
+            SUM(IFNULL(pii.void_qty, 0)) AS qty,
+            SUM(IFNULL(pii.void_rate, 0)) AS rate,
+            SUM(IFNULL(pii.void_amount, 0)) AS amount
+        FROM `tabPOS Invoice Item` pii
+        JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
+        WHERE pi.posting_date = %(posting_date)s
+        AND pi.docstatus = 1
+        AND IFNULL(pii.status_kitchen,'') = 'Void Menu'
+        GROUP BY pii.parent, pii.item_name
+    """, {"posting_date": posting_date}, as_dict=True)
+
+    void_menu_summary = {
+        "total_items": len(void_menu_items),
+        "total_amount": sum(flt(v.amount) for v in void_menu_items),
+        "items": void_menu_items
+    }
 
     # =====================================================
-    # 9. VOID BILL
+    # 10. VOID BILL
     # =====================================================
     void_bill_filters = {
         "posting_date": posting_date,
@@ -1393,6 +1417,7 @@ def get_end_day_report_v2():
         "taxes": tax_summary,
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
+        "void_menu": void_menu_summary,
         "void_bill": void_bill_summary
     }
     
