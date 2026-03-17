@@ -1861,6 +1861,17 @@ def print_void_item(pos_invoice: str):
     if not items_to_print:
         frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
         return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
+    
+    for it in items_to_print:
+        frappe.db.set_value(
+            "POS Invoice Item",
+            it["name"],
+            {
+                "is_checked": 1,
+                "is_print_kitchen": 1
+            }
+        )
+    frappe.db.commit()
 
     printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "default_printer_checker") or "Void Printer"
 
