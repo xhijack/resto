@@ -1002,6 +1002,20 @@ def get_cashier_name(pos_invoice_name: str) -> str:
     owner_user_doc = frappe.get_doc("User", invoice.owner)
     return owner_user_doc.full_name or invoice.owner
 
+def get_current_cashier_name(pos_invoice_name: str) -> str:
+    current_user = frappe.session.user
+
+    # Jika ada user aktif dan bukan Guest → pakai user yang print
+    if current_user and current_user != "Guest":
+        user = frappe.get_cached_doc("User", current_user)
+        return user.full_name or current_user
+
+    # Fallback → pakai owner POS Invoice
+    invoice = frappe.get_cached_doc("POS Invoice", pos_invoice_name)
+    owner_user = frappe.get_cached_doc("User", invoice.owner)
+
+    return owner_user.full_name or invoice.owner
+
 def build_escpos_bill(name: str) -> bytes:
     data = _collect_pos_invoice(name)
 
@@ -1143,7 +1157,8 @@ def build_escpos_bill(name: str) -> bytes:
 
     # Nama kasir
     # cashier_name = get_cashier_name(data["name"])
-    cashier_name = get_waiter_name(data["name"])
+    # cashier_name = get_waiter_name(data["name"])
+    cashier_name = get_current_cashier_name(data["name"])
     out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
 
     # Customer
@@ -1394,7 +1409,8 @@ def build_escpos_receipt(name: str) -> bytes:
 
 
     # Nama kasir
-    cashier_name = get_cashier_name(data["name"])
+    # cashier_name = get_cashier_name(data["name"])
+    cashier_name = get_current_cashier_name(data["name"])
     out += (f"Cashier : {cashier_name}\n").encode("ascii", "ignore")
 
     # Customer
