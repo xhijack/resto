@@ -968,9 +968,9 @@ def get_total_pax_from_pos_invoice(pos_invoice_name: str) -> int:
 
 def get_waiter_name(pos_invoice_name: str) -> str:
     invoice = frappe.get_doc("POS Invoice", pos_invoice_name)
-    owner = invoice.owner
-    user = frappe.get_doc("User", owner)
-    return user.full_name or owner  
+    user_id = invoice.modified_by or invoice.owner
+    user = frappe.get_doc("User", user_id)
+    return user.full_name or user_id  
 
 def get_cashier_name(pos_invoice_name: str) -> str:
     # Ambil POS Invoice
