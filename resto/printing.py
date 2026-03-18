@@ -239,7 +239,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
             "price_list_rate"
         ) or it.get("rate") 
 
-        short_name = frappe.db.get_value("Resto Menu", item_code, "short_name") or it.get("item_name") or item_code
+        short_name = frappe.db.get_value("Resto Menu", {"sell_item": item_code}, "short_name") or it.get("item_name")
 
         items.append({
             "name": it.get("name"),
