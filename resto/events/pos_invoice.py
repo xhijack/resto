@@ -122,14 +122,14 @@ def exclude_void_items_from_total(doc, method):
     # =====================
     # PAYMENT SYNC (ANTI PARTIAL)
     # =====================
-    if doc.is_pos:
-        gt = flt(doc.rounded_total or doc.grand_total)
-        doc.paid_amount = gt
-        doc.base_paid_amount = gt
-        for p in doc.payments:
-            p.amount = gt
-            p.base_amount = gt
-        doc.outstanding_amount = 0
+    # if doc.is_pos:
+    #     gt = flt(doc.rounded_total or doc.grand_total)
+    #     doc.paid_amount = gt
+    #     doc.base_paid_amount = gt
+    #     for p in doc.payments:
+    #         p.amount = gt
+    #         p.base_amount = gt
+    #     doc.outstanding_amount = 0
 
 def lock_void_value_after_submit(doc, method):
     for item in doc.items:
