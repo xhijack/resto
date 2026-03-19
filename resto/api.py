@@ -1561,6 +1561,7 @@ def end_shift(user=None):
 
     # Save & Submit
     closing.insert(ignore_permissions=True)
+    closing.reload()
     closing.submit()
 
     try:
