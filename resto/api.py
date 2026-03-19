@@ -1560,7 +1560,7 @@ def end_shift(user=None):
     # closing.validate_duplicate_pos_invoices()
 
     # Save & Submit
-    closing.insert(ignore_permissions=True)
+    closing.insert()
     closing.reload()
     closing.submit()
 
