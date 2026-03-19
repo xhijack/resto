@@ -1167,15 +1167,47 @@ def build_escpos_bill(name: str) -> bytes:
 
     out += (separator + "\n").encode("ascii", "ignore")
 
-    # ===== ITEMS =====
+    grouped_items = {}
+
+    def normalize_addons(add_ons):
+        if not add_ons:
+            return ""
+        parts = sorted([a.strip() for a in add_ons.split(",") if a.strip()])
+        return ",".join(parts)
+
     for item in items:
         if item.get("status_kitchen") == "Void Menu":
             continue
         
-        item_name = (item.get("short_name") or "").strip()
+        normalized_addons = normalize_addons(item.get("add_ons"))
+
+        key = (
+            item.get("short_name"),
+            float(item.get("rate") or 0),
+            normalized_addons
+        )
+        
+        if key not in grouped_items:
+            grouped_items[key] = {
+                "name": item.get("short_name"),
+                "qty": 0,
+                "rate": float(item.get("rate") or 0),
+                "amount": 0,
+                "add_ons": normalized_addons
+            }
+        
+        grouped_items[key]["qty"] += int(item.get("qty") or 0)
+        grouped_items[key]["amount"] += float(item.get("amount") or 0)
+
+    # ===== ITEMS =====
+    for item in sorted(grouped_items.values(), key=lambda x: x["name"]):
+        # if item.get("status_kitchen") == "Void Menu":
+        #     continue
+        
+        item_name = (item.get("name") or "").strip()
         qty = int(item.get("qty") or 0)
         rate = float(item.get("rate") or 0)
-        amount = qty * rate
+        amount = float(item.get("amount") or (qty * rate))
         resto_menu = item.get("resto_menu")
 
         # mandarin_name = mandarin_map.get(resto_menu) or ""
@@ -1419,15 +1451,47 @@ def build_escpos_receipt(name: str) -> bytes:
 
     out += (separator + "\n").encode("ascii", "ignore")
 
-    # ===== ITEMS =====
+    grouped_items = {}
+
+    def normalize_addons(add_ons):
+        if not add_ons:
+            return ""
+        parts = sorted([a.strip() for a in add_ons.split(",") if a.strip()])
+        return ",".join(parts)
+
     for item in items:
         if item.get("status_kitchen") == "Void Menu":
             continue
         
-        item_name = item.get("short_name", "")
+        normalized_addons = normalize_addons(item.get("add_ons"))
+
+        key = (
+            item.get("short_name"),
+            float(item.get("rate") or 0),
+            normalized_addons
+        )
+        
+        if key not in grouped_items:
+            grouped_items[key] = {
+                "name": item.get("short_name"),
+                "qty": 0,
+                "rate": float(item.get("rate") or 0),
+                "amount": 0,
+                "add_ons": normalized_addons
+            }
+        
+        grouped_items[key]["qty"] += int(item.get("qty") or 0)
+        grouped_items[key]["amount"] += float(item.get("amount") or 0)
+
+    # ===== ITEMS =====
+    for item in sorted(grouped_items.values(), key=lambda x: x["name"]):
+        # if item.get("status_kitchen") == "Void Menu":
+        #     continue
+        
+        item_name = item.get("name", "")
         qty = int(item.get("qty", 0))
         rate = item.get("rate", 0)
-        amount = rate * qty
+        amount = float(item.get("amount") or (qty * rate))
 
         # Item utama
         out += (f"{item_name}\n").encode("ascii", "ignore")
