@@ -1442,10 +1442,10 @@ def end_shift(user=None):
         order_by="posting_date asc, posting_time asc"
     )
 
-    for invoice in invoices:
-        frappe.db.set_value("POS Invoice", invoice.name, "owner", opening.user)
+    # for invoice in invoices:
+    #     frappe.db.set_value("POS Invoice", invoice.name, "owner", opening.user)
 
-    frappe.db.commit()
+    # frappe.db.commit()
 
     if not invoices:
         frappe.throw("Tidak ada POS Invoice")
