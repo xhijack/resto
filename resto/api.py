@@ -1179,7 +1179,7 @@ def get_end_day_report():
     }
 
 import frappe
-from frappe.utils import flt, cint
+from frappe.utils import flt
 
 @frappe.whitelist()
 def get_end_day_report_v2():
@@ -1187,7 +1187,7 @@ def get_end_day_report_v2():
     
     posting_date = frappe.form_dict.get("posting_date")
     outlet = frappe.form_dict.get("outlet")
-    do_print = cint(frappe.form_dict.get("print"))
+    do_print = frappe.form_dict.get("print")
 
     if not posting_date or not outlet:
         frappe.throw("posting_date dan outlet wajib diisi")
@@ -1254,19 +1254,15 @@ def get_end_day_report_v2():
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     discount = frappe.db.sql("""
-        SELECT SUM(tax_amount)
-        FROM `tabSales Taxes and Charges`
-        WHERE parent IN %(inv)s
-        AND LOWER(description) LIKE '%%discount%%'
+        SELECT SUM(discount_amount)
+        FROM `tabPOS Invoice`
+        WHERE name IN %(inv)s
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
-
-    discount = abs(discount)
 
     tax = frappe.db.sql("""
         SELECT SUM(tax_amount)
         FROM `tabSales Taxes and Charges`
         WHERE parent IN %(inv)s
-        AND LOWER(description) NOT LIKE '%%discount%%'
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     summary = {
@@ -1330,38 +1326,22 @@ def get_end_day_report_v2():
     # =====================================================
     discount_by_order_type = frappe.db.sql("""
         SELECT
-            pi.order_type,
-            pi.discount_name,
-            pi.discount_for_bank,
-            COUNT(DISTINCT pi.name) AS total_bill,
-            SUM(ABS(stc.tax_amount)) AS total_amount
-        FROM `tabPOS Invoice` pi
-        JOIN `tabSales Taxes and Charges` stc 
-            ON stc.parent = pi.name
-        WHERE pi.name IN %(inv)s
-        AND LOWER(stc.description) LIKE '%%discount%%'
-        GROUP BY 
-            pi.order_type,
-            pi.discount_name,
-            pi.discount_for_bank
+            order_type,
+            COUNT(name) total_bill,
+            SUM(discount_amount) total_amount
+        FROM `tabPOS Invoice`
+        WHERE name IN %(inv)s
+        AND discount_amount > 0
+        GROUP BY order_type
     """, {"inv": tuple(paid_invoice_names)}, as_dict=True)
 
-    discount_order_type = {}
-
-    for d in discount_by_order_type:
-        order_type = d.order_type or "Unknown"
-        discount_name = d.discount_name or "No Name"
-        bank = d.discount_for_bank or "Non Bank"
-
-        if order_type not in discount_order_type:
-            discount_order_type[order_type] = {}
-
-        key = f"{discount_name} - {bank}"
-
-        discount_order_type[order_type][key] = {
+    discount_order_type = {
+        d.order_type or "Unknown": {
             "total_qty": int(d.total_bill),
             "total_amount": flt(d.total_amount)
         }
+        for d in discount_by_order_type
+    }
 
     # =====================================================
     # 8. DRAFT SUMMARY
@@ -1378,33 +1358,9 @@ def get_end_day_report_v2():
             for d in draft_invoices
         ]
     }
-    
-    # =====================================================
-    # 9. VOID MENU
-    # =====================================================
-    void_menu_items = frappe.db.sql("""
-        SELECT
-            pii.parent AS invoice,
-            pii.item_name,
-            SUM(IFNULL(pii.void_qty, 0)) AS qty,
-            SUM(IFNULL(pii.void_rate, 0)) AS rate,
-            SUM(IFNULL(pii.void_amount, 0)) AS amount
-        FROM `tabPOS Invoice Item` pii
-        JOIN `tabPOS Invoice` pi ON pi.name = pii.parent
-        WHERE pi.posting_date = %(posting_date)s
-        AND pi.docstatus = 1
-        AND IFNULL(pii.status_kitchen,'') = 'Void Menu'
-        GROUP BY pii.parent, pii.item_name
-    """, {"posting_date": posting_date}, as_dict=True)
-
-    void_menu_summary = {
-        "total_items": len(void_menu_items),
-        "total_amount": sum(flt(v.amount) for v in void_menu_items),
-        "items": void_menu_items
-    }
 
     # =====================================================
-    # 10. VOID BILL
+    # 9. VOID BILL
     # =====================================================
     void_bill_filters = {
         "posting_date": posting_date,
@@ -1437,7 +1393,6 @@ def get_end_day_report_v2():
         "taxes": tax_summary,
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
-        "void_menu": void_menu_summary,
         "void_bill": void_bill_summary
     }
     
@@ -1452,26 +1407,18 @@ def get_end_day_report_v2():
             "default_printer_receipt"
         )
 
-        frappe.enqueue(
-            method="resto.api.printing.print_end_day_report_v2",
-            queue="short",
-            timeout=300,
-            result=result,
-            printer=printer
-        )
-        
-        # try:
-        #     print_end_day_report_v2(result, printer)
-        # except Exception as e:
-        #     frappe.log_error(str(e), "End Day Report Print Error")
+        try:
+            print_end_day_report_v2(result, printer)
+        except Exception as e:
+            frappe.log_error(str(e), "End Day Report Print Error")
 
     return result
 
 @frappe.whitelist()
-def end_shift():
+def end_shift(user=None):
     from .printing import print_shift_report
 
-    user = frappe.session.user
+    user = user or frappe.session.user
 
     # POS Opening Entry aktif
     opening_info = get_active_pos_profile_for_user(user)
@@ -1616,25 +1563,11 @@ def end_shift():
     closing.insert(ignore_permissions=True)
     closing.submit()
 
-    default_printer_receipt = frappe.db.get_value(
-        "Printer Settings",
-        opening.branch,
-        "default_printer_receipt"
-    )
-
-    frappe.enqueue(
-        method="resto.api.printing.print_shift_report",
-        queue="short",
-        timeout=300,
-        closing_name=closing.name,
-        printer_name=default_printer_receipt
-    )
-
-    # try:
-    #     default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
-    #     print_shift_report(closing.name, default_printer_receipt)
-    # except Exception as e:
-    #     frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
+    try:
+        default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
+        print_shift_report(closing.name, default_printer_receipt)
+    except Exception as e:
+        frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
 
     # Response
     return {
@@ -1706,37 +1639,30 @@ def get_select_options(doctype, fieldname):
 
 @frappe.whitelist()
 def get_active_pos_profile_for_user(user):
-    try:
-        pos_profiles = frappe.get_all(
-            "POS Profile User",
-            filters={"user": user},
-            pluck="parent"
-        )
+    pos_profiles = frappe.get_all(
+        "POS Profile User",
+        filters={"user": user},
+        pluck="parent"
+    )
 
-        if not pos_profiles:
-            frappe.log_error(f"User {user} tidak punya POS Profile", "get_active_pos_profile_for_user")
-            frappe.throw("User tidak punya POS Profile")
+    if not pos_profiles:
+        frappe.throw("User tidak punya POS Profile")
 
-        opening = frappe.get_all(
-            "POS Opening Entry",
-            filters={
-                "pos_profile": ["in", pos_profiles],
-                "status": "Open"
-            },
-            fields=["name", "pos_profile", "user", "branch"],
-            order_by="creation desc",
-            limit=1
-        )
+    opening = frappe.get_all(
+        "POS Opening Entry",
+        filters={
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open"
+        },
+        fields=["name", "pos_profile", "user", "branch"],
+        order_by="creation desc",
+        limit=1
+    )
 
-        if not opening:
-            frappe.log_error(f"POS belum dibuka untuk user {user}, pos_profiles: {pos_profiles}", "get_active_pos_profile_for_user")
-            frappe.throw("POS belum dibuka")
+    if not opening:
+        frappe.throw("POS belum dibuka")
 
-        return opening[0]
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), f"Error get_active_pos_profile_for_user for user {user}")
-        frappe.throw(title="POS Profile Fetch Error", msg=str(e))
+    return opening[0]
 
 import frappe
 
@@ -1903,17 +1829,6 @@ def print_void_item(pos_invoice: str):
     if not items_to_print:
         frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
         return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
-    
-    for it in items_to_print:
-        frappe.db.set_value(
-            "POS Invoice Item",
-            it["name"],
-            {
-                "is_checked": 1,
-                "is_print_kitchen": 1
-            }
-        )
-    frappe.db.commit()
 
     printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "default_printer_checker") or "Void Printer"
 
@@ -2142,30 +2057,15 @@ def remove_discount(pos_invoice):
     return {"ok": False, "message": "Tidak ditemukan diskon untuk dihapus"}
 
 @frappe.whitelist()
-def create_payment(pos_invoice, amount, mode_of_payment, paid_by):
-    if not frappe.db.exists("POS Invoice", pos_invoice):
-        frappe.throw(f"Invoice {pos_invoice} tidak ditemukan")
-
+def create_payment(pos_invoice, amount, mode_of_payment):
     doc = frappe.get_doc("POS Invoice", pos_invoice)
-    if amount < doc.grand_total:
-        frappe.throw("Pembayaran tidak mencukupi")
-
     doc.append("payments", {
         "mode_of_payment": mode_of_payment,
         "amount": amount
     })
-
-    doc.custom_paid_amount_pos = amount
-    doc.paid_amount = amount
-    doc.base_paid_amount = amount
-    doc.paid_by = paid_by
-
-    doc.save()
-
-    if doc.docstatus == 0:
-        doc.submit()
+    doc.submit()
     
-    # clear_table_merged(pos_invoice)
+    clear_table_merged(pos_invoice)
 
     frappe.db.commit()
     return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
