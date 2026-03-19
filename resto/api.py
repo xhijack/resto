@@ -1179,7 +1179,7 @@ def get_end_day_report():
     }
 
 import frappe
-from frappe.utils import flt
+from frappe.utils import flt, cint
 
 @frappe.whitelist()
 def get_end_day_report_v2():
@@ -1187,7 +1187,7 @@ def get_end_day_report_v2():
     
     posting_date = frappe.form_dict.get("posting_date")
     outlet = frappe.form_dict.get("outlet")
-    do_print = frappe.form_dict.get("print")
+    do_print = cint(frappe.form_dict.get("print"))
 
     if not posting_date or not outlet:
         frappe.throw("posting_date dan outlet wajib diisi")
@@ -1254,15 +1254,19 @@ def get_end_day_report_v2():
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     discount = frappe.db.sql("""
-        SELECT SUM(discount_amount)
-        FROM `tabPOS Invoice`
-        WHERE name IN %(inv)s
+        SELECT SUM(tax_amount)
+        FROM `tabSales Taxes and Charges`
+        WHERE parent IN %(inv)s
+        AND LOWER(description) LIKE '%%discount%%'
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
+
+    discount = abs(discount)
 
     tax = frappe.db.sql("""
         SELECT SUM(tax_amount)
         FROM `tabSales Taxes and Charges`
         WHERE parent IN %(inv)s
+        AND LOWER(description) NOT LIKE '%%discount%%'
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     summary = {
@@ -1326,22 +1330,38 @@ def get_end_day_report_v2():
     # =====================================================
     discount_by_order_type = frappe.db.sql("""
         SELECT
-            order_type,
-            COUNT(name) total_bill,
-            SUM(discount_amount) total_amount
-        FROM `tabPOS Invoice`
-        WHERE name IN %(inv)s
-        AND discount_amount > 0
-        GROUP BY order_type
+            pi.order_type,
+            pi.discount_name,
+            pi.discount_for_bank,
+            COUNT(DISTINCT pi.name) AS total_bill,
+            SUM(ABS(stc.tax_amount)) AS total_amount
+        FROM `tabPOS Invoice` pi
+        JOIN `tabSales Taxes and Charges` stc 
+            ON stc.parent = pi.name
+        WHERE pi.name IN %(inv)s
+        AND LOWER(stc.description) LIKE '%%discount%%'
+        GROUP BY 
+            pi.order_type,
+            pi.discount_name,
+            pi.discount_for_bank
     """, {"inv": tuple(paid_invoice_names)}, as_dict=True)
 
-    discount_order_type = {
-        d.order_type or "Unknown": {
+    discount_order_type = {}
+
+    for d in discount_by_order_type:
+        order_type = d.order_type or "Unknown"
+        discount_name = d.discount_name or "No Name"
+        bank = d.discount_for_bank or "Non Bank"
+
+        if order_type not in discount_order_type:
+            discount_order_type[order_type] = {}
+
+        key = f"{discount_name} - {bank}"
+
+        discount_order_type[order_type][key] = {
             "total_qty": int(d.total_bill),
             "total_amount": flt(d.total_amount)
         }
-        for d in discount_by_order_type
-    }
 
     # =====================================================
     # 8. DRAFT SUMMARY
@@ -1432,10 +1452,18 @@ def get_end_day_report_v2():
             "default_printer_receipt"
         )
 
-        try:
-            print_end_day_report_v2(result, printer)
-        except Exception as e:
-            frappe.log_error(str(e), "End Day Report Print Error")
+        frappe.enqueue(
+            method="resto.api.printing.print_end_day_report_v2",
+            queue="short",
+            timeout=300,
+            result=result,
+            printer=printer
+        )
+        
+        # try:
+        #     print_end_day_report_v2(result, printer)
+        # except Exception as e:
+        #     frappe.log_error(str(e), "End Day Report Print Error")
 
     return result
 
@@ -1588,11 +1616,25 @@ def end_shift():
     closing.insert(ignore_permissions=True)
     closing.submit()
 
-    try:
-        default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
-        print_shift_report(closing.name, default_printer_receipt)
-    except Exception as e:
-        frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
+    default_printer_receipt = frappe.db.get_value(
+        "Printer Settings",
+        opening.branch,
+        "default_printer_receipt"
+    )
+
+    frappe.enqueue(
+        method="resto.api.printing.print_shift_report",
+        queue="short",
+        timeout=300,
+        closing_name=closing.name,
+        printer_name=default_printer_receipt
+    )
+
+    # try:
+    #     default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
+    #     print_shift_report(closing.name, default_printer_receipt)
+    # except Exception as e:
+    #     frappe.log_error(f"Error printing shift report: {str(e)}", "Print Error")
 
     # Response
     return {

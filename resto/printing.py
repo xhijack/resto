@@ -1765,10 +1765,24 @@ def print_shift_report(closing_name, printer_name=None):
     # Kumpulkan data item per invoice
     items_summary = {}  # key: (item_code, item_name, item_group)
     total_discount = 0
+    void_qty = 0
+    void_amount = 0
     for inv in invoices:
-        total_discount += flt(inv.discount_amount)
+        # DISCOUNT (AMBIL DARI TAX TABLE)
+        for tax in inv.taxes:
+            if tax.description and "discount" in tax.description.lower():
+                total_discount += abs(flt(tax.tax_amount))
+
+        # ITEMS
         for item in inv.items:
+            # VOID MENU
+            if (item.status_kitchen or "") == "Void Menu":
+                void_qty += flt(item.void_qty or item.qty)
+                void_amount += flt(item.void_amount or item.amount)
+                continue
+
             key = (item.item_code, item.item_name, item.item_group)
+
             if key not in items_summary:
                 items_summary[key] = {
                     "qty": 0,
@@ -1776,6 +1790,7 @@ def print_shift_report(closing_name, printer_name=None):
                     "item_name": item.item_name,
                     "item_group": item.item_group
                 }
+
             items_summary[key]["qty"] += flt(item.qty)
             items_summary[key]["amount"] += flt(item.amount)
     
@@ -1845,7 +1860,7 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("-" * 32)
     lines.append(format_row("Sub Total", total_qty, fmt_amt(net_total)))
     lines.append(format_lr("Discount", fmt_amt(total_discount)))
-    lines.append(format_row("Total Dine In", total_qty, fmt_amt(net_total)))
+    lines.append(format_row("Total Sales", total_qty, fmt_amt(net_total)))
     lines.append("")
     
     # --- Grand Total ---
@@ -1881,6 +1896,15 @@ def print_shift_report(closing_name, printer_name=None):
         amount = pay.expected_amount
         lines.append(format_lr(mop[:20], fmt_amt(amount)))
     
+    # VOID MENU
+    lines.append("")
+    lines.append("VOID MENU")
+    lines.append("-" * 32)
+
+    lines.append(format_lr("Total Qty", int(void_qty)))
+    lines.append(format_lr("Total Amount", fmt_amt(void_amount)))
+    lines.append("")
+
     # Akhir
     lines.append("")
     lines.append("")
@@ -1955,45 +1979,16 @@ def print_end_day_report_v2(report_data, printer_name=None):
     discount_by_order_type = report_data.get("discount_by_order_type", {})
     draft = report_data.get("draft", {})
     void_bill = report_data.get("void_bill", {})
+    void_menu = report_data.get("void_menu", {})
 
     # =========================
     # HEADER
     # =========================
 
-    lines.append("END DAY REPORT".center(WIDTH))
+    lines.append("Consolidate Sales".center(WIDTH))
     lines.append(f"Date   : {posting_date}")
-    lines.append(f"Outlet : {outlet}")
+    lines.append(f"Shop   : {outlet}")
     lines.append(line())
-
-    # =========================
-    # SALES SUMMARY
-    # =========================
-
-    lines.append("SALES SUMMARY")
-    lines.append(line())
-
-    lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
-    lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
-
-    for tax_name, amt in taxes.items():
-        lines.append(format_lr(tax_name, fmt_amt(amt)))
-
-    lines.append(line())
-    lines.append(format_lr("GRAND TOTAL", fmt_amt(summary.get("grand_total", 0))))
-    lines.append("")
-
-    # =========================
-    # ORDER SUMMARY
-    # =========================
-
-    total_dine = sum(v["qty"] for v in dine_in.values()) if dine_in else 0
-    total_take = sum(v["qty"] for v in take_away.values()) if take_away else 0
-
-    lines.append("ORDER SUMMARY")
-    lines.append(line())
-    lines.append(format_lr("Dine In Item", total_dine))
-    lines.append(format_lr("Take Away Item", total_take))
-    lines.append("")
 
     # =========================
     # DINE IN SALES
@@ -2001,7 +1996,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     if dine_in:
 
-        lines.append("DINE IN SALES")
+        lines.append("DINE IN")
         lines.append(line())
         lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
         lines.append(line())
@@ -2029,7 +2024,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     if take_away:
 
-        lines.append("TAKE AWAY SALES")
+        lines.append("TAKE AWAY")
         lines.append(line())
         lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
         lines.append(line())
@@ -2052,16 +2047,34 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append("")
 
     # =========================
-    # PAYMENT SUMMARY
+    # SALES SUMMARY
     # =========================
 
-    lines.append("PAYMENT SUMMARY")
+    lines.append("SALES")
     lines.append(line())
 
-    for mop, amt in payments.items():
-        lines.append(format_lr(mop, fmt_amt(amt)))
+    lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
+    lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
 
+    for tax_name, amt in taxes.items():
+        lines.append(format_lr(tax_name, fmt_amt(amt)))
+
+    lines.append(line())
+    lines.append(format_lr("GRAND TOTAL", fmt_amt(summary.get("grand_total", 0))))
     lines.append("")
+
+    # =========================
+    # ORDER SUMMARY
+    # =========================
+
+    # total_dine = sum(v["qty"] for v in dine_in.values()) if dine_in else 0
+    # total_take = sum(v["qty"] for v in take_away.values()) if take_away else 0
+
+    # lines.append("TOTAL ORDER")
+    # lines.append(line())
+    # lines.append(format_lr("Dine In Item", total_dine))
+    # lines.append(format_lr("Take Away Item", total_take))
+    # lines.append("")
 
     # =========================
     # DISCOUNT SUMMARY
@@ -2069,17 +2082,55 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     if discount_by_order_type:
 
-        lines.append("DISCOUNT SUMMARY")
+        lines.append("DISCOUNT")
         lines.append(line())
 
-        for typ, val in discount_by_order_type.items():
-
-            qty = val["total_qty"]
-            amt = val["total_amount"]
-
-            lines.append(format_lr(f"{typ} ({qty})", f"-{fmt_amt(amt)}"))
+        for order_type, discounts in discount_by_order_type.items():
+            lines.append(order_type)
+            
+            for name, val in discounts.items():
+                qty = val["total_qty"]
+                amt = val["total_amount"]
+                lines.append(format_lr(f"  {name} ({qty})", f"-{fmt_amt(amt)}"))
 
         lines.append("")
+    
+    # =========================
+    # PAYMENT SUMMARY
+    # =========================
+
+    lines.append("PAYMENT")
+    lines.append(line())
+
+    for mop, amt in payments.items():
+        lines.append(format_lr(mop, fmt_amt(amt)))
+
+    lines.append("")
+        
+    # =========================
+    # VOID MENU
+    # =========================
+    lines.append("VOID ITEM")
+    lines.append(line())
+
+    total_qty = sum(flt(v.get("qty")) for v in void_menu.get("items", []))
+    total_amount = sum(flt(v.get("amount")) for v in void_menu.get("items", []))
+
+    lines.append(format_lr("Total Qty", int(total_qty)))
+    lines.append(format_lr("Total Amount", fmt_amt(total_amount)))
+    lines.append("")
+
+    # =========================
+    # VOID BILL
+    # =========================
+
+    lines.append("VOID BILL")
+    lines.append(line())
+
+    lines.append(format_lr("Total Bill", void_bill.get("total_bill", 0)))
+    lines.append(format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0))))
+
+    lines.append("")
 
     # =========================
     # DRAFT BILL
@@ -2087,7 +2138,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     if draft.get("total_bill"):
 
-        lines.append("DRAFT BILL")
+        lines.append("UNPAID SALES")
         lines.append(line())
 
         for d in draft.get("details", []):
@@ -2102,43 +2153,6 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append(format_lr("Amount", fmt_amt(draft.get("total_amount"))))
         lines.append("")
         
-    # =========================
-    # VOID MENU
-    # =========================
-    lines.append("VOID MENU")
-    lines.append(line())
-    lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
-    lines.append(line())
-
-    total_qty = 0
-    total_amount = 0
-
-    for v in void_menu.get("items", []):
-
-        name = v.get("item_name")
-        qty = v.get("qty")
-        amt = v.get("amount")
-
-        total_qty += qty
-        total_amount += amt
-
-        lines.append(format_item(name, qty, amt))
-
-    lines.append(line())
-    lines.append(format_item("TOTAL", total_qty, total_amount))
-    lines.append("")
-
-    # =========================
-    # VOID BILL
-    # =========================
-
-    lines.append("VOID BILL")
-    lines.append(line())
-
-    lines.append(format_lr("Total Bill", void_bill.get("total_bill", 0)))
-    lines.append(format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0))))
-
-    lines.append("")
     lines.append("END OF REPORT".center(WIDTH))
     lines.append("")
 
