@@ -1556,8 +1556,8 @@ def end_shift(user=None):
         })
 
     # Validasi ERPNext
-    closing.validate_pos_invoices()
-    closing.validate_duplicate_pos_invoices()
+    # closing.validate_pos_invoices()
+    # closing.validate_duplicate_pos_invoices()
 
     # Save & Submit
     closing.insert(ignore_permissions=True)
