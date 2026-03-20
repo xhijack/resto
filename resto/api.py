@@ -1556,14 +1556,15 @@ def end_shift(user=None, is_submit=True):
         })
 
     # Validasi ERPNext
-    # closing.validate_pos_invoices()
-    # closing.validate_duplicate_pos_invoices()
+    closing.validate_pos_invoices()
+    closing.validate_duplicate_pos_invoices()
 
     # Save & Submit
     closing.insert()
-    closing.reload()
+    frappe.db.commit()
     if is_submit:
-        closing.on_submit()
+        closing = frappe.get_doc("POS Closing Entry", closing.name)
+        closing.submit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
