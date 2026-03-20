@@ -1415,7 +1415,7 @@ def get_end_day_report_v2():
     return result
 
 @frappe.whitelist()
-def end_shift(user=None):
+def end_shift(user=None, is_submit=True):
     from .printing import print_shift_report
 
     user = user or frappe.session.user
@@ -1442,10 +1442,10 @@ def end_shift(user=None):
         order_by="posting_date asc, posting_time asc"
     )
 
-    # for invoice in invoices:
-    #     frappe.db.set_value("POS Invoice", invoice.name, "owner", opening.user)
+    for invoice in invoices:
+        frappe.db.set_value("POS Invoice", invoice.name, "owner", opening.user)
 
-    # frappe.db.commit()
+    frappe.db.commit()
 
     if not invoices:
         frappe.throw("Tidak ada POS Invoice")
@@ -1562,7 +1562,8 @@ def end_shift(user=None):
     # Save & Submit
     closing.insert()
     closing.reload()
-    closing.submit()
+    if is_submit:
+        closing.submit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
