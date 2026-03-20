@@ -1563,7 +1563,7 @@ def end_shift(user=None, is_submit=True):
     closing.insert()
     closing.reload()
     if is_submit:
-        closing.submit()
+        closing.on_submit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
