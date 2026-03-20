@@ -1391,19 +1391,20 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         "POS Invoice",
         filters=void_bill_filters
     )
+    print(void_bill_filters)
     for item in void_menus:
         void_items = frappe.get_all(
             "POS Invoice Item",
             filters={
                 "parent": item.name,
                 "is_void_printed": 1
-              },
+                },
             
             fields=["void_qty", "void_rate"]
         )
         for vi in void_items:
             void_summary["total_qty"] += int(vi.void_qty or 0)
-            void_summary["total_amount"] += flt(vi.void_rate or 0) 
+            void_summary["total_amount"] += flt((vi.void_rate * vi.void_qty) or 0) 
 
     # =====================================================
     # 10. RESPONSE
