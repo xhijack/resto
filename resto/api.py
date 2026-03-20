@@ -1380,6 +1380,39 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     }
 
     # =====================================================
+    # 9.1. VOID Item
+    # =====================================================
+    void_summary = {
+        "total_qty": 0,
+        "total_amount": 0
+    }
+
+    void_menus  = frappe.get_all(
+        "POS Invoice",
+        filters=void_bill_filters
+    )
+    for item in void_menus:
+        void_items = frappe.db.sql("""
+            SELECT
+                item_name,
+                SUM(qty) AS qty,
+                SUM(
+                    CASE
+                        WHEN IFNULL(void_amount,0) > 0 THEN void_amount
+                        ELSE void_rate * void_qty
+                    END
+                ) AS amount
+            FROM `tabPOS Invoice Item`
+            WHERE parent = %(parent)s
+            AND status_kitchen = 'Void Menu'
+            GROUP BY item_name
+        """, {"parent": item.name}, as_dict=True)
+        void_summary["total_qty"] += sum(int(v.qty or 0) for v in void_items)
+        void_summary["total_amount"] += sum(flt(v.amount or 0) for v
+            in void_items
+        )  
+
+    # =====================================================
     # 10. RESPONSE
     # =====================================================
     result = {
@@ -1393,7 +1426,8 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         "taxes": tax_summary,
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
-        "void_bill": void_bill_summary
+        "void_bill": void_bill_summary,
+        "void_menu": void_summary
     }
     
     # =====================================================
