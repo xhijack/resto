@@ -1404,7 +1404,7 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
                 ) AS amount
             FROM `tabPOS Invoice Item`
             WHERE parent = %(parent)s
-            AND status_kitchen = 'Void Menu'
+            AND is_void_printed = 1
             GROUP BY item_name
         """, {"parent": item.name}, as_dict=True)
         void_summary["total_qty"] += sum(int(v.qty or 0) for v in void_items)
