@@ -1398,6 +1398,7 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
                 "parent": item.name,
                 "is_void_printed": 1
               },
+            
             fields=["void_qty", "void_rate"]
         )
         for vi in void_items:
