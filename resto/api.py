@@ -1182,12 +1182,12 @@ import frappe
 from frappe.utils import flt
 
 @frappe.whitelist()
-def get_end_day_report_v2():
+def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     from .printing import print_end_day_report_v2
-    
-    posting_date = frappe.form_dict.get("posting_date")
-    outlet = frappe.form_dict.get("outlet")
-    do_print = frappe.form_dict.get("print")
+
+    posting_date = posting_date or frappe.form_dict.get("posting_date")
+    outlet = outlet or frappe.form_dict.get("outlet")
+    do_print = do_print or frappe.form_dict.get("print")
 
     if not posting_date or not outlet:
         frappe.throw("posting_date dan outlet wajib diisi")
@@ -1380,6 +1380,38 @@ def get_end_day_report_v2():
     }
 
     # =====================================================
+    # 9.1. VOID Item
+    # =====================================================
+    void_summary = {
+        "total_qty": 0,
+        "total_amount": 0
+    }
+    normal_filters = {
+        "docstatus": 1,
+        "posting_date": posting_date,
+        "status": ["in", ["Paid", "Consolidated"]],
+        "branch": outlet
+    }
+
+    void_menus  = frappe.get_all(
+        "POS Invoice",
+        filters=normal_filters
+    )
+    for item in void_menus:
+        void_items = frappe.get_all(
+            "POS Invoice Item",
+            filters={
+                "parent": item.name,
+                "is_void_printed": 1
+                },
+            
+            fields=["void_qty", "void_rate"]
+        )
+        for vi in void_items:
+            void_summary["total_qty"] += int(vi.void_qty or 0)
+            void_summary["total_amount"] += flt((vi.void_rate * vi.void_qty) or 0) 
+
+    # =====================================================
     # 10. RESPONSE
     # =====================================================
     result = {
@@ -1393,7 +1425,8 @@ def get_end_day_report_v2():
         "taxes": tax_summary,
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
-        "void_bill": void_bill_summary
+        "void_bill": void_bill_summary,
+        "void_menu": void_summary
     }
     
     # =====================================================

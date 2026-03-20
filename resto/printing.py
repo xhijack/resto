@@ -2176,14 +2176,14 @@ def print_end_day_report_v2(report_data, printer_name=None):
     # =========================
     # VOID MENU
     # =========================
-    lines.append("VOID ITEM")
+    lines.append("VOID MENU")
     lines.append(line())
 
-    total_qty = sum(flt(v.get("qty")) for v in void_menu.get("items", []))
-    total_amount = sum(flt(v.get("amount")) for v in void_menu.get("items", []))
+    # total_qty = sum(flt(v.get("qty")) for v in void_menu.get("items", []))
+    # total_amount = sum(flt(v.get("amount")) for v in void_menu.get("items", []))
 
-    lines.append(format_lr("Total Qty", int(total_qty)))
-    lines.append(format_lr("Total Amount", fmt_amt(total_amount)))
+    lines.append(format_lr("Total Qty", int(void_menu['total_qty'])))
+    lines.append(format_lr("Total Amount", fmt_amt(void_menu['total_amount'])))
     lines.append("")
 
     # =========================
@@ -2294,9 +2294,9 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
                 out += (f"  + {a}\n").encode("ascii", "ignore")
 
         # Notes
-        notes = it.get("quick_notes") or ""
-        if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+        # notes = it.get("quick_notes") or ""
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("ascii", "ignore")
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += _esc_feed(5)
