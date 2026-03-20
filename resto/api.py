@@ -1563,8 +1563,8 @@ def end_shift(user=None, is_submit=True):
     closing.insert()
     frappe.db.commit()
     if is_submit:
-        closing = frappe.get_doc("POS Closing Entry", closing.name)
-        closing.submit()
+        closing1 = frappe.get_doc("POS Closing Entry", closing.name)
+        closing1.submit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
