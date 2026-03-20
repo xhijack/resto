@@ -1397,7 +1397,6 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         "POS Invoice",
         filters=normal_filters
     )
-    print(normal_filters)
     for item in void_menus:
         void_items = frappe.get_all(
             "POS Invoice Item",
