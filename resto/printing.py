@@ -1944,8 +1944,10 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
     # Tampilkan semua pajak dari child table taxes
     for tax in closing.taxes:
-        # Ambil nama akun (misal "SVC - Toko")
-        tax_name = tax.account_head.split(" - ")[0]  # ambil bagian sebelum kode perusahaan
+        parts = [p.strip() for p in tax.account_head.split(" - ")]
+
+        tax_name = parts[1] if len(parts) > 2 else parts[0]
+
         lines.append(format_lr(tax_name[:20], fmt_amt(tax.amount)))
     # Total Sales (mungkin net total)
     lines.append(format_lr("Total Sales", fmt_amt(net_total)))
