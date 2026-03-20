@@ -1415,7 +1415,7 @@ def get_end_day_report_v2():
     return result
 
 @frappe.whitelist()
-def end_shift(user=None):
+def end_shift(user=None, is_submit=True):
     from .printing import print_shift_report
 
     user = user or frappe.session.user
@@ -1560,8 +1560,12 @@ def end_shift(user=None):
     closing.validate_duplicate_pos_invoices()
 
     # Save & Submit
-    closing.insert(ignore_permissions=True)
-    closing.submit()
+    closing.insert()
+    frappe.db.commit()
+    if is_submit:
+        closing1 = frappe.get_doc("POS Closing Entry", closing.name)
+        closing1.submit()
+        frappe.db.commit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
