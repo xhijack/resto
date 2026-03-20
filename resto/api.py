@@ -1386,12 +1386,18 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         "total_qty": 0,
         "total_amount": 0
     }
+    normal_filters = {
+        "docstatus": 1,
+        "posting_date": posting_date,
+        "status": ["in", ["Paid", "Consolidated"]],
+        "branch": outlet
+    }
 
     void_menus  = frappe.get_all(
         "POS Invoice",
-        filters=outlet_filter
+        filters=normal_filters
     )
-    print(outlet_filter)
+    print(normal_filters)
     for item in void_menus:
         void_items = frappe.get_all(
             "POS Invoice Item",
