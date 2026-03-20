@@ -2294,9 +2294,9 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
                 out += (f"  + {a}\n").encode("ascii", "ignore")
 
         # Notes
-        notes = it.get("quick_notes") or ""
-        if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+        # notes = it.get("quick_notes") or ""
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("ascii", "ignore")
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += _esc_feed(5)
