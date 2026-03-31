@@ -2119,6 +2119,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("SALES")
     lines.append(line())
 
+    lines.append(format_lr("Total Pax", summary.get("total_pax", 0)))
     lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
     lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
 

@@ -434,4 +434,25 @@ def after_migrate():
                 "insert_after": "taxes_and_charges"
             }).insert(ignore_permissions=True)
             
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "pax"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "pax",
+                "label": "Pax",
+                "fieldtype": "Int",
+                "insert_after": "paid_by"
+            }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "type_customer"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "type_customer",
+                "label": "Type Customer",
+                "fieldtype": "Select",
+                "options": "\nPersonal\nFamily\nCorporate",
+                "insert_after": "pax"
+            }).insert(ignore_permissions=True)
+        
     add_custom_field()

@@ -290,6 +290,8 @@ def create_pos_invoice(payload):
     discount_amount  = payload.get("discount_amount")
     discount_for_bank  = payload.get("discount_for_bank") or ""
     discount_name    = payload.get("discount_name") or ""
+    pax              = payload.get("pax")
+    type_customer    = payload.get("type_customer")
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
 
@@ -342,7 +344,9 @@ def create_pos_invoice(payload):
         "discount_amount": discount_amount,
         "discount_for_bank": discount_for_bank,
         "discount_name": discount_name,
-        "ordered_by": frappe.session.user
+        "ordered_by": frappe.session.user,
+        "pax": pax,
+        "type_customer": type_customer
     })
 
     # Tambahkan item utama
@@ -1267,12 +1271,19 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         FROM `tabSales Taxes and Charges`
         WHERE parent IN %(inv)s
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
+    
+    total_pax = frappe.db.sql("""
+        SELECT SUM(pax)
+        FROM `tabPOS Invoice`
+        WHERE name IN %(inv)s
+    """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     summary = {
         "sub_total": int(sub_total),
         "discount": int(discount),
         "tax": int(tax),
-        "grand_total": int(sub_total + tax - discount)
+        "grand_total": int(sub_total + tax - discount),
+        "total_pax": int(total_pax)
     }
 
     # =====================================================
