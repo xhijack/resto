@@ -26,6 +26,34 @@ class TestCreatePOSInvoice(RestoPOSTestBase):
         
         # Set default company di Global Defaults
         self._ensure_global_defaults()
+
+        
+        test_role = "System Manager"  # biasanya sudah ada di test user
+
+        # Tambahkan permission agar test existing tetap jalan
+        test_role = "System Manager"
+
+        self._setup_permissions(test_role, [
+            "Allow Create POS Invoice"
+        ])
+
+
+    def _setup_permissions(self, role, permissions):
+        if isinstance(permissions, str):
+            permissions = [permissions]
+
+        settings = frappe.get_single("Resto Settings")
+
+        # clear dulu biar gak duplicate
+        settings.permissions = []
+
+        for p in permissions:
+            settings.append("permissions", {
+                "role": role,
+                "permission": p
+            })
+
+        settings.save(ignore_permissions=True)
     
     def _ensure_global_defaults(self):
         """Pastikan default company tersetting"""
@@ -288,3 +316,5 @@ class TestCreatePOSInvoice(RestoPOSTestBase):
         
         with self.assertRaises(frappe.ValidationError):
             create_pos_invoice(payload)
+
+    

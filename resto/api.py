@@ -1,4 +1,4 @@
-from erpnext.apps.resto.resto.decorator import check_permission
+from .decorator import check_permission
 import frappe
 from frappe import _
 import json
@@ -268,6 +268,7 @@ def get_select_options(doctype, fieldname):
 
     return {"options": options}
 
+@check_permission("Allow Create POS Invoice")
 def create_pos_invoice(payload):
     """
     Fungsi reusable untuk membuat & submit POS Invoice.
@@ -501,7 +502,6 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
         return None
 
 
-@check_permission("Allow Send to Kitchen")
 @frappe.whitelist()
 def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
                     customer=None, type_customer=None, orders=None, checked=None):
