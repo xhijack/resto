@@ -1,3 +1,4 @@
+from erpnext.apps.resto.resto.decorator import check_permission
 import frappe
 from frappe import _
 import json
@@ -499,6 +500,8 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
         frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
         return None
 
+
+@check_permission("Allow Send to Kitchen")
 @frappe.whitelist()
 def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
                     customer=None, type_customer=None, orders=None, checked=None):
