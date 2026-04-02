@@ -2180,11 +2180,26 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("VOID MENU")
     lines.append(line())
 
-    # total_qty = sum(flt(v.get("qty")) for v in void_menu.get("items", []))
-    # total_amount = sum(flt(v.get("amount")) for v in void_menu.get("items", []))
+    items = void_menu.get("items", {})
 
-    lines.append(format_lr("Total Qty", int(void_menu['total_qty'])))
-    lines.append(format_lr("Total Amount", fmt_amt(void_menu['total_amount'])))
+    if items:
+        lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
+        lines.append(line())
+
+        for name, val in items.items():
+            qty = val.get("qty", 0)
+            amt = val.get("amount", 0)
+
+            if qty <= 0:
+                continue  # safety
+
+            lines.append(format_item(name, qty, amt))
+
+        lines.append(line())
+
+    # TOTAL
+    lines.append(format_lr("Total Qty", int(void_menu.get('total_qty', 0))))
+    lines.append(format_lr("Total Amount", fmt_amt(void_menu.get('total_amount', 0))))
     lines.append("")
 
     # =========================
@@ -2194,9 +2209,18 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("VOID BILL")
     lines.append(line())
 
+    details = void_bill.get("details", [])
+
+    if details:
+        for v in details:
+            inv = v["invoice"][-8:]
+            amt = fmt_amt(v["amount"])
+            lines.append(format_lr(inv, amt))
+
+        lines.append(line())
+
     lines.append(format_lr("Total Bill", void_bill.get("total_bill", 0)))
     lines.append(format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0))))
-
     lines.append("")
 
     # =========================

@@ -1382,12 +1382,19 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     void_bills = frappe.get_all(
         "POS Invoice",
         filters=void_bill_filters,
-        fields=["grand_total"]
+        fields=["name", "rounded_total"]
     )
 
     void_bill_summary = {
         "total_bill": len(void_bills),
-        "total_amount": sum(flt(v.grand_total) for v in void_bills)
+        "total_amount": sum(flt(v.rounded_total) for v in void_bills),
+        "details": [
+            {
+                "invoice": v.name,
+                "amount": flt(v.rounded_total)
+            }
+            for v in void_bills
+        ]
     }
 
     # =====================================================
@@ -1395,7 +1402,8 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     # =====================================================
     void_summary = {
         "total_qty": 0,
-        "total_amount": 0
+        "total_amount": 0,
+        "items": {}
     }
     normal_filters = {
         "docstatus": 1,
@@ -1414,13 +1422,32 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
             filters={
                 "parent": item.name,
                 "is_void_printed": 1
-                },
-            
-            fields=["void_qty", "void_rate"]
+            },
+            fields=["item_name", "void_qty", "void_rate"]
         )
+
         for vi in void_items:
-            void_summary["total_qty"] += int(vi.void_qty or 0)
-            void_summary["total_amount"] += flt((vi.void_rate * vi.void_qty) or 0) 
+            qty = int(vi.void_qty or 0)
+
+            if qty <= 0:
+                continue
+
+            item_name = vi.item_name or "Unknown"
+            amount = flt((vi.void_rate or 0) * qty)
+
+            # total summary
+            void_summary["total_qty"] += qty
+            void_summary["total_amount"] += amount
+
+            # grouping per item
+            if item_name not in void_summary["items"]:
+                void_summary["items"][item_name] = {
+                    "qty": 0,
+                    "amount": 0
+                }
+
+            void_summary["items"][item_name]["qty"] += qty
+            void_summary["items"][item_name]["amount"] += amount
 
     # =====================================================
     # 10. RESPONSE
