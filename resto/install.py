@@ -182,6 +182,29 @@ def after_migrate():
                 "fieldtype": "Data",
                 "insert_after": "status_kitchen"
             }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {'fieldname': 'is_merged', 'dt': 'POS Invoice'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "is_merged",
+                "label": "Is Merged",
+                "fieldtype": "Check",
+                "insert_after": "queue",
+                "default": 0,
+                "read_only": 1,
+            }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {'fieldname': 'merge_invoice', 'dt': 'POS Invoice'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "merge_invoice",
+                "label": "Merge Invoice",
+                "fieldtype": "Data",
+                "insert_after": "is_merged",
+                "read_only": 1,
+            }).insert(ignore_permissions=True)
 
         if not frappe.db.exists("Custom Field", {'fieldname': "branch", "dt": "POS Invoice"}):
             frappe.get_doc({
@@ -411,4 +434,25 @@ def after_migrate():
                 "insert_after": "taxes_and_charges"
             }).insert(ignore_permissions=True)
             
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "pax"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "pax",
+                "label": "Pax",
+                "fieldtype": "Int",
+                "insert_after": "paid_by"
+            }).insert(ignore_permissions=True)
+        
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "type_customer"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "type_customer",
+                "label": "Type Customer",
+                "fieldtype": "Select",
+                "options": "\nPersonal\nFamily\nCorporate",
+                "insert_after": "pax"
+            }).insert(ignore_permissions=True)
+        
     add_custom_field()

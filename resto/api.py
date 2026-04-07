@@ -289,6 +289,8 @@ def create_pos_invoice(payload):
     discount_amount  = payload.get("discount_amount")
     discount_for_bank  = payload.get("discount_for_bank") or ""
     discount_name    = payload.get("discount_name") or ""
+    pax              = payload.get("pax")
+    type_customer    = payload.get("type_customer")
 
     company = frappe.db.get_single_value("Global Defaults", "default_company")
 
@@ -341,7 +343,9 @@ def create_pos_invoice(payload):
         "discount_amount": discount_amount,
         "discount_for_bank": discount_for_bank,
         "discount_name": discount_name,
-        "ordered_by": frappe.session.user
+        "ordered_by": frappe.session.user,
+        "pax": pax,
+        "type_customer": type_customer
     })
 
     # Tambahkan item utama
@@ -1183,12 +1187,12 @@ import frappe
 from frappe.utils import flt
 
 @frappe.whitelist()
-def get_end_day_report_v2():
+def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     from .printing import print_end_day_report_v2
-    
-    posting_date = frappe.form_dict.get("posting_date")
-    outlet = frappe.form_dict.get("outlet")
-    do_print = frappe.form_dict.get("print")
+
+    posting_date = posting_date or frappe.form_dict.get("posting_date")
+    outlet = outlet or frappe.form_dict.get("outlet")
+    do_print = do_print or frappe.form_dict.get("print")
 
     if not posting_date or not outlet:
         frappe.throw("posting_date dan outlet wajib diisi")
@@ -1265,12 +1269,19 @@ def get_end_day_report_v2():
         FROM `tabSales Taxes and Charges`
         WHERE parent IN %(inv)s
     """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
+    
+    total_pax = frappe.db.sql("""
+        SELECT SUM(pax)
+        FROM `tabPOS Invoice`
+        WHERE name IN %(inv)s
+    """, {"inv": tuple(paid_invoice_names)})[0][0] or 0
 
     summary = {
         "sub_total": int(sub_total),
         "discount": int(discount),
         "tax": int(tax),
-        "grand_total": int(sub_total + tax - discount)
+        "grand_total": int(sub_total + tax - discount),
+        "total_pax": int(total_pax)
     }
 
     # =====================================================
@@ -1372,13 +1383,72 @@ def get_end_day_report_v2():
     void_bills = frappe.get_all(
         "POS Invoice",
         filters=void_bill_filters,
-        fields=["grand_total"]
+        fields=["name", "rounded_total"]
     )
 
     void_bill_summary = {
         "total_bill": len(void_bills),
-        "total_amount": sum(flt(v.grand_total) for v in void_bills)
+        "total_amount": sum(flt(v.rounded_total) for v in void_bills),
+        "details": [
+            {
+                "invoice": v.name,
+                "amount": flt(v.rounded_total)
+            }
+            for v in void_bills
+        ]
     }
+
+    # =====================================================
+    # 9.1. VOID Item
+    # =====================================================
+    void_summary = {
+        "total_qty": 0,
+        "total_amount": 0,
+        "items": {}
+    }
+    normal_filters = {
+        "docstatus": 1,
+        "posting_date": posting_date,
+        "status": ["in", ["Paid", "Consolidated"]],
+        "branch": outlet
+    }
+
+    void_menus  = frappe.get_all(
+        "POS Invoice",
+        filters=normal_filters
+    )
+    for item in void_menus:
+        void_items = frappe.get_all(
+            "POS Invoice Item",
+            filters={
+                "parent": item.name,
+                "is_void_printed": 1
+            },
+            fields=["item_name", "void_qty", "void_rate"]
+        )
+
+        for vi in void_items:
+            qty = int(vi.void_qty or 0)
+
+            if qty <= 0:
+                continue
+
+            item_name = vi.item_name or "Unknown"
+            amount = flt((vi.void_rate or 0) * qty)
+
+            # total summary
+            void_summary["total_qty"] += qty
+            void_summary["total_amount"] += amount
+
+            # grouping per item
+            if item_name not in void_summary["items"]:
+                void_summary["items"][item_name] = {
+                    "qty": 0,
+                    "amount": 0
+                }
+
+            void_summary["items"][item_name]["qty"] += qty
+            void_summary["items"][item_name]["amount"] += amount
 
     # =====================================================
     # 10. RESPONSE
@@ -1394,7 +1464,8 @@ def get_end_day_report_v2():
         "taxes": tax_summary,
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
-        "void_bill": void_bill_summary
+        "void_bill": void_bill_summary,
+        "void_menu": void_summary
     }
     
     # =====================================================
@@ -1416,10 +1487,10 @@ def get_end_day_report_v2():
     return result
 
 @frappe.whitelist()
-def end_shift():
+def end_shift(user=None, is_submit=True):
     from .printing import print_shift_report
 
-    user = frappe.session.user
+    user = user or frappe.session.user
 
     # POS Opening Entry aktif
     opening_info = get_active_pos_profile_for_user(user)
@@ -1561,8 +1632,12 @@ def end_shift():
     closing.validate_duplicate_pos_invoices()
 
     # Save & Submit
-    closing.insert(ignore_permissions=True)
-    closing.submit()
+    closing.insert()
+    frappe.db.commit()
+    if is_submit:
+        closing1 = frappe.get_doc("POS Closing Entry", closing.name)
+        closing1.submit()
+        frappe.db.commit()
 
     try:
         default_printer_receipt = frappe.db.get_value("Printer Settings", opening.branch, "default_printer_receipt")
@@ -1858,3 +1933,252 @@ def print_void_to_other_station(pos_invoice, items_to_print, branch):
         for printer in branch_menu.printers:
             raw = build_void_item_receipt(pos_invoice, items_to_print)
             cups_print_raw(raw, printer.printer_name)
+
+
+@frappe.whitelist()
+def move_table(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def merge_table(pos_invoice, source_table, target_table=[]):
+    """
+    Memindahkan semua item dari invoice yang ada di meja target ke dalam invoice sumber (pos_invoice),
+    lalu memperbarui referensi invoice di meja target menjadi pos_invoice.
+    """
+    # Validasi
+    if not source_table:
+        frappe.throw("Source table harus diisi")
+    if not target_table:
+        frappe.throw("Target table tidak boleh kosong")
+
+    # Cek keberadaan source table
+    if not frappe.db.exists("Table", source_table):
+        frappe.throw(f"Meja {source_table} tidak ditemukan")
+
+    # Cek keberadaan pos_invoice
+    if not frappe.db.exists("POS Invoice", pos_invoice):
+        frappe.throw(f"Invoice {pos_invoice} tidak ditemukan")
+
+    # Ambil dokumen source invoice
+    target_invoice_doc = frappe.get_doc("POS Invoice", pos_invoice)
+
+    # Loop setiap target table
+    for target_name in target_table:
+        if target_name == source_table:
+            frappe.msgprint(f"Meja {target_name} sama dengan sumber, dilewati")
+            continue
+
+        if not frappe.db.exists("Table", target_name):
+            frappe.msgprint(f"Meja {target_name} tidak ditemukan, dilewati")
+            continue
+
+        target_table_doc = frappe.get_doc("Table", target_name)
+
+        # Ambil semua invoice dari child table orders
+        invoice_names = [row.invoice_name for row in target_table_doc.get("orders") if row.invoice_name]
+
+        # Proses setiap invoice target
+        for inv_name in invoice_names:
+            # Pindahkan item dari invoice target ke invoice source
+            move_items_from_invoice(inv_name, pos_invoice)
+
+            # Update baris orders di meja target: ubah invoice_name menjadi pos_invoice
+            # Kita loop semua baris orders yang memiliki invoice_name == inv_name, ubah
+            for row in target_table_doc.get("orders"):
+                if row.invoice_name == inv_name:
+                    row.invoice_name = pos_invoice
+
+            # Opsional: Batalkan invoice target (misal ubah status jadi Cancelled)
+            # cancel_invoice(inv_name)
+
+        # Simpan perubahan meja target
+        target_table_doc.save()
+
+    delete_merge_invoice(pos_invoice)
+    return {
+        "ok": True,
+        "message": f"Berhasil menggabungkan {len(target_table)} meja ke {source_table}"
+    }
+
+def move_items_from_invoice(source_invoice_name, target_invoice_name):
+    """Memindahkan semua item dari source_invoice ke target_invoice."""
+    source_invoice = frappe.get_doc("POS Invoice", source_invoice_name)
+    target_invoice = frappe.get_doc("POS Invoice", target_invoice_name)
+
+    for item in source_invoice.get("items"):
+        # Salin field item, kecuali field parent, name, idx
+        new_item = {}
+        for field in item.meta.get_fieldnames_with_value():
+            if field not in ["name", "parent", "parenttype", "parentfield", "idx"]:
+                new_item[field] = item.get(field)
+
+        # Tambahkan item ke target invoice
+        target_invoice.append("items", new_item)
+
+    # Simpan target invoice
+    source_invoice.is_merged = 1
+    source_invoice.merge_invoice = target_invoice_name
+    source_invoice.save()
+    target_invoice.save()
+
+
+@frappe.whitelist()
+def move_item(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def split_bill(pos_invoice):
+    pass
+
+@frappe.whitelist()
+def remove_item(pos_invoice, item_code, qty):
+    pass
+    # removeitem dengan status VOID MENU
+    # pi = frappe.get_doc("POS Invoice", pos_invoice)
+    # pi.save()
+    # return pi.as_dict()
+
+@frappe.whitelist()
+def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None,  user=None):
+    """
+    Docstring for apply_discount
+    
+    :param pos_invoice: Description
+    :param discount_percentage: Description
+    :param discount_amount: Description
+    :param user: Description
+    """
+    user = frappe.session.user or user
+    doc = frappe.get_doc("POS Invoice", pos_invoice)
+    current_pos_profile = get_active_pos_profile_for_user(user)
+    pos_profile = frappe.get_doc("POS Profile", current_pos_profile['pos_profile'], "taxes_and_charges")
+
+    if not doc.taxes_and_charges:
+        doc.taxes_and_charges = pos_profile.taxes_and_charges
+        doc.set_taxes()
+
+    charge_type = None
+    tax_rate = 0
+    tax_amount = 0
+
+    discount_percentage = float(discount_percentage or 0)
+    discount_amount = float(discount_amount or 0)
+
+    if discount_percentage > 0:
+        charge_type = "On Net Total"
+        tax_rate = -abs(discount_percentage)
+    elif discount_amount > 0:
+        charge_type = "Actual"
+        tax_amount = -abs(discount_amount)
+    elif discount_percentage == 0 and discount_amount == 0:
+        # reset discount
+        charge_type = "Actual"
+        taxt_rate = 0
+        tax_amount = 0
+    else:
+        frappe.throw("Tidak ada discount yang diterapkan. Mohon isi discount_percentage atau discount_amount")
+
+    # cek apakah sudah ada baris discount
+    discount_row = None
+    for tax in doc.taxes:
+        if tax.description == "Discount":
+            discount_row = tax
+            break
+    # cek account head
+    account_head = None
+    tax_template = frappe.get_doc(
+        "Sales Taxes and Charges Template",
+        pos_profile.taxes_and_charges
+    )
+    for t in tax_template.taxes:
+        if t.description == "Discount":
+            account_head = t.account_head
+            break
+
+    if discount_row:
+        discount_row.charge_type = charge_type
+        discount_row.rate = tax_rate
+        discount_row.tax_amount = tax_amount
+    else:
+        doc.append("taxes", {
+            "description": "Discount",
+            "charge_type": charge_type,
+            "account_head": account_head,
+            "rate": tax_rate,
+            "tax_amount": tax_amount
+        })
+        
+    # 🔧 FIX row reference error
+    for tax in doc.taxes:
+        if tax.charge_type not in ["On Previous Row Amount", "On Previous Row Total"]:
+            tax.row_id = None
+    
+    doc.calculate_taxes_and_totals()
+    doc.discount_name = discount_name
+    doc.discount_for_bank = discount_for_bank
+    doc.save()
+    frappe.db.commit()
+    return {"ok": True, "message": "Diskon berhasil diterapkan", "pos_invoice": pos_invoice}
+        
+@frappe.whitelist()
+def remove_discount(pos_invoice):
+    doc = frappe.get_doc("POS Invoice", pos_invoice)
+    taxes = doc.taxes
+    for tax in taxes:
+        if tax.description == "Discount":
+            doc.remove(tax)
+            doc.save()
+            frappe.db.commit()
+            return {"ok": True, "message": "Diskon berhasil dihapus", "pos_invoice": pos_invoice}
+    return {"ok": False, "message": "Tidak ditemukan diskon untuk dihapus"}
+
+@frappe.whitelist()
+def create_payment(pos_invoice, amount, mode_of_payment):
+    doc = frappe.get_doc("POS Invoice", pos_invoice)
+    doc.append("payments", {
+        "mode_of_payment": mode_of_payment,
+        "amount": amount
+    })
+    doc.submit()
+    
+    clear_table_merged(pos_invoice)
+
+    frappe.db.commit()
+    return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
+
+def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
+    tables = frappe.get_all(
+        "Table Order",
+        filters={"invoice_name": pos_invoice_name},
+        fields=["parent"],
+        distinct=True
+    )
+
+    return ", ".join([t["parent"] for t in tables])
+
+def clear_table_merged(pos_invoice):
+    """Fungsi untuk mengosongkan meja setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
+    tables = get_table_names_from_pos_invoice(pos_invoice)
+    for table in tables.split(", "):
+        clear_table(table)
+
+def delete_merge_invoice(pos_invoice):
+    """Fungsi untuk menghapus invoice setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
+    invoices = frappe.get_all(
+        "POS Invoice",
+        filters={"merge_invoice": pos_invoice},
+        fields=["name"]
+    )
+    for inv in invoices:
+        doc = frappe.get_doc("POS Invoice", inv.name)
+        doc.delete()
+    
+def clear_table(table_name):
+    """Hati-hati menggunakan fungsi ini, pastikan table_name benar-benar tabel yang ingin dikosongkan"""
+    table = frappe.get_doc("Table", table_name)
+    table.orders = []
+    table.customer = None
+    table.taken_by = None
+    table.status = "Kosong"
+    table.type_customer = None
+    table.save()

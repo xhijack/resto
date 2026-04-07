@@ -96,40 +96,40 @@ def exclude_void_items_from_total(doc, method):
     # =====================
     # RECALC TOTAL MANUAL
     # =====================
-    doc.net_total = sum(flt(i.net_amount) for i in doc.items)
-    doc.base_net_total = sum(flt(i.base_net_amount) for i in doc.items)
+    # doc.net_total = sum(flt(i.net_amount) for i in doc.items)
+    # doc.base_net_total = sum(flt(i.base_net_amount) for i in doc.items)
 
-    total_tax = 0
-    base_total_tax = 0
+    # total_tax = 0
+    # base_total_tax = 0
 
-    for tax in doc.taxes:
-        if tax.charge_type == "On Net Total":
-            tax.tax_amount = flt(doc.net_total * tax.rate / 100)
-            tax.base_tax_amount = flt(doc.base_net_total * tax.rate / 100)
-        tax.total = doc.net_total + tax.tax_amount
-        tax.base_total = doc.base_net_total + tax.base_tax_amount
-        total_tax += tax.tax_amount
-        base_total_tax += tax.base_tax_amount
+    # for tax in doc.taxes:
+    #     if tax.charge_type == "On Net Total":
+    #         tax.tax_amount = flt(doc.net_total * tax.rate / 100)
+    #         tax.base_tax_amount = flt(doc.base_net_total * tax.rate / 100)
+    #     tax.total = doc.net_total + tax.tax_amount
+    #     tax.base_total = doc.base_net_total + tax.base_tax_amount
+    #     total_tax += tax.tax_amount
+    #     base_total_tax += tax.base_tax_amount
 
-    doc.total_taxes_and_charges = total_tax
-    doc.base_total_taxes_and_charges = base_total_tax
+    # doc.total_taxes_and_charges = total_tax
+    # doc.base_total_taxes_and_charges = base_total_tax
 
-    doc.grand_total = doc.net_total + total_tax - flt(doc.discount_amount)
-    doc.base_grand_total = doc.base_net_total + base_total_tax - flt(doc.base_discount_amount)
-    doc.rounded_total = flt(doc.grand_total, doc.precision("rounded_total"))
-    doc.base_rounded_total = flt(doc.base_grand_total, doc.precision("base_rounded_total"))
+    # doc.grand_total = doc.net_total + total_tax - flt(doc.discount_amount)
+    # doc.base_grand_total = doc.base_net_total + base_total_tax - flt(doc.base_discount_amount)
+    # doc.rounded_total = flt(doc.grand_total, doc.precision("rounded_total"))
+    # doc.base_rounded_total = flt(doc.base_grand_total, doc.precision("base_rounded_total"))
 
     # =====================
     # PAYMENT SYNC (ANTI PARTIAL)
     # =====================
-    if doc.is_pos:
-        gt = flt(doc.rounded_total or doc.grand_total)
-        doc.paid_amount = gt
-        doc.base_paid_amount = gt
-        for p in doc.payments:
-            p.amount = gt
-            p.base_amount = gt
-        doc.outstanding_amount = 0
+    # if doc.is_pos:
+    #     gt = flt(doc.rounded_total or doc.grand_total)
+    #     doc.paid_amount = gt
+    #     doc.base_paid_amount = gt
+    #     for p in doc.payments:
+    #         p.amount = gt
+    #         p.base_amount = gt
+    #     doc.outstanding_amount = 0
 
 def lock_void_value_after_submit(doc, method):
     for item in doc.items:
