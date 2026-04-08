@@ -1899,7 +1899,7 @@ def print_shift_report(closing_name, printer_name=None):
     # Nama toko / profil POS
     pos_profile = closing.pos_profile
     lines.append(f"Shop: {pos_profile}")
-    lines.append(f"PVJ: {pos_profile}")  # bisa disesuaikan dengan cabang
+    # lines.append(f"PVJ: {pos_profile}")  # bisa disesuaikan dengan cabang
     lines.append("# PAID SALES")
     lines.append("")
     
@@ -1939,7 +1939,7 @@ def print_shift_report(closing_name, printer_name=None):
     # --- Rincian Pajak ---
     lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
-    lines.append(f"PVJ: {pos_profile}")
+    # lines.append(f"PVJ: {pos_profile}")
     lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
     # Tampilkan semua pajak dari child table taxes
