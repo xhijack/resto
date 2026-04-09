@@ -1829,13 +1829,32 @@ def print_shift_report(closing_name, printer_name=None):
     # Kumpulkan data item per invoice
     items_summary = {}  # key: (item_code, item_name, item_group)
     total_discount = 0
+    discount_map = {}
     void_qty = 0
     void_amount = 0
     for inv in invoices:
         # DISCOUNT (AMBIL DARI TAX TABLE)
+        discount_added = False
+
         for tax in inv.taxes:
-            if tax.description and "discount" in tax.description.lower():
-                total_discount += abs(flt(tax.tax_amount))
+            if not tax.description or "discount" not in tax.description.lower():
+                continue
+
+            total_discount += abs(flt(tax.tax_amount))
+
+            key = f"{inv.discount_for_bank or ''} {inv.discount_name or 'No Name'}"
+
+            if key not in discount_map:
+                discount_map[key] = {
+                    "total_bill": 0,
+                    "total_amount": 0
+                }
+
+            discount_map[key]["total_amount"] += abs(flt(tax.tax_amount))
+
+            if not discount_added:
+                discount_map[key]["total_bill"] += 1
+                discount_added = True
 
         # ITEMS
         for item in inv.items:
@@ -1923,7 +1942,7 @@ def print_shift_report(closing_name, printer_name=None):
     total_qty = closing.total_quantity
     lines.append("-" * 32)
     lines.append(format_row("Sub Total", total_qty, fmt_amt(net_total)))
-    lines.append(format_lr("Discount", fmt_amt(total_discount)))
+    lines.append(format_lr("Discount", f"-{fmt_amt(total_discount)}"))
     lines.append(format_row("Total Sales", total_qty, fmt_amt(net_total)))
     lines.append("")
     
@@ -1931,16 +1950,32 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
-    lines.append(format_lr("Discount", fmt_amt(total_discount)))
+    lines.append(format_lr("Discount", f"-{fmt_amt(total_discount)}"))
     grand_total = closing.grand_total
     lines.append(format_row("Grand Total", total_qty, fmt_amt(grand_total)))
     lines.append("")
+    
+    # --- Discount Detail ---
+    if discount_map:
+
+        lines.append("DISCOUNT")
+        lines.append("-" * 32)
+
+        for name, val in discount_map.items():
+            qty = val["total_bill"]
+            amt = val["total_amount"]
+
+            lines.append(
+                format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
+            )
+
+        lines.append("")
     
     # --- Rincian Pajak ---
     lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     # lines.append(f"PVJ: {pos_profile}")
-    lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
+    # lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
     # Tampilkan semua pajak dari child table taxes
     for tax in closing.taxes:
@@ -2147,18 +2182,18 @@ def print_end_day_report_v2(report_data, printer_name=None):
     # DISCOUNT SUMMARY
     # =========================
 
-    if discount_by_order_type:
+    if discount_order_type:
 
         lines.append("DISCOUNT")
         lines.append(line())
 
-        for order_type, discounts in discount_by_order_type.items():
-            lines.append(order_type)
-            
-            for name, val in discounts.items():
-                qty = val["total_qty"]
-                amt = val["total_amount"]
-                lines.append(format_lr(f"  {name} ({qty})", f"-{fmt_amt(amt)}"))
+        for name, val in discount_order_type.items():
+            qty = val["total_bill"]
+            amt = val["total_amount"]
+
+            lines.append(
+                format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
+            )
 
         lines.append("")
     

@@ -1337,19 +1337,21 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     # =====================================================
     discount_by_order_type = frappe.db.sql("""
         SELECT
-            order_type,
-            COUNT(name) total_bill,
-            SUM(discount_amount) total_amount
-        FROM `tabPOS Invoice`
-        WHERE name IN %(inv)s
-        AND discount_amount > 0
-        GROUP BY order_type
+            pi.discount_for_bank,
+            pi.discount_name,
+            COUNT(DISTINCT pi.name) total_bill,
+            SUM(stc.tax_amount) total_amount
+        FROM `tabSales Taxes and Charges` stc
+        JOIN `tabPOS Invoice` pi ON pi.name = stc.parent
+        WHERE pi.name IN %(inv)s
+        AND stc.tax_amount < 0
+        GROUP BY pi.discount_for_bank, pi.discount_name
     """, {"inv": tuple(paid_invoice_names)}, as_dict=True)
 
     discount_order_type = {
-        d.order_type or "Unknown": {
-            "total_qty": int(d.total_bill),
-            "total_amount": flt(d.total_amount)
+        f"{d.discount_for_bank or ''} {d.discount_name or 'No Name'}": {
+            "total_bill": int(d.total_bill),
+            "total_amount": abs(flt(d.total_amount))
         }
         for d in discount_by_order_type
     }
@@ -1540,6 +1542,7 @@ def end_shift(user=None, is_submit=True):
 
     payment_map = {}
     tax_map = {}
+    discount_map = {}
 
     for row in invoices:
         inv_dt = get_datetime(f"{row.posting_date} {row.posting_time}")
@@ -1565,18 +1568,21 @@ def end_shift(user=None, is_submit=True):
         grand_total += flt(doc.grand_total)
 
         # ---------------- Taxes (Sales Taxes and Charges) ----------------
+        discount_added = False
+
         for t in doc.taxes:
             if not t.tax_amount:
                 continue
 
-            key = (
+            # ================= TAX =================
+            tax_key = (
                 t.account_head,
                 t.charge_type,
                 flt(t.rate)
             )
 
-            if key not in tax_map:
-                tax_map[key] = {
+            if tax_key not in tax_map:
+                tax_map[tax_key] = {
                     "account_head": t.account_head,
                     "charge_type": t.charge_type,
                     "rate": flt(t.rate),
@@ -1584,8 +1590,26 @@ def end_shift(user=None, is_submit=True):
                     "total": 0
                 }
 
-            tax_map[key]["tax_amount"] += flt(t.tax_amount)
-            tax_map[key]["total"] += flt(t.tax_amount)
+            tax_map[tax_key]["tax_amount"] += flt(t.tax_amount)
+            tax_map[tax_key]["total"] += flt(t.tax_amount)
+
+            # ================= DISCOUNT =================
+            if flt(t.tax_amount) >= 0:
+                continue
+
+            discount_key = f"{doc.discount_for_bank or ''} {doc.discount_name or 'No Name'}"
+
+            if discount_key not in discount_map:
+                discount_map[discount_key] = {
+                    "total_bill": 0,
+                    "total_amount": 0
+                }
+
+            discount_map[discount_key]["total_amount"] += abs(flt(t.tax_amount))
+
+            if not discount_added:
+                discount_map[discount_key]["total_bill"] += 1
+                discount_added = True
 
         # ---------------- Payment Scaling ----------------
         payment_rows = doc.payments or []
@@ -1651,7 +1675,8 @@ def end_shift(user=None, is_submit=True):
         "grand_total": closing.grand_total,
         "total_quantity": closing.total_quantity,
         "tax_total": closing.total_taxes_and_charges,
-        "payments": payment_map
+        "payments": payment_map,
+        "discount_detail": discount_map
     }
 
 @frappe.whitelist()
