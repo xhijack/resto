@@ -505,7 +505,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += (f"{station_name}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
-    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
+    # out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
     out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
     out += (f"Petugas: {created_by}\n").encode("ascii", "ignore")
 
@@ -2009,6 +2009,9 @@ def print_shift_report(closing_name, printer_name=None):
     # Akhir
     lines.append("")
     lines.append("")
+    text = "\n".join(lines)
+    esc_commads = _esc_feed(8) + _esc_cut_full()
+    out = text.encode("ascii", "ignore") + esc_commads
     
     text = "\n".join(lines)
     
@@ -2329,7 +2332,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_bold(False)
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
-    out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
     out += (f"Table : {table_name}\n").encode("ascii", "ignore")
     out += (f"Pax : {int(flt(pax))}\n").encode("ascii", "ignore")
     out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
