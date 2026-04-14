@@ -2063,7 +2063,7 @@ def remove_item(pos_invoice, item_code, qty):
     # return pi.as_dict()
 
 @frappe.whitelist()
-def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None,  user=None):
+def apply_discount(pos_invoice=None, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None,  user=None):
     """
     Docstring for apply_discount
     
@@ -2073,6 +2073,20 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, discou
     :param user: Description
     """
     user = frappe.session.user or user
+    if not pos_invoice:
+        return {
+            "ok": False,
+            "message": "Skip discount: pos_invoice kosong",
+            "skipped": True
+        }
+
+    if not frappe.db.exists("POS Invoice", pos_invoice):
+        return {
+            "ok": False,
+            "message": f"POS Invoice {pos_invoice} tidak ditemukan",
+            "skipped": True
+        }
+        
     doc = frappe.get_doc("POS Invoice", pos_invoice)
     current_pos_profile = get_active_pos_profile_for_user(user)
     pos_profile = frappe.get_doc("POS Profile", current_pos_profile['pos_profile'], "taxes_and_charges")
@@ -2097,7 +2111,7 @@ def apply_discount(pos_invoice, discount_percentage=0, discount_amount=0, discou
     elif discount_percentage == 0 and discount_amount == 0:
         # reset discount
         charge_type = "Actual"
-        taxt_rate = 0
+        tax_rate = 0
         tax_amount = 0
     else:
         frappe.throw("Tidak ada discount yang diterapkan. Mohon isi discount_percentage atau discount_amount")
