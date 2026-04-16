@@ -1890,10 +1890,17 @@ def print_shift_report(closing_name, printer_name=None):
     def format_lr(left, right):
         left = str(left)
         right = str(right)
-        space = WIDTH - len(left) - len(right)
-        if space < 1:
-            space = 1
-        return left + (" " * space) + right
+
+        # kalau masih muat → normal
+        if len(left) + len(right) + 1 <= WIDTH:
+            space = WIDTH - len(left) - len(right)
+            return [left + (" " * space) + right]
+
+        # kalau tidak muat → split jadi 2 baris
+        return [
+            left,
+            right.rjust(WIDTH)
+        ]
     
     # --- Persiapan teks ---
     lines = []
@@ -2002,8 +2009,8 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("VOID MENU")
     lines.append("-" * 32)
 
-    lines.append(format_lr("Total Qty", int(void_qty)))
-    lines.append(format_lr("Total Amount", fmt_amt(void_amount)))
+    lines.append(format_lr("Total Qty", int(void_qty or 0)))
+    lines.append(format_lr("Total Amount", fmt_amt(void_amount or 0)))
     lines.append("")
 
     # Akhir
@@ -2012,8 +2019,6 @@ def print_shift_report(closing_name, printer_name=None):
     text = "\n".join(lines)
     esc_commads = _esc_feed(8) + _esc_cut_full()
     out = text.encode("ascii", "ignore") + esc_commads
-    
-    text = "\n".join(lines)
     
     # --- Cetak dengan CUPS ---
     try:
@@ -2028,7 +2033,7 @@ def print_shift_report(closing_name, printer_name=None):
                 frappe.throw(_("Tidak ada printer terdeteksi."))
         
         # Kirim job cetak (langsung bytes)
-        job_id = cups_print_raw(text.encode('utf-8'), printer_name)
+        job_id = cups_print_raw(out, printer_name)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
@@ -2218,7 +2223,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("VOID MENU")
     lines.append(line())
 
-    items = void_menu.get("items", {})
+    items = void_menu.get("items") or {}
 
     if items:
         lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
@@ -2236,8 +2241,8 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append(line())
 
     # TOTAL
-    lines.append(format_lr("Total Qty", int(void_menu.get('total_qty', 0))))
-    lines.append(format_lr("Total Amount", fmt_amt(void_menu.get('total_amount', 0))))
+    lines.append(format_lr("Total Qty", int(void_menu.get('total_qty', 0) or 0)))
+    lines.append(format_lr("Total Amount", fmt_amt(void_menu.get('total_amount', 0) or 0)))
     lines.append("")
 
     # =========================
