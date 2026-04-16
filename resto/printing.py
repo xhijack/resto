@@ -1890,17 +1890,10 @@ def print_shift_report(closing_name, printer_name=None):
     def format_lr(left, right):
         left = str(left)
         right = str(right)
-
-        # kalau masih muat → normal
-        if len(left) + len(right) + 1 <= WIDTH:
-            space = WIDTH - len(left) - len(right)
-            return [left + (" " * space) + right]
-
-        # kalau tidak muat → split jadi 2 baris
-        return [
-            left,
-            right.rjust(WIDTH)
-        ]
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+        return left + (" " * space) + right
     
     # --- Persiapan teks ---
     lines = []
