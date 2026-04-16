@@ -2185,12 +2185,12 @@ def print_end_day_report_v2(report_data, printer_name=None):
     # DISCOUNT SUMMARY
     # =========================
 
-    if discount_order_type:
+    if discount_by_order_type:
 
         lines.append("DISCOUNT")
         lines.append(line())
 
-        for name, val in discount_order_type.items():
+        for name, val in discount_by_order_type.items():
             qty = val["total_bill"]
             amt = val["total_amount"]
 
