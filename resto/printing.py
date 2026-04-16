@@ -2010,8 +2010,8 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("")
     lines.append("")
     text = "\n".join(lines)
-    esc_commads = _esc_feed(8) + _esc_cut_full()
-    out = text.encode("ascii", "ignore") + esc_commads
+    # esc_commads = _esc_feed(8) + _esc_cut_full()
+    # out = text.encode("ascii", "ignore") + esc_commads
     
     # --- Cetak dengan CUPS ---
     try:
@@ -2026,7 +2026,7 @@ def print_shift_report(closing_name, printer_name=None):
                 frappe.throw(_("Tidak ada printer terdeteksi."))
         
         # Kirim job cetak (langsung bytes)
-        job_id = cups_print_raw(out, printer_name)
+        job_id = cups_print_raw(text.encode('utf-8'), printer_name)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
@@ -2157,9 +2157,16 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     lines.append(format_lr("Total Pax", summary.get("total_pax", 0)))
     lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
-    lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
+
+    discount = summary.get("discount") or 0
+    if discount:
+        lines.append(format_lr("Discount", f"-{fmt_amt(discount)}"))
 
     for tax_name, amt in taxes.items():
+        if tax_name.lower() == "discount":
+            continue
+        if not amt:
+            continue
         lines.append(format_lr(tax_name, fmt_amt(amt)))
 
     lines.append(line())
