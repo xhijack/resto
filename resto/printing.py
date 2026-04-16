@@ -2162,11 +2162,17 @@ def print_end_day_report_v2(report_data, printer_name=None):
     if discount:
         lines.append(format_lr("Discount", f"-{fmt_amt(discount)}"))
 
+    # =========================
+    # TAXES (ONLY SKIP ZERO DISCOUNT)
+    # =========================
     for tax_name, amt in taxes.items():
-        if tax_name.lower() == "discount":
+
+        if "discount" in tax_name.lower() and (amt is None or amt == 0):
             continue
-        if not amt:
+
+        if amt is None or amt == 0:
             continue
+
         lines.append(format_lr(tax_name, fmt_amt(amt)))
 
     lines.append(line())
