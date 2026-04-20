@@ -1817,6 +1817,17 @@ from frappe import _
 import frappe
 from frappe.utils import flt
 
+def clean_item_name(name):
+    name = (name or "").strip()
+    
+    if "-" in name:
+        parts = name.split("-", 1)
+        
+        if parts[0].isdigit():
+            return parts[1].strip()
+    
+    return name
+
 def print_shift_report(closing_name, printer_name=None):
     """
     Mencetak laporan shift dari POS Closing Entry menggunakan printer thermal 75mm.
@@ -1864,13 +1875,14 @@ def print_shift_report(closing_name, printer_name=None):
                 void_amount += flt(item.void_amount or item.amount)
                 continue
 
-            key = (item.item_code, item.item_name, item.item_group)
+            clean_name = clean_item_name(item.item_name)
+            key = (item.item_code, clean_name, item.item_group)
 
             if key not in items_summary:
                 items_summary[key] = {
                     "qty": 0,
                     "amount": 0,
-                    "item_name": item.item_name,
+                    "item_name": clean_name,
                     "item_group": item.item_group
                 }
 
@@ -1882,10 +1894,10 @@ def print_shift_report(closing_name, printer_name=None):
     
     WIDTH = 32
     def format_row(name, qty, price):
-        name = str(name)[:18]
-        qty = str(qty)
+        name = str(name)[:16]
+        qty = str(qty)[:4]
         price = str(price)
-        return f"{name:<18}{qty:>4} {price:>9}"
+        return f"{name:<16}{qty:>4} {price:>10}"
     
     def format_lr(left, right):
         left = str(left)
@@ -1932,14 +1944,15 @@ def print_shift_report(closing_name, printer_name=None):
             current_group = item["item_group"]
             lines.append(f"* {current_group}")
         # Potong nama item maks 18 karakter
-        name = item["item_name"].strip()[:18]
+        clean_name = clean_item_name(item["item_name"])
+        name = clean_name[:18]
         qty = f"{item['qty']:.0f}"
         price = fmt_amt(item["amount"])
         lines.append(format_row(name, qty, price))
     
     # Sub total dan ringkasan
     net_total = closing.net_total
-    total_qty = closing.total_quantity
+    total_qty = int(closing.total_quantity or 0)
     lines.append("-" * 32)
     lines.append(format_row("Sub Total", total_qty, fmt_amt(net_total)))
     lines.append(format_lr("Discount", f"-{fmt_amt(total_discount)}"))
@@ -1964,6 +1977,9 @@ def print_shift_report(closing_name, printer_name=None):
         for name, val in discount_map.items():
             qty = val["total_bill"]
             amt = val["total_amount"]
+            
+            if not amt:
+                continue
 
             lines.append(
                 format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
