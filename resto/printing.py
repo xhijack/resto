@@ -2362,7 +2362,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
     out += (f"Table : {table_name}\n").encode("ascii", "ignore")
     out += (f"Pax : {int(flt(pax))}\n").encode("ascii", "ignore")
-    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    out += (f"Petugas : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     for it in items:
