@@ -2346,7 +2346,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     """
     Build ESC/POS print data untuk Void Menu
     """
-    
+    data = _collect_pos_invoice(pos_invoice)
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
     table_name = get_table_names_from_pos_invoice(pos_invoice)
