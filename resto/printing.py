@@ -4,7 +4,7 @@ import math
 import tempfile
 import frappe
 from typing import List, Dict, Any
-from frappe.utils import now_datetime
+from frappe.utils import now_datetime, getdate, get_time
 from PIL import Image
 from io import BytesIO
 import requests
@@ -2258,7 +2258,8 @@ def print_end_day_report_v2(report_data, printer_name=None):
             if qty <= 0:
                 continue  # safety
 
-            lines.append(format_item(name, qty, amt))
+            clean_name = clean_item_name(name)
+            lines.append(format_item(clean_name, qty, amt))
 
         lines.append(line())
 
@@ -2346,11 +2347,34 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     """
     Build ESC/POS print data untuk Void Menu
     """
+    WIDTH = 32
+    def format_lr(left, right):
+        left = str(left)
+        right = str(right)
+
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+
+        return left + (" " * space) + right
+    
     data = _collect_pos_invoice(pos_invoice)
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
     table_name = get_table_names_from_pos_invoice(pos_invoice)
     pax = get_total_pax_from_pos_invoice(pos_invoice)
+    posting_date = data.get("posting_date")
+    posting_time = data.get("posting_time")
+    try:
+        tanggal = getdate(posting_date).strftime("%d-%m-%Y") if posting_date else "-"
+    except:
+        tanggal = str(posting_date) or "-"
+    try:
+        jam = get_time(posting_time).strftime("%H:%M:%S") if posting_time else "-"
+    except:
+        jam = str(posting_time)[:8] if posting_time else "-"
+    table_short = str(table_name)[:12]
+    
     out = b""
     out += _esc_init()
     out += _esc_font_a()
@@ -2360,8 +2384,8 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
     # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
-    out += (f"Table : {table_name}\n").encode("ascii", "ignore")
-    out += (f"Pax : {int(flt(pax))}\n").encode("ascii", "ignore")
+    out += (format_lr(f"Table : {table_short}", tanggal)).encode("ascii", "ignore") + b"\n"
+    out += (format_lr(f"Pax   : {int(flt(pax))}", jam)).encode("ascii", "ignore") + b"\n"
     out += (f"Petugas : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
