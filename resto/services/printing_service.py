@@ -3,11 +3,14 @@ import frappe
 from resto.repositories.printing_repository import PrintingRepository
 
 try:
-    from resto.printing import _enqueue_bill_worker, _enqueue_receipt_worker
-    from resto.printing import build_void_item_receipt, cups_print_raw
+    from resto.printing import (
+        _enqueue_bill_worker, _enqueue_receipt_worker,
+        _enqueue_checker_worker, build_void_item_receipt, cups_print_raw
+    )
 except Exception:
     _enqueue_bill_worker = None
     _enqueue_receipt_worker = None
+    _enqueue_checker_worker = None
     build_void_item_receipt = None
     cups_print_raw = None
 
@@ -102,6 +105,21 @@ class PrintingService:
         })
 
         return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}
+
+    def enqueue_checker_after_kitchen(self, pos_name, branch):
+        try:
+            printer = self.repo.get_checker_printer(branch)
+            if not printer:
+                frappe.throw(f"Tidak ditemukan printer checker default untuk branch {branch}")
+
+            job_id = _enqueue_checker_worker(pos_name, printer)
+            frappe.logger().info(
+                f"Enqueue Checker: {pos_name} (printer={printer}, job_id={job_id})"
+            )
+            return job_id
+        except Exception:
+            frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
+            return None
 
     def _print_void_to_other_stations(self, pos_invoice, items_to_print, branch):
         for item in items_to_print:

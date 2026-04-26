@@ -67,3 +67,24 @@ class KitchenRepository:
 
     def table_exists(self, name):
         return bool(frappe.db.exists("Table", name))
+
+    def get_pos_invoice_resto_menus(self, pos_name):
+        return frappe.get_all(
+            "POS Invoice Item",
+            filters={"parent": pos_name},
+            fields=["resto_menu"]
+        )
+
+    def get_branch_menus_for_resto_menu(self, resto_menu):
+        bms = frappe.get_all(
+            "Branch Menu",
+            filters={"menu_item": resto_menu},
+            fields=["name", "branch", "menu_item"]
+        )
+        return [frappe.get_doc("Branch Menu", bm.name) for bm in bms]
+
+    def get_invoice_branch(self, pos_invoice):
+        branch = frappe.db.get_value("POS Invoice", pos_invoice, "branch")
+        if not branch:
+            frappe.throw(f"Branch tidak ditemukan untuk invoice {pos_invoice}")
+        return branch

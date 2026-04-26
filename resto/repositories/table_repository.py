@@ -24,3 +24,12 @@ class TableRepository:
 
     def invoice_exists(self, name):
         return bool(frappe.db.exists("POS Invoice", name))
+
+    def get_tables_for_invoice(self, pos_invoice_name):
+        rows = frappe.get_all(
+            "Table Order",
+            filters={"invoice_name": pos_invoice_name},
+            fields=["parent"],
+            distinct=True
+        )
+        return [r["parent"] for r in rows]

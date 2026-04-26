@@ -43,3 +43,14 @@ class InvoiceRepository:
 
     def get_resto_menu(self, name):
         return frappe.get_doc("Resto Menu", name)
+
+    def get_merged_invoices(self, pos_invoice):
+        names = frappe.get_all(
+            "POS Invoice",
+            filters={"merge_invoice": pos_invoice},
+            fields=["name"]
+        )
+        return [frappe.get_doc("POS Invoice", n.name) for n in names]
+
+    def get_invoice_branch(self, pos_invoice):
+        return frappe.db.get_value("POS Invoice", pos_invoice, "branch")

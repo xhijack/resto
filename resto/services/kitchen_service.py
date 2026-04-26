@@ -13,6 +13,45 @@ class KitchenService:
         self.repo = repo or KitchenRepository()
 
     # ------------------------------------------------------------------
+    # get_branch_menu_by_resto_menu
+    # ------------------------------------------------------------------
+
+    def get_branch_menu_by_resto_menu(self, pos_name):
+        items = self.repo.get_pos_invoice_resto_menus(pos_name)
+        result = []
+        for it in items:
+            resto_menu = it.get("resto_menu") if isinstance(it, dict) else getattr(it, "resto_menu", None)
+            if not resto_menu:
+                continue
+            for bm_doc in self.repo.get_branch_menus_for_resto_menu(resto_menu):
+                kitchen_printers = [
+                    {"station": ks.kitchen_station, "printer_name": ks.printer_name}
+                    for ks in bm_doc.printers
+                    if ks.printer_name
+                ]
+                result.append({
+                    "resto_menu": resto_menu,
+                    "branch": bm_doc.branch,
+                    "kitchen_printers": kitchen_printers
+                })
+        return result
+
+    def process_kitchen_printing_worker(self, pos_invoice):
+        try:
+            frappe.logger().info(f"KITCHEN WORKER START {pos_invoice}")
+            self.print_to_ks_now(pos_invoice)
+            frappe.logger().info(f"KITCHEN PRINT DONE {pos_invoice}")
+
+            from resto.services.printing_service import PrintingService
+            branch = self.repo.get_invoice_branch(pos_invoice)
+            PrintingService(repo=self.repo).enqueue_checker_after_kitchen(pos_invoice, branch)
+        except Exception:
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"Kitchen Printing Worker Error {pos_invoice}"
+            )
+
+    # ------------------------------------------------------------------
     # get_all_branch_menu_with_children
     # ------------------------------------------------------------------
 

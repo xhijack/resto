@@ -83,6 +83,21 @@ class TableService:
         self.repo.save_table(doc)
         return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
 
+    def clear_table(self, table_name):
+        doc = self.repo.get_table(table_name)
+        doc.orders = []
+        doc.customer = None
+        doc.taken_by = None
+        doc.status = "Kosong"
+        doc.type_customer = None
+        self.repo.save_table(doc)
+
+    def clear_table_merged(self, pos_invoice):
+        tables = self.repo.get_tables_for_invoice(pos_invoice)
+        for table in tables:
+            if table:
+                self.clear_table(table)
+
     def merge_table(self, pos_invoice, source_table=None, target_table=None):
         if not source_table:
             frappe.throw("source_table wajib diisi")

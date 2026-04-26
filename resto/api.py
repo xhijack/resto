@@ -123,41 +123,8 @@ def create_pos_invoice(payload):
     return InvoiceService().create_pos_invoice(payload)
 
 def get_branch_menu_by_resto_menu(pos_name):
-    branch_results = []
-    items = frappe.get_all(
-        "POS Invoice Item",
-        filters={"parent": pos_name},
-        fields=["resto_menu"]
-    )
-
-    for it in items:
-        resto_menu = it.get("resto_menu")
-        if not resto_menu:
-            continue
-
-        branch_menus = frappe.get_all(
-            "Branch Menu",
-            filters={"menu_item": resto_menu},
-            fields=["name","branch","menu_item"]
-        )
-
-        for bm in branch_menus:
-            bm_doc = frappe.get_doc("Branch Menu", bm.name)
-            kitchen_printers = []
-            for ks in bm_doc.printers:
-                if ks.printer_name:
-                    kitchen_printers.append({
-                        "station": ks.kitchen_station,
-                        "printer_name": ks.printer_name
-                    })
-
-            branch_results.append({
-                "resto_menu": resto_menu,
-                "branch": bm.branch,
-                "kitchen_printers": kitchen_printers
-            })
-
-    return branch_results
+    from resto.services.kitchen_service import KitchenService
+    return KitchenService().get_branch_menu_by_resto_menu(pos_name)
 
 @frappe.whitelist()
 def process_kitchen_printing(pos_invoice):
@@ -170,59 +137,14 @@ def process_kitchen_printing(pos_invoice):
 
     return True
 
-def get_branch_from_invoice(pos_invoice):
-    branch = frappe.db.get_value(
-        "POS Invoice",
-        pos_invoice,
-        "branch"
-    )
-
-    if not branch:
-        frappe.throw(f"Branch tidak ditemukan untuk invoice {pos_invoice}")
-
-    return branch
-    
 def _process_kitchen_printing_worker(pos_invoice):
-    try:
-        frappe.logger().info(f"KITCHEN WORKER START {pos_invoice}")
+    from resto.services.kitchen_service import KitchenService
+    KitchenService().process_kitchen_printing_worker(pos_invoice)
 
-        print_to_ks_now(pos_invoice)
-
-        frappe.logger().info(f"KITCHEN PRINT DONE {pos_invoice}")
-
-        enqueue_checker_after_kitchen(
-            pos_invoice,
-            get_branch_from_invoice(pos_invoice)
-        )
-
-    except Exception:
-        frappe.log_error(
-            frappe.get_traceback(),
-            f"Kitchen Printing Worker Error {pos_invoice}"
-        )
-        
 @frappe.whitelist()
 def enqueue_checker_after_kitchen(pos_name: str, branch: str):
-    from resto.printing import _enqueue_checker_worker
-
-    try:
-        printer = frappe.db.get_value(
-            "Printer Settings",
-            {"branch": branch},
-            "printer_checker_name"
-        )
-
-        if not printer:
-            frappe.throw(f"Tidak ditemukan printer checker default untuk branch {branch}")
-
-        job_id = _enqueue_checker_worker(pos_name, printer)
-        frappe.logger().info(f"✅ Enqueue Checker: {pos_name} (printer={printer}, job_id={job_id})")
-
-        return job_id
-
-    except Exception:
-        frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
-        return None
+    from resto.services.printing_service import PrintingService
+    return PrintingService().enqueue_checker_after_kitchen(pos_name, branch)
 
 @frappe.whitelist()
 def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
@@ -234,42 +156,11 @@ def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
         orders=orders, checked=checked
     )
 
-def grouping_items_to_kitchen_station(branch, pos_name):
-    """
-    ***UNUSED***
+# TODO: grouping_items_to_kitchen_station — implement atau hapus jika tidak diperlukan
+# def grouping_items_to_kitchen_station(branch, pos_name): ...
 
-    Grouping items by kitchen_station di POS Invoice Item.
-    Return dict { kitchen_station: [items] }
-    """
-    items = frappe.get_all(
-        "POS Invoice Item",
-        filters={"parent": pos_name},
-        fields=["item_code", "qty", "rate", "resto_menu", "category", "status_kitchen", "add_ons", "quick_notes"]
-    )
-
-    grouped = {}
-    for item in items:
-        branch_menu = frappe.get_doc("Branch Menu", filters={"branch": branch, "menu_item": item.get("resto_menu")})
-        for ks in branch_menu.printers:
-            kitchen_station = ks.printer_name
-            if kitchen_station not in grouped:
-                grouped[kitchen_station] = []
-            grouped[kitchen_station].append(item)
-    return grouped
-        
-
-def send_to_ks_printing(kitchen_station, pos_invoice, items):
-    doc = frappe.new_doc("KS Printing")
-    doc.kitchen_station = kitchen_station
-    doc.pos_invoice = pos_invoice
-    for item in items:
-        doc.append("items", {
-            "menu_item": item.get("resto_menu"),
-            "qty": item.get("qty"),
-            "add_ons": item.get("add_ons"),
-            "quick_notes": item.get("quick_notes")
-        })
-    return doc.insert(ignore_permissions=True)
+# TODO: send_to_ks_printing — pindahkan ke PrintingService jika KS Printing doctype diaktifkan
+# def send_to_ks_printing(kitchen_station, pos_invoice, items): ...
 
 def print_to_ks_now(pos_invoice):
     from resto.services.kitchen_service import KitchenService
@@ -303,7 +194,6 @@ def print_receipt_now(invoice_name: str, branch: str):
     from resto.services.printing_service import PrintingService
     return PrintingService().print_receipt_now(invoice_name, branch)
 
-# detect_outlet_filter dipindah ke ReportingRepository
 
 
 @frappe.whitelist()
@@ -371,8 +261,6 @@ def check_pos_status_for_user(user=None):
 
 @frappe.whitelist()
 def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
-    import frappe
-    from frappe.utils import today, now_datetime
 
     user = user or frappe.session.user
 
@@ -432,11 +320,11 @@ def print_void_item(pos_invoice: str):
 
 @frappe.whitelist()
 def move_table(pos_invoice):
+    # TODO: implementasi move_table
     pass
 
 @frappe.whitelist()
 def merge_table(pos_invoice, source_table, target_table=None):
-    import json
     if isinstance(target_table, str):
         try:
             target_table = json.loads(target_table)
@@ -452,19 +340,18 @@ def move_items_from_invoice(source_invoice_name, target_invoice_name):
 
 @frappe.whitelist()
 def move_item(pos_invoice):
+    # TODO: implementasi move_item (pindah item antar invoice)
     pass
 
 @frappe.whitelist()
 def split_bill(pos_invoice):
+    # TODO: implementasi split_bill (pecah invoice menjadi beberapa)
     pass
 
 @frappe.whitelist()
 def remove_item(pos_invoice, item_code, qty):
+    # TODO: implementasi remove_item dengan status VOID MENU di InvoiceService
     pass
-    # removeitem dengan status VOID MENU
-    # pi = frappe.get_doc("POS Invoice", pos_invoice)
-    # pi.save()
-    # return pi.as_dict()
 
 @frappe.whitelist()
 def apply_discount(pos_invoice=None, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None, user=None):
@@ -488,40 +375,14 @@ def create_payment(pos_invoice, amount, mode_of_payment):
     from resto.services.payment_service import PaymentService
     return PaymentService().create_payment(pos_invoice, amount, mode_of_payment)
 
-def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
-    tables = frappe.get_all(
-        "Table Order",
-        filters={"invoice_name": pos_invoice_name},
-        fields=["parent"],
-        distinct=True
-    )
-
-    return ", ".join([t["parent"] for t in tables])
-
 def clear_table_merged(pos_invoice):
-    """Fungsi untuk mengosongkan meja setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
-    tables = get_table_names_from_pos_invoice(pos_invoice)
-    for table in tables.split(", "):
-        if table:
-            clear_table(table)
+    from resto.services.table_service import TableService
+    TableService().clear_table_merged(pos_invoice)
 
 def delete_merge_invoice(pos_invoice):
-    """Fungsi untuk menghapus invoice setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
-    invoices = frappe.get_all(
-        "POS Invoice",
-        filters={"merge_invoice": pos_invoice},
-        fields=["name"]
-    )
-    for inv in invoices:
-        doc = frappe.get_doc("POS Invoice", inv.name)
-        doc.delete()
-    
+    from resto.services.invoice_service import InvoiceService
+    InvoiceService().delete_merge_invoice(pos_invoice)
+
 def clear_table(table_name):
-    """Hati-hati menggunakan fungsi ini, pastikan table_name benar-benar tabel yang ingin dikosongkan"""
-    table = frappe.get_doc("Table", table_name)
-    table.orders = []
-    table.customer = None
-    table.taken_by = None
-    table.status = "Kosong"
-    table.type_customer = None
-    table.save()
+    from resto.services.table_service import TableService
+    TableService().clear_table(table_name)
