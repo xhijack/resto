@@ -151,15 +151,8 @@ def get_all_branch_menu_with_children(branch=None):
 
 @frappe.whitelist(allow_guest=False)
 def create_customer(name, mobile_no=None):
-    doc = frappe.get_doc({
-        "doctype": "Customer",
-        "customer_name": name,
-        "customer_type": "Company",
-        "mobile_no": mobile_no,
-        "mobile_number": mobile_no
-    })
-    doc.insert(ignore_permissions=True)
-    return doc.as_dict()
+    from resto.repositories.customer_repository import CustomerRepository
+    return CustomerRepository().create_customer(name, mobile_no=mobile_no)
 
 @frappe.whitelist()
 def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
