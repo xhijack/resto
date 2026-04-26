@@ -85,69 +85,8 @@ def get_branch_list():
 
 @frappe.whitelist()
 def get_all_branch_menu_with_children(branch=None):
-    filters = {"enabled": 1}
-    if branch:
-        filters["branch"] = branch
-
-    branch_menus = frappe.get_all(
-        "Branch Menu",
-        filters=filters,
-        fields=["name", "menu_item", "rate"],
-        limit_page_length=0
-    )
-
-    if not branch_menus:
-        return []
-
-    menu_items = [bm.menu_item for bm in branch_menus if bm.menu_item]
-
-    resto_menus = {
-        rm.name: rm
-        for rm in frappe.get_all(
-            "Resto Menu",
-            filters={"name": ["in", menu_items]},
-            fields=[
-                "name",
-                "title",
-                "menu_category",
-                "sell_item",
-                "use_stock",
-                "stock_limit",
-                "stock_used",
-                "is_sold_out",
-                "description"
-            ]
-        )
-    }
-
-    files = frappe.get_all(
-        "File",
-        filters={
-            "attached_to_doctype": "Resto Menu",
-            "attached_to_name": ["in", menu_items]
-        },
-        fields=["attached_to_name", "file_url"]
-    )
-    image_map = {f.attached_to_name: f.file_url for f in files}
-
-    result = []
-
-    for bm in branch_menus:
-        if bm.menu_item not in resto_menus:
-            continue
-
-        branch_doc = frappe.get_doc("Branch Menu", bm.name)
-        branch_dict = branch_doc.as_dict()
-
-        branch_dict.update({
-            "rate": bm.rate,
-            "resto_menu": resto_menus.get(bm.menu_item),
-            "image": image_map.get(bm.menu_item)
-        })
-
-        result.append(branch_dict)
-
-    return result
+    from resto.services.kitchen_service import KitchenService
+    return KitchenService().get_all_branch_menu_with_children(branch=branch)
 
 @frappe.whitelist(allow_guest=False)
 def create_customer(name, mobile_no=None):
@@ -288,82 +227,12 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
 @frappe.whitelist()
 def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
                     customer=None, type_customer=None, orders=None, checked=None):
-    """
-    payload: POS invoice payload
-    table_name: name of the Table
-    status, taken_by, pax, customer, type_customer, orders, checked: 
-        semua field Table yang dikirim dari FE
-    """
-    try:
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-
-        result = create_pos_invoice(payload)
-        pos_name = result["name"]
-
-        table_update_result = None
-
-        # ✅ update table dulu sebelum print
-        if table_name:
-            if frappe.db.exists("Table", table_name):
-                # normalize orders dari FE
-                if orders is None:
-                    orders = []
-                elif isinstance(orders, str):
-                    try:
-                        orders = json.loads(orders)
-                    except Exception:
-                        frappe.log_error("Gagal parse orders JSON", orders)
-                        orders = []
-
-                if not isinstance(orders, list):
-                    orders = []
-
-                # cek apakah invoice sudah ada dalam list orders
-                exists = any(
-                    isinstance(o, dict) and o.get("invoice_name") == pos_name
-                    for o in orders
-                )
-
-                # kalau belum ada → append
-                if not exists:
-                    orders.append({"invoice_name": pos_name})
-
-                table_update_result = update_table_status(
-                    name=table_name,
-                    status=status or "Terisi",
-                    taken_by=taken_by,
-                    pax=pax,
-                    customer=customer,
-                    type_customer=type_customer,
-                    orders=orders,
-                    checked=checked
-                )
-            else:
-                # Take Away / table tidak ada → lewati update table
-                frappe.log_error(f"Take Away POS Invoice {pos_name} tidak terkait table", "send_to_kitchen")    
-
-        # print kitchen
-        try:
-            print_to_ks_now(pos_name)
-            printing_status = "Printing queued"
-        except Exception as print_err:
-            frappe.log_error(frappe.get_traceback(), f"Printing Error for POS {pos_name}")
-            printing_status = f"Printing gagal: {str(print_err)}"
-
-        return {
-            "status": "success",
-            "pos_invoice": pos_name,
-            "table_update": table_update_result,
-            "message": f"POS Invoice {pos_name} created. {printing_status}"
-        }
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Send to Kitchen - Invoice Creation Error")
-        frappe.throw(
-            title="POS Invoice Creation Error",
-            msg=str(e)
-        )
+    from resto.services.kitchen_service import KitchenService
+    return KitchenService().send_to_kitchen(
+        payload=payload, table_name=table_name, status=status, taken_by=taken_by,
+        pax=pax, customer=customer, type_customer=type_customer,
+        orders=orders, checked=checked
+    )
 
 def grouping_items_to_kitchen_station(branch, pos_name):
     """
@@ -403,161 +272,13 @@ def send_to_ks_printing(kitchen_station, pos_invoice, items):
     return doc.insert(ignore_permissions=True)
 
 def print_to_ks_now(pos_invoice):
-    from resto.printing import kitchen_print_from_payload
-
-    # Kumpulkan semua payload per station
-    station_payloads = []
-    items_to_lock = set()  # menyimpan nama item yang akan dikunci setelah cetak
-
-    for item in get_branch_menu_for_kitchen_printing(pos_invoice):
-        items_to_send = []
-        for it in item.get("items", []):
-            name = it.get("name")
-            if not name:
-                continue
-
-            # Cek apakah item sudah pernah dicetak (0 = belum)
-            status = frappe.db.get_value("POS Invoice Item", name, "is_print_kitchen")
-            if int(status or 0) == 0:
-                items_to_send.append(it)
-                items_to_lock.add(name)  # tandai untuk dikunci nanti
-
-        if items_to_send:
-            payload = {
-                "kitchen_station": item.get("kitchen_station"),
-                "printer_name": item.get("printer_name"),
-                "pos_invoice": pos_invoice,
-                "items": items_to_send
-            }
-            station_payloads.append(payload)
-
-    # Kirim semua instruksi cetak ke masing-masing station
-    for payload in station_payloads:
-        kitchen_print_from_payload(payload)
-
-    # Setelah semua terkirim, kunci semua item yang sudah diproses
-    for name in items_to_lock:
-        frappe.db.set_value("POS Invoice Item", name, "is_print_kitchen", 1)
-
-    frappe.db.commit()
+    from resto.services.kitchen_service import KitchenService
+    KitchenService().print_to_ks_now(pos_invoice)
 
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):
-    """
-    Return list of tickets grouped by kitchen_station, respecting printing_type.
-    For Combine: one ticket with all items for that station.
-    For Split: one ticket per item for that station.
-    """
-    # Ambil branch dari POS Invoice agar pencarian Branch Menu relevan
-    branch = frappe.db.get_value("POS Invoice", pos_name, "branch")
-
-    # Ambil item dari POS Invoice Item
-    pos_items = frappe.get_all(
-        "POS Invoice Item",
-        filters={"parent": pos_name},
-        fields=["name", "resto_menu", "item_name", "qty", "quick_notes", "add_ons"]
-    )
-
-    if not pos_items:
-        return []
-
-    # Dictionary untuk menyimpan data per station
-    # station_data[station] = {"items": [], "printing_type": ...}
-    station_data = {}
-    short_name_cache = {}
-
-    for it in pos_items:
-        resto_menu = it.get("resto_menu")
-        if not resto_menu:
-            continue
-
-        # Ambil short_name dari Resto Menu (cache)
-        if resto_menu not in short_name_cache:
-            short_name_cache[resto_menu] = frappe.db.get_value(
-                "Resto Menu", resto_menu, "short_name"
-            ) or ""
-
-        # Cari Branch Menu yang sesuai resto_menu (dan branch jika tersedia)
-        bm_filters = {"menu_item": resto_menu}
-        if branch:
-            bm_filters["branch"] = branch
-
-        branch_menus = frappe.get_all(
-            "Branch Menu",
-            filters=bm_filters,
-            fields=["name"]
-        )
-
-        if not branch_menus:
-            continue
-
-        # Untuk setiap Branch Menu yang cocok, ambil printer entries
-        for bm in branch_menus:
-            bm_doc = frappe.get_doc("Branch Menu", bm.name)
-            for printer_entry in (bm_doc.printers or []):
-                printer_name = printer_entry.get("printer_name")
-                if not printer_name:
-                    continue
-                station = printer_entry.get("kitchen_station")
-                if not station:
-                    continue
-                printing_type = printer_entry.get("printing_type") or "Combine"  # default Combine
-
-                # Inisialisasi data station jika belum ada
-                if station not in station_data:
-                    station_data[station] = {
-                        "items": [],
-                        "printing_type": printing_type
-                    }
-                else:
-                    # Jika printing_type berbeda, log warning dan gunakan yang pertama
-                    if station_data[station]["printing_type"] != printing_type:
-                        frappe.logger("pos_print").warning(
-                            f"Inconsistent printing_type for station {station}: "
-                            f"{station_data[station]['printing_type']} vs {printing_type}. "
-                            f"Using {station_data[station]['printing_type']}"
-                        )
-
-                # Tambahkan item ke station ini
-                station_data[station]["items"].append({
-                    "resto_menu": resto_menu,
-                    "short_name": short_name_cache.get(resto_menu, ""),
-                    "item_name": it.get("item_name") or "",
-                    "qty": it.get("qty") or 0,
-                    "quick_notes": it.get("quick_notes") or "",
-                    "add_ons": it.get("add_ons") or "",
-                    "name": it.get("name")
-                })
-
-    # Bangun hasil akhir berdasarkan printing_type
-    result = []
-    for station, data in station_data.items():
-        items = data["items"]
-        if not items:
-            continue
-        printing_type = data["printing_type"]
-
-        if printing_type == "Combine":
-            # Satu tiket dengan semua item
-            result.append({
-                "kitchen_station": station,
-                "pos_invoice": pos_name,
-                "items": items,
-                "printing_type": printing_type  # opsional, untuk informasi
-            })
-        else:  # Split
-            # Satu tiket per item
-            for item in items:
-                result.append({
-                    "kitchen_station": station,
-                    "pos_invoice": pos_name,
-                    "items": [item],
-                    "printing_type": printing_type
-                })
-
-    # Urutkan hasil (opsional, untuk konsistensi)
-    result.sort(key=lambda x: (x["kitchen_station"] or "", len(x["items"])))
-    return result
+    from resto.services.kitchen_service import KitchenService
+    return KitchenService().get_branch_menu_for_kitchen_printing(pos_name)
 
 @frappe.whitelist(allow_guest=True)
 def get_all_tables_with_details():
