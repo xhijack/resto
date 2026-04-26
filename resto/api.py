@@ -289,79 +289,19 @@ def get_all_tables_with_details():
 def print_bill_now(invoice_name: str, branch: str, table_name=None,
                    status=None, taken_by=None, pax=0,
                    customer=None, type_customer=None, orders=None, checked=None):
-
-    from resto.printing import _enqueue_bill_worker
-    import frappe
-    import json
-
-    try:
-        printer = frappe.db.get_value(
-            "Printer Settings",
-            {"branch": branch},
-            "printer_bill_name"
-        )
-
-        if not printer:
-            frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
-
-        # update table snapshot state jika ada table
-        if table_name:
-            if orders is None:
-                orders = []
-            elif isinstance(orders, str):
-                try:
-                    orders = json.loads(orders)
-                except Exception:
-                    frappe.log_error("Gagal parse orders JSON", orders)
-
-            if not isinstance(orders, list):
-                orders = []
-
-            update_table_status(
-                name=table_name,
-                status="Print Bill",
-                taken_by=taken_by,
-                pax=pax,
-                customer=customer,
-                type_customer=type_customer,
-                orders=orders,
-                checked=checked
-            )
-
-        # enqueue print job
-        job_id = _enqueue_bill_worker(invoice_name, printer)
-
-        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
-
-        return {"ok": True, "job_id": job_id}
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Print Bill Error")
-        frappe.throw(f"Gagal print bill {invoice_name}: {str(e)}")
+    from resto.services.printing_service import PrintingService
+    from resto.services.table_service import TableService
+    return PrintingService().print_bill_now(
+        invoice_name, branch, table_name=table_name, status=status,
+        taken_by=taken_by, pax=pax, customer=customer,
+        type_customer=type_customer, orders=orders, checked=checked,
+        table_service=TableService() if table_name else None
+    )
 
 @frappe.whitelist()
 def print_receipt_now(invoice_name: str, branch: str):
-    from resto.printing import _enqueue_receipt_worker
-    import frappe
-
-    try:
-        printer = frappe.db.get_value(
-            "Printer Settings",
-            {"branch": branch},
-            "printer_receipt_name"
-        )
-
-        if not printer:
-            frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
-
-        # Enqueue print job
-        job_id = _enqueue_receipt_worker(invoice_name, printer)
-        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
-        return {"ok": True, "job_id": job_id}
-
-    except Exception as e:
-        frappe.log_error(frappe.get_traceback(), "Print Receipt Error")
-        frappe.throw(f"Gagal print Receipt {invoice_name}: {str(e)}")
+    from resto.services.printing_service import PrintingService
+    return PrintingService().print_receipt_now(invoice_name, branch)
 
 # =====================================================
 # AUTO DETECT OUTLET FIELD
@@ -1244,57 +1184,8 @@ def get_company_name():
 
 @frappe.whitelist()
 def print_void_item(pos_invoice: str):
-    """
-    Print semua item VOID MENU yang belum dicetak
-    """
-    import cups
-    from .printing import build_void_item_receipt, cups_print_raw
-    import tempfile
-    invoice = frappe.get_doc("POS Invoice", pos_invoice)
-    items_to_print = [
-        {
-            "name": item.name,
-            "item_code": item.item_code,
-            "item_name": frappe.db.get_value("Resto Menu", {"sell_item": item.item_code}, "short_name") or item.item_name,
-            "qty": item.qty,
-            "add_ons": item.add_ons,
-            "quick_notes": getattr(item, "quick_notes", ""),
-        }
-        for item in invoice.items
-        if getattr(item, "status_kitchen", "") == "Void Menu" and getattr(item, "is_void_printed", 0) == 0
-    ]
-
-    if not items_to_print:
-        frappe.logger("pos_print").info(f"Void Menu: tidak ada item baru untuk dicetak pada invoice {pos_invoice}")
-        return {"ok": True, "message": "Tidak ada item baru untuk dicetak"}
-
-    printer_name = frappe.db.get_value("Printer Settings", {"branch": invoice.branch}, "default_printer_checker") or "Void Printer"
-
-    raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
-    job_id = cups_print_raw(raw, printer_name)
-
-    print_void_to_other_station(pos_invoice, items_to_print, invoice.branch)
-
-    # Update status is_print_kitchen
-    for it in items_to_print:
-        frappe.db.set_value("POS Invoice Item", it["name"], "is_void_printed", 1)
-    frappe.db.commit()
-
-    frappe.logger("pos_print").info({"invoice": pos_invoice, "printer": printer_name, "job_id": job_id, "items_printed": len(items_to_print)})
-
-    return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}
-
-
-def print_void_to_other_station(pos_invoice, items_to_print, branch):
-    import cups
-    from .printing import build_void_item_receipt, cups_print_raw
-    import tempfile
-
-    for item in items_to_print:
-        branch_menu = frappe.get_doc("Branch Menu", {"branch": branch, "sell_item": item['item_code']})
-        for printer in branch_menu.printers:
-            raw = build_void_item_receipt(pos_invoice, items_to_print)
-            cups_print_raw(raw, printer.printer_name)
+    from resto.services.printing_service import PrintingService
+    return PrintingService().print_void_item(pos_invoice)
 
 
 @frappe.whitelist()
