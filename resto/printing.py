@@ -4,7 +4,7 @@ import math
 import tempfile
 import frappe
 from typing import List, Dict, Any
-from frappe.utils import now_datetime
+from frappe.utils import now_datetime, getdate, get_time
 from PIL import Image
 from io import BytesIO
 import requests
@@ -505,7 +505,7 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
     out += (f"{station_name}\n").encode("ascii", "ignore")
     out += _esc_bold(False) + _esc_align_left()
 
-    out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
+    # out += (f"Invoice: {data['name']}\n").encode("ascii", "ignore")
     out += (f"Tanggal: {data['posting_date']} {data['posting_time']}\n").encode("ascii", "ignore")
     out += (f"Petugas: {created_by}\n").encode("ascii", "ignore")
 
@@ -1817,6 +1817,17 @@ from frappe import _
 import frappe
 from frappe.utils import flt
 
+def clean_item_name(name):
+    name = (name or "").strip()
+    
+    if "-" in name:
+        parts = name.split("-", 1)
+        
+        if parts[0].isdigit():
+            return parts[1].strip()
+    
+    return name
+
 def print_shift_report(closing_name, printer_name=None):
     """
     Mencetak laporan shift dari POS Closing Entry menggunakan printer thermal 75mm.
@@ -1829,13 +1840,32 @@ def print_shift_report(closing_name, printer_name=None):
     # Kumpulkan data item per invoice
     items_summary = {}  # key: (item_code, item_name, item_group)
     total_discount = 0
+    discount_map = {}
     void_qty = 0
     void_amount = 0
     for inv in invoices:
         # DISCOUNT (AMBIL DARI TAX TABLE)
+        discount_added = False
+
         for tax in inv.taxes:
-            if tax.description and "discount" in tax.description.lower():
-                total_discount += abs(flt(tax.tax_amount))
+            if not tax.description or "discount" not in tax.description.lower():
+                continue
+
+            total_discount += abs(flt(tax.tax_amount))
+
+            key = f"{inv.discount_for_bank or ''} {inv.discount_name or 'No Name'}"
+
+            if key not in discount_map:
+                discount_map[key] = {
+                    "total_bill": 0,
+                    "total_amount": 0
+                }
+
+            discount_map[key]["total_amount"] += abs(flt(tax.tax_amount))
+
+            if not discount_added:
+                discount_map[key]["total_bill"] += 1
+                discount_added = True
 
         # ITEMS
         for item in inv.items:
@@ -1845,13 +1875,14 @@ def print_shift_report(closing_name, printer_name=None):
                 void_amount += flt(item.void_amount or item.amount)
                 continue
 
-            key = (item.item_code, item.item_name, item.item_group)
+            clean_name = clean_item_name(item.item_name)
+            key = (item.item_code, clean_name, item.item_group)
 
             if key not in items_summary:
                 items_summary[key] = {
                     "qty": 0,
                     "amount": 0,
-                    "item_name": item.item_name,
+                    "item_name": clean_name,
                     "item_group": item.item_group
                 }
 
@@ -1863,10 +1894,10 @@ def print_shift_report(closing_name, printer_name=None):
     
     WIDTH = 32
     def format_row(name, qty, price):
-        name = str(name)[:18]
-        qty = str(qty)
+        name = str(name)[:16]
+        qty = str(qty)[:4]
         price = str(price)
-        return f"{name:<18}{qty:>4} {price:>9}"
+        return f"{name:<16}{qty:>4} {price:>10}"
     
     def format_lr(left, right):
         left = str(left)
@@ -1899,7 +1930,7 @@ def print_shift_report(closing_name, printer_name=None):
     # Nama toko / profil POS
     pos_profile = closing.pos_profile
     lines.append(f"Shop: {pos_profile}")
-    lines.append(f"PVJ: {pos_profile}")  # bisa disesuaikan dengan cabang
+    # lines.append(f"PVJ: {pos_profile}")  # bisa disesuaikan dengan cabang
     lines.append("# PAID SALES")
     lines.append("")
     
@@ -1913,17 +1944,18 @@ def print_shift_report(closing_name, printer_name=None):
             current_group = item["item_group"]
             lines.append(f"* {current_group}")
         # Potong nama item maks 18 karakter
-        name = item["item_name"].strip()[:18]
+        clean_name = clean_item_name(item["item_name"])
+        name = clean_name[:18]
         qty = f"{item['qty']:.0f}"
         price = fmt_amt(item["amount"])
         lines.append(format_row(name, qty, price))
     
     # Sub total dan ringkasan
     net_total = closing.net_total
-    total_qty = closing.total_quantity
+    total_qty = int(closing.total_quantity or 0)
     lines.append("-" * 32)
     lines.append(format_row("Sub Total", total_qty, fmt_amt(net_total)))
-    lines.append(format_lr("Discount", fmt_amt(total_discount)))
+    lines.append(format_lr("Discount", f"-{fmt_amt(total_discount)}"))
     lines.append(format_row("Total Sales", total_qty, fmt_amt(net_total)))
     lines.append("")
     
@@ -1931,16 +1963,35 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
-    lines.append(format_lr("Discount", fmt_amt(total_discount)))
+    lines.append(format_lr("Discount", f"-{fmt_amt(total_discount)}"))
     grand_total = closing.grand_total
     lines.append(format_row("Grand Total", total_qty, fmt_amt(grand_total)))
     lines.append("")
     
+    # --- Discount Detail ---
+    if discount_map:
+
+        lines.append("DISCOUNT")
+        lines.append("-" * 32)
+
+        for name, val in discount_map.items():
+            qty = val["total_bill"]
+            amt = val["total_amount"]
+            
+            if not amt:
+                continue
+
+            lines.append(
+                format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
+            )
+
+        lines.append("")
+    
     # --- Rincian Pajak ---
     lines.append(format_row("Item", "Qty", "Price"))
     lines.append("-" * 32)
-    lines.append(f"PVJ: {pos_profile}")
-    lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
+    # lines.append(f"PVJ: {pos_profile}")
+    # lines.append(format_lr("Discount", "0"))  # asumsi tidak ada diskon di sini
     lines.append(format_lr("Sub Total", fmt_amt(net_total)))
     # Tampilkan semua pajak dari child table taxes
     for tax in closing.taxes:
@@ -1967,15 +2018,16 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("VOID MENU")
     lines.append("-" * 32)
 
-    lines.append(format_lr("Total Qty", int(void_qty)))
-    lines.append(format_lr("Total Amount", fmt_amt(void_amount)))
+    lines.append(format_lr("Total Qty", int(void_qty or 0)))
+    lines.append(format_lr("Total Amount", fmt_amt(void_amount or 0)))
     lines.append("")
 
     # Akhir
     lines.append("")
     lines.append("")
-    
     text = "\n".join(lines)
+    # esc_commads = _esc_feed(8) + _esc_cut_full()
+    # out = text.encode("ascii", "ignore") + esc_commads
     
     # --- Cetak dengan CUPS ---
     try:
@@ -2121,9 +2173,22 @@ def print_end_day_report_v2(report_data, printer_name=None):
 
     lines.append(format_lr("Total Pax", summary.get("total_pax", 0)))
     lines.append(format_lr("Sub Total", fmt_amt(summary.get("sub_total", 0))))
-    lines.append(format_lr("Discount", f"-{fmt_amt(summary.get('discount',0))}"))
 
+    discount = summary.get("discount") or 0
+    if discount:
+        lines.append(format_lr("Discount", f"-{fmt_amt(discount)}"))
+
+    # =========================
+    # TAXES (ONLY SKIP ZERO DISCOUNT)
+    # =========================
     for tax_name, amt in taxes.items():
+
+        if "discount" in tax_name.lower() and (amt is None or amt == 0):
+            continue
+
+        if amt is None or amt == 0:
+            continue
+
         lines.append(format_lr(tax_name, fmt_amt(amt)))
 
     lines.append(line())
@@ -2152,13 +2217,13 @@ def print_end_day_report_v2(report_data, printer_name=None):
         lines.append("DISCOUNT")
         lines.append(line())
 
-        for order_type, discounts in discount_by_order_type.items():
-            lines.append(order_type)
-            
-            for name, val in discounts.items():
-                qty = val["total_qty"]
-                amt = val["total_amount"]
-                lines.append(format_lr(f"  {name} ({qty})", f"-{fmt_amt(amt)}"))
+        for name, val in discount_by_order_type.items():
+            qty = val["total_bill"]
+            amt = val["total_amount"]
+
+            lines.append(
+                format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
+            )
 
         lines.append("")
     
@@ -2180,7 +2245,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("VOID MENU")
     lines.append(line())
 
-    items = void_menu.get("items", {})
+    items = void_menu.get("items") or {}
 
     if items:
         lines.append(f"{'Item':<18}{'Qty':>4} {'Amount':>9}")
@@ -2193,13 +2258,14 @@ def print_end_day_report_v2(report_data, printer_name=None):
             if qty <= 0:
                 continue  # safety
 
-            lines.append(format_item(name, qty, amt))
+            clean_name = clean_item_name(name)
+            lines.append(format_item(clean_name, qty, amt))
 
         lines.append(line())
 
     # TOTAL
-    lines.append(format_lr("Total Qty", int(void_menu.get('total_qty', 0))))
-    lines.append(format_lr("Total Amount", fmt_amt(void_menu.get('total_amount', 0))))
+    lines.append(format_lr("Total Qty", int(void_menu.get('total_qty', 0) or 0)))
+    lines.append(format_lr("Total Amount", fmt_amt(void_menu.get('total_amount', 0) or 0)))
     lines.append("")
 
     # =========================
@@ -2281,11 +2347,34 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     """
     Build ESC/POS print data untuk Void Menu
     """
+    WIDTH = 32
+    def format_lr(left, right):
+        left = str(left)
+        right = str(right)
+
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+
+        return left + (" " * space) + right
     
+    data = _collect_pos_invoice(pos_invoice)
     current_user = frappe.session.user
     full_name = frappe.db.get_value("User", current_user, "full_name") or current_user
     table_name = get_table_names_from_pos_invoice(pos_invoice)
     pax = get_total_pax_from_pos_invoice(pos_invoice)
+    posting_date = data.get("posting_date")
+    posting_time = data.get("posting_time")
+    try:
+        tanggal = getdate(posting_date).strftime("%d-%m-%Y") if posting_date else "-"
+    except:
+        tanggal = str(posting_date) or "-"
+    try:
+        jam = get_time(posting_time).strftime("%H:%M:%S") if posting_time else "-"
+    except:
+        jam = str(posting_time)[:8] if posting_time else "-"
+    table_short = str(table_name)[:12]
+    
     out = b""
     out += _esc_init()
     out += _esc_font_a()
@@ -2294,10 +2383,10 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_bold(False)
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
-    out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
-    out += (f"Table : {table_name}\n").encode("ascii", "ignore")
-    out += (f"Pax : {int(flt(pax))}\n").encode("ascii", "ignore")
-    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    out += (format_lr(f"Table : {table_short}", tanggal)).encode("ascii", "ignore") + b"\n"
+    out += (format_lr(f"Pax   : {int(flt(pax))}", jam)).encode("ascii", "ignore") + b"\n"
+    out += (f"Petugas : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
     out += (_line("-") + "\n").encode("ascii", "ignore")
 
     for it in items:
