@@ -15,7 +15,7 @@ class TestMenuRepository(FrappeTestCase):
         super().tearDown()
 
     # ------------------------------------------------------------------
-    # Unit tests (mock frappe) — test logika repository secara terisolasi
+    # get_all_branches — unit tests
     # ------------------------------------------------------------------
 
     def test_get_all_branches_calls_frappe_with_correct_args(self):
@@ -45,7 +45,7 @@ class TestMenuRepository(FrappeTestCase):
             self.assertEqual(result, mock_data)
 
     # ------------------------------------------------------------------
-    # Integration tests — test terhadap Frappe DB sungguhan
+    # get_all_branches — integration tests
     # ------------------------------------------------------------------
 
     def test_get_all_branches_integration_returns_list(self):
@@ -73,3 +73,42 @@ class TestMenuRepository(FrappeTestCase):
             for item in result:
                 self.assertIn("name", item)
                 self.assertIn("branch", item)
+
+    # ------------------------------------------------------------------
+    # get_company_name — unit tests
+    # ------------------------------------------------------------------
+
+    def test_get_company_name_returns_list(self):
+        """Harus return list"""
+        mock_data = [frappe._dict({"company_name": "PT Test"})]
+        with patch("resto.repositories.menu_repository.frappe.get_all", return_value=mock_data):
+            result = self.repo.get_company_name()
+        self.assertIsInstance(result, list)
+
+    def test_get_company_name_calls_with_correct_args(self):
+        """Harus query Company dengan fields company_name, limit 1, order creation asc"""
+        with patch("resto.repositories.menu_repository.frappe.get_all", return_value=[]) as mock_get_all:
+            self.repo.get_company_name()
+            mock_get_all.assert_called_once_with(
+                "Company",
+                fields=["company_name"],
+                limit_page_length=1,
+                order_by="creation asc"
+            )
+
+    def test_get_company_name_returns_empty_when_no_company(self):
+        """Harus return [] jika tidak ada company"""
+        with patch("resto.repositories.menu_repository.frappe.get_all", return_value=[]):
+            result = self.repo.get_company_name()
+        self.assertEqual(result, [])
+
+    # ------------------------------------------------------------------
+    # get_company_name — integration test
+    # ------------------------------------------------------------------
+
+    def test_get_company_name_integration_returns_company(self):
+        """Harus return minimal satu company dari DB"""
+        result = self.repo.get_company_name()
+        self.assertIsInstance(result, list)
+        self.assertGreater(len(result), 0)
+        self.assertIn("company_name", result[0])
