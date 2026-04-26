@@ -2032,17 +2032,8 @@ def remove_discount(pos_invoice):
 
 @frappe.whitelist()
 def create_payment(pos_invoice, amount, mode_of_payment):
-    doc = frappe.get_doc("POS Invoice", pos_invoice)
-    doc.append("payments", {
-        "mode_of_payment": mode_of_payment,
-        "amount": amount
-    })
-    doc.submit()
-    
-    clear_table_merged(pos_invoice)
-
-    frappe.db.commit()
-    return {"ok": True, "message": "Pembayaran berhasil ditambahkan", "pos_invoice": pos_invoice}
+    from resto.services.payment_service import PaymentService
+    return PaymentService().create_payment(pos_invoice, amount, mode_of_payment)
 
 def get_table_names_from_pos_invoice(pos_invoice_name: str) -> str:
     tables = frappe.get_all(
@@ -2058,7 +2049,8 @@ def clear_table_merged(pos_invoice):
     """Fungsi untuk mengosongkan meja setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
     tables = get_table_names_from_pos_invoice(pos_invoice)
     for table in tables.split(", "):
-        clear_table(table)
+        if table:
+            clear_table(table)
 
 def delete_merge_invoice(pos_invoice):
     """Fungsi untuk menghapus invoice setelah merge, dengan catatan invoice sudah dipindahkan ke meja lain"""
