@@ -1811,14 +1811,8 @@ def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
 
 @frappe.whitelist(allow_guest=True)
 def get_company_name():
-    company = frappe.get_all(
-        "Company",
-        fields=["company_name"],
-        limit_page_length=1,
-        order_by="creation asc"
-    )
-
-    return company
+    from resto.repositories.menu_repository import MenuRepository
+    return MenuRepository().get_company_name()
 
 @frappe.whitelist()
 def print_void_item(pos_invoice: str):
