@@ -18,3 +18,9 @@ class TableRepository:
             ],
             order_by="table_name asc"
         )
+
+    def table_exists(self, name):
+        return bool(frappe.db.exists("Table", name))
+
+    def invoice_exists(self, name):
+        return bool(frappe.db.exists("POS Invoice", name))

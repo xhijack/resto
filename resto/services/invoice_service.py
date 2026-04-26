@@ -214,3 +214,25 @@ class InvoiceService:
         self.repo.save_invoice(doc)
 
         return {"ok": True, "message": "Diskon berhasil diterapkan", "pos_invoice": pos_invoice}
+
+    # ------------------------------------------------------------------
+    # move_items_from_invoice
+    # ------------------------------------------------------------------
+
+    SKIP_FIELDS = {"name", "parent", "parenttype", "parentfield", "idx"}
+
+    def move_items_from_invoice(self, source_name, target_name):
+        source = self.repo.get_invoice(source_name)
+        target = self.repo.get_invoice(target_name)
+
+        for item in source.get("items"):
+            fields = item.meta.get_fieldnames_with_value()
+            row = {f: item.get(f) for f in fields if f not in self.SKIP_FIELDS}
+            target.append("items", row)
+
+        source.is_merged = 1
+        source.merge_invoice = target_name
+
+        source.save()
+        target.save()
+        frappe.db.commit()

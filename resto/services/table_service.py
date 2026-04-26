@@ -1,6 +1,7 @@
 import json
 import frappe
 from resto.repositories.table_repository import TableRepository
+from resto.services.invoice_service import InvoiceService
 
 
 class TableService:
@@ -81,6 +82,37 @@ class TableService:
 
         self.repo.save_table(doc)
         return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
+
+    def merge_table(self, pos_invoice, source_table=None, target_table=None):
+        if not source_table:
+            frappe.throw("source_table wajib diisi")
+        if not target_table:
+            frappe.throw("target_table wajib diisi")
+
+        if not self.repo.table_exists(source_table):
+            frappe.throw(f"Table '{source_table}' tidak ditemukan")
+
+        if not self.repo.invoice_exists(pos_invoice):
+            frappe.throw(f"POS Invoice '{pos_invoice}' tidak ditemukan")
+
+        source_invoice = self.repo.get_invoice(pos_invoice)
+        if source_invoice.docstatus == 1:
+            frappe.throw(f"POS Invoice '{pos_invoice}' sudah disubmit dan tidak dapat di-merge")
+
+        invoice_service = InvoiceService(repo=self.repo)
+
+        for tbl in target_table:
+            if tbl == source_table:
+                continue
+            if not self.repo.table_exists(tbl):
+                continue
+
+            target_table_doc = self.repo.get_table(tbl)
+            for order in target_table_doc.get("orders", []):
+                target_invoice_name = order.invoice_name
+                invoice_service.move_items_from_invoice(pos_invoice, target_invoice_name)
+
+        return {"ok": True}
 
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()

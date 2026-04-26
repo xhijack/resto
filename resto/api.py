@@ -1581,86 +1581,19 @@ def move_table(pos_invoice):
     pass
 
 @frappe.whitelist()
-def merge_table(pos_invoice, source_table, target_table=[]):
-    """
-    Memindahkan semua item dari invoice yang ada di meja target ke dalam invoice sumber (pos_invoice),
-    lalu memperbarui referensi invoice di meja target menjadi pos_invoice.
-    """
-    # Validasi
-    if not source_table:
-        frappe.throw("Source table harus diisi")
-    if not target_table:
-        frappe.throw("Target table tidak boleh kosong")
-
-    # Cek keberadaan source table
-    if not frappe.db.exists("Table", source_table):
-        frappe.throw(f"Meja {source_table} tidak ditemukan")
-
-    # Cek keberadaan pos_invoice
-    if not frappe.db.exists("POS Invoice", pos_invoice):
-        frappe.throw(f"Invoice {pos_invoice} tidak ditemukan")
-
-    # Ambil dokumen source invoice
-    target_invoice_doc = frappe.get_doc("POS Invoice", pos_invoice)
-
-    # Loop setiap target table
-    for target_name in target_table:
-        if target_name == source_table:
-            frappe.msgprint(f"Meja {target_name} sama dengan sumber, dilewati")
-            continue
-
-        if not frappe.db.exists("Table", target_name):
-            frappe.msgprint(f"Meja {target_name} tidak ditemukan, dilewati")
-            continue
-
-        target_table_doc = frappe.get_doc("Table", target_name)
-
-        # Ambil semua invoice dari child table orders
-        invoice_names = [row.invoice_name for row in target_table_doc.get("orders") if row.invoice_name]
-
-        # Proses setiap invoice target
-        for inv_name in invoice_names:
-            # Pindahkan item dari invoice target ke invoice source
-            move_items_from_invoice(inv_name, pos_invoice)
-
-            # Update baris orders di meja target: ubah invoice_name menjadi pos_invoice
-            # Kita loop semua baris orders yang memiliki invoice_name == inv_name, ubah
-            for row in target_table_doc.get("orders"):
-                if row.invoice_name == inv_name:
-                    row.invoice_name = pos_invoice
-
-            # Opsional: Batalkan invoice target (misal ubah status jadi Cancelled)
-            # cancel_invoice(inv_name)
-
-        # Simpan perubahan meja target
-        target_table_doc.save()
-
-    delete_merge_invoice(pos_invoice)
-    return {
-        "ok": True,
-        "message": f"Berhasil menggabungkan {len(target_table)} meja ke {source_table}"
-    }
+def merge_table(pos_invoice, source_table, target_table=None):
+    import json
+    if isinstance(target_table, str):
+        try:
+            target_table = json.loads(target_table)
+        except Exception:
+            target_table = [target_table]
+    from resto.services.table_service import TableService
+    return TableService().merge_table(pos_invoice, source_table=source_table, target_table=target_table)
 
 def move_items_from_invoice(source_invoice_name, target_invoice_name):
-    """Memindahkan semua item dari source_invoice ke target_invoice."""
-    source_invoice = frappe.get_doc("POS Invoice", source_invoice_name)
-    target_invoice = frappe.get_doc("POS Invoice", target_invoice_name)
-
-    for item in source_invoice.get("items"):
-        # Salin field item, kecuali field parent, name, idx
-        new_item = {}
-        for field in item.meta.get_fieldnames_with_value():
-            if field not in ["name", "parent", "parenttype", "parentfield", "idx"]:
-                new_item[field] = item.get(field)
-
-        # Tambahkan item ke target invoice
-        target_invoice.append("items", new_item)
-
-    # Simpan target invoice
-    source_invoice.is_merged = 1
-    source_invoice.merge_invoice = target_invoice_name
-    source_invoice.save()
-    target_invoice.save()
+    from resto.services.invoice_service import InvoiceService
+    InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)
 
 
 @frappe.whitelist()
