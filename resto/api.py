@@ -1707,15 +1707,15 @@ def get_select_options(doctype, fieldname):
 
 @frappe.whitelist()
 def get_active_pos_profile_for_user(user):
-    from resto.repositories.pos_repository import POSRepository
-    return POSRepository().get_active_pos_profile_for_user(user)
+    from resto.services.pos_service import POSService
+    return POSService().get_active_pos_profile_for_user(user)
 
 import frappe
 
 @frappe.whitelist()
 def get_active_pos_opening():
-    from resto.repositories.pos_repository import POSRepository
-    return POSRepository().get_active_pos_opening(frappe.session.user)
+    from resto.services.pos_service import POSService
+    return POSService().get_active_pos_opening(frappe.session.user)
 
 @frappe.whitelist()
 def check_pos_status_for_user(user=None):
