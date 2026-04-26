@@ -1712,45 +1712,9 @@ def get_active_pos_opening():
 
 @frappe.whitelist()
 def check_pos_status_for_user(user=None):
-    import frappe
-    from frappe.utils import getdate, nowdate, add_days
-
+    from resto.services.pos_service import POSService
     user = user or frappe.session.user
-    today = nowdate()
-
-    pos_profiles = frappe.get_all(
-        "POS Profile User",
-        filters={"user": user},
-        pluck="parent"
-    )
-
-    if not pos_profiles:
-        frappe.throw("User tidak punya POS Profile")
-
-    # cek POS yang masih open dari hari sebelumnya
-    end_day_pending = frappe.db.exists(
-        "POS Opening Entry",
-        {
-            "pos_profile": ["in", pos_profiles],
-            "status": "Open",
-            "posting_date": ["<", today]
-        }
-    )
-
-    # cek POS opening hari ini
-    today_opening = frappe.db.exists(
-        "POS Opening Entry",
-        {
-            "pos_profile": ["in", pos_profiles],
-            "status": "Open",
-            "posting_date": today
-        }
-    )
-
-    return {
-        "end_day_pending": bool(end_day_pending),
-        "today_opening": bool(today_opening)
-    }
+    return POSService().check_pos_status_for_user(user)
 
 @frappe.whitelist()
 def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
