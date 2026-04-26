@@ -156,97 +156,16 @@ def create_customer(name, mobile_no=None):
 
 @frappe.whitelist()
 def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
-    doc = frappe.get_doc("Table", name)
-
-    if status == "Kosong":
-        doc.status = "Kosong"
-        doc.taken_by = ""
-        doc.pax = 0
-        doc.customer = ""
-        doc.type_customer = ""
-        doc.checked = 0
-        doc.orders = []
-    else:
-        if checked is not None:
-            doc.checked = int(checked)
-        if status is not None:
-            doc.status = status
-        if taken_by is not None:
-            doc.taken_by = taken_by
-        if pax is not None:
-            doc.pax = int(pax)
-        if customer is not None:
-            doc.customer = customer
-        if type_customer is not None:
-            doc.type_customer = type_customer
-        if orders is not None:
-
-            if isinstance(orders, str):
-                try:
-                    orders = json.loads(orders)
-                except Exception:
-                    frappe.log_error("Gagal parse orders JSON", orders)
-                    orders = []
-
-            if not isinstance(orders, list):
-                orders = []
-
-            # ambil invoice yang sudah ada
-            existing_invoices = {d.invoice_name for d in doc.orders}
-
-            for o in orders:
-                invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
-
-                if invoice_name and invoice_name not in existing_invoices:
-                    doc.append("orders", {"invoice_name": invoice_name})
-
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {
-        "success": True,
-        "message": f"Table {doc.name} updated successfully",
-        "checked": getattr(doc, "checked", None)
-    }
+    from resto.services.table_service import TableService
+    return TableService().update_table_status(
+        name, status=status, taken_by=taken_by, pax=pax,
+        customer=customer, type_customer=type_customer, orders=orders, checked=checked
+    )
 
 @frappe.whitelist()
 def add_table_order(table_name, order):
-    """Tambah order baru ke Table tanpa menghapus orders lama"""
-    import json
-
-    if not table_name or not order:
-        frappe.throw("Table name dan order wajib diisi.")
-
-    # Ambil dokumen Table
-    doc = frappe.get_doc("Table", table_name)
-
-    # Pastikan order bisa dibaca (bisa dikirim sebagai dict atau JSON string)
-    if isinstance(order, str):
-        try:
-            order = json.loads(order)
-        except Exception:
-            order = {"invoice_name": order}
-
-    invoice_name = order.get("invoice_name")
-    if not invoice_name:
-        frappe.throw("Field 'invoice_name' wajib ada di order.")
-
-    # Cek apakah invoice_name sudah ada
-    existing_invoices = {o.invoice_name for o in doc.orders}
-    if invoice_name in existing_invoices:
-        return {"success": False, "message": f"Invoice {invoice_name} sudah ada di Table {table_name}"}
-
-    # Tambahkan order baru
-    doc.append("orders", {"invoice_name": invoice_name})
-
-    # Ubah status jadi 'Terisi' jika sebelumnya kosong
-    if doc.status == "Kosong":
-        doc.status = "Terisi"
-
-    doc.save(ignore_permissions=True)
-    frappe.db.commit()
-
-    return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
+    from resto.services.table_service import TableService
+    return TableService().add_table_order(table_name, order)
 
 @frappe.whitelist()
 def get_select_options(doctype, fieldname):
@@ -772,47 +691,8 @@ def get_branch_menu_for_kitchen_printing(pos_name: str):
 
 @frappe.whitelist(allow_guest=True)
 def get_all_tables_with_details():
-    tables = frappe.get_all(
-        "Table",
-        fields=[
-            "name",
-            "table_name",
-            "status",
-            "table_type",
-            "zone",
-            "customer",
-            "pax",
-            "type_customer",
-            "floor",
-            "taken_by",
-            "checked",
-            # "order",
-        ],
-        order_by="table_name asc"
-    )
-
-    result = []
-    for t in tables:
-        doc = frappe.get_doc("Table", t.name)
-        result.append({
-            "id": t.name,
-            "name": t.table_name,
-            "status": t.status or "Kosong",
-            "type": t.table_type,
-            "zone": t.zone,
-            "customer": t.customer or None,
-            "pax": t.pax or 0,
-            "typeCustomer": t.type_customer or None,
-            "floor": t.floor or "1",
-            "takenBy": t.taken_by or None,
-            "checked": t.checked,
-            # "order": t.order or None,
-            "orders": [
-                {"invoice_name": o.invoice_name} for o in doc.orders
-            ],
-        })
-
-    return result
+    from resto.services.table_service import TableService
+    return TableService().get_all_tables_with_details()
 
 @frappe.whitelist()
 def print_bill_now(invoice_name: str, branch: str, table_name=None,
