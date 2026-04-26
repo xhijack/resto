@@ -405,7 +405,7 @@ class TestApplyDiscount(RestoPOSTestBase):
         invoice = self._create_test_pos_invoice(qty=1, rate=100)
         with self.assertRaises(frappe.ValidationError) as cm:
             apply_discount(invoice.name, discount_percentage=-10)
-        self.assertIn("Tidak ada discount", str(cm.exception))
+        self.assertIn("tidak boleh negatif", str(cm.exception))
     
     def test_apply_discount_with_name_and_bank(self):
         """Memastikan discount_name dan discount_for_bank tersimpan"""
