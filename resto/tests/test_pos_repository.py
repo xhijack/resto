@@ -1,8 +1,7 @@
 import frappe
 from unittest.mock import patch
-from frappe.tests.utils import FrappeTestCase
-from resto.repositories.pos_repository import POSRepository
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
+from resto.repositories.pos_repository import POSRepository
 
 
 class TestPOSRepository(RestoPOSTestBase):
@@ -11,96 +10,71 @@ class TestPOSRepository(RestoPOSTestBase):
         self.repo = POSRepository()
 
     # ------------------------------------------------------------------
-    # Unit tests (mock) — get_active_pos_profile_for_user
+    # Unit tests — get_pos_profiles_for_user
     # ------------------------------------------------------------------
 
-    def test_get_active_pos_profile_throws_when_user_has_no_profile(self):
-        """Harus throw jika user tidak punya POS Profile"""
-        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[]), \
-             patch("resto.repositories.pos_repository.frappe.throw", side_effect=frappe.ValidationError("no profile")):
-            with self.assertRaises(frappe.ValidationError):
-                self.repo.get_active_pos_profile_for_user("user@test.com")
+    def test_get_pos_profiles_returns_empty_when_user_has_none(self):
+        """Harus return [] jika user tidak punya POS Profile"""
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[]):
+            result = self.repo.get_pos_profiles_for_user("nobody@test.com")
+            self.assertEqual(result, [])
 
-    def test_get_active_pos_profile_throws_when_no_open_entry(self):
-        """Harus throw jika tidak ada POS Opening Entry yang Open"""
-        def fake_get_all(doctype, **kwargs):
-            if doctype == "POS Profile User":
-                return ["PROF-001"]
-            return []
-
-        with patch("resto.repositories.pos_repository.frappe.get_all", side_effect=fake_get_all), \
-             patch("resto.repositories.pos_repository.frappe.throw", side_effect=frappe.ValidationError("not open")):
-            with self.assertRaises(frappe.ValidationError):
-                self.repo.get_active_pos_profile_for_user("user@test.com")
-
-    def test_get_active_pos_profile_returns_first_open_entry(self):
-        """Harus return opening entry pertama yang Open"""
-        expected = {"name": "POS-OPEN-001", "pos_profile": "PROF-001", "user": "user@test.com", "branch": "Cabang A"}
-
-        def fake_get_all(doctype, **kwargs):
-            if doctype == "POS Profile User":
-                return ["PROF-001"]
-            return [expected]
-
-        with patch("resto.repositories.pos_repository.frappe.get_all", side_effect=fake_get_all):
-            result = self.repo.get_active_pos_profile_for_user("user@test.com")
-
-        self.assertEqual(result, expected)
+    def test_get_pos_profiles_returns_profile_names(self):
+        """Harus return list nama POS Profile untuk user"""
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=["PROF-001", "PROF-002"]):
+            result = self.repo.get_pos_profiles_for_user("user@test.com")
+            self.assertEqual(result, ["PROF-001", "PROF-002"])
 
     # ------------------------------------------------------------------
-    # Unit tests (mock) — get_active_pos_opening
+    # Unit tests — find_open_pos_entry
     # ------------------------------------------------------------------
 
-    def test_get_active_pos_opening_throws_when_user_has_no_profile(self):
-        """Harus throw jika user tidak punya POS Profile"""
-        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[]), \
-             patch("resto.repositories.pos_repository.frappe.throw", side_effect=frappe.ValidationError("no profile")):
-            with self.assertRaises(frappe.ValidationError):
-                self.repo.get_active_pos_opening("user@test.com")
+    def test_find_open_pos_entry_returns_none_when_not_found(self):
+        """Harus return None jika tidak ada entry yang Open"""
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[]):
+            result = self.repo.find_open_pos_entry(["PROF-001"])
+            self.assertIsNone(result)
 
-    def test_get_active_pos_opening_throws_when_no_open_entry(self):
-        """Harus throw jika tidak ada POS Opening Entry yang Open"""
-        def fake_get_all(doctype, **kwargs):
-            if doctype == "POS Profile User":
-                return ["PROF-001"]
-            return []
+    def test_find_open_pos_entry_returns_first_result(self):
+        """Harus return item pertama dari hasil query"""
+        entry = frappe._dict({"name": "POS-OPEN-001", "pos_profile": "PROF-001", "user": "u@t.com", "branch": "A"})
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[entry]):
+            result = self.repo.find_open_pos_entry(["PROF-001"])
+            self.assertEqual(result["name"], "POS-OPEN-001")
 
-        with patch("resto.repositories.pos_repository.frappe.get_all", side_effect=fake_get_all), \
-             patch("resto.repositories.pos_repository.frappe.throw", side_effect=frappe.ValidationError("not open")):
-            with self.assertRaises(frappe.ValidationError):
-                self.repo.get_active_pos_opening("user@test.com")
+    # ------------------------------------------------------------------
+    # Unit tests — find_open_pos_opening
+    # ------------------------------------------------------------------
 
-    def test_get_active_pos_opening_returns_correct_fields(self):
+    def test_find_open_pos_opening_returns_none_when_not_found(self):
+        """Harus return None jika tidak ada POS Opening yang Open"""
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[]):
+            result = self.repo.find_open_pos_opening(["PROF-001"])
+            self.assertIsNone(result)
+
+    def test_find_open_pos_opening_returns_correct_fields(self):
         """Harus return fields: name, pos_profile, branch, period_start_date"""
-        expected = {
-            "name": "POS-OPEN-001",
-            "pos_profile": "PROF-001",
-            "branch": "Cabang A",
-            "period_start_date": "2026-04-26 08:00:00"
-        }
-
-        def fake_get_all(doctype, **kwargs):
-            if doctype == "POS Profile User":
-                return ["PROF-001"]
-            return [expected]
-
-        with patch("resto.repositories.pos_repository.frappe.get_all", side_effect=fake_get_all):
-            result = self.repo.get_active_pos_opening("user@test.com")
-
-        self.assertIn("name", result)
-        self.assertIn("pos_profile", result)
-        self.assertIn("branch", result)
-        self.assertIn("period_start_date", result)
+        entry = frappe._dict({
+            "name": "POS-OPEN-001", "pos_profile": "PROF-001",
+            "branch": "Cabang A", "period_start_date": "2026-04-26 08:00:00"
+        })
+        with patch("resto.repositories.pos_repository.frappe.get_all", return_value=[entry]):
+            result = self.repo.find_open_pos_opening(["PROF-001"])
+            self.assertIn("name", result)
+            self.assertIn("pos_profile", result)
+            self.assertIn("branch", result)
+            self.assertIn("period_start_date", result)
 
     # ------------------------------------------------------------------
-    # Integration test — pakai Frappe DB sungguhan
+    # Integration test
     # ------------------------------------------------------------------
 
-    def test_get_active_pos_profile_integration(self):
-        """Harus return opening entry setelah POS dibuka"""
-        opening = self._create_pos_opening_entry()
-        result = self.repo.get_active_pos_profile_for_user(frappe.session.user)
+    def test_find_open_pos_entry_integration(self):
+        """Harus return entry setelah POS dibuka"""
+        self._create_pos_opening_entry()
+        profiles = self.repo.get_pos_profiles_for_user(frappe.session.user)
+        self.assertTrue(len(profiles) > 0)
 
+        result = self.repo.find_open_pos_entry(profiles)
+        self.assertIsNotNone(result)
         self.assertEqual(result["pos_profile"], self.pos_profile.name)
-        self.assertIn("name", result)
-        self.assertIn("branch", result)
