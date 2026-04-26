@@ -2027,15 +2027,8 @@ def apply_discount(pos_invoice=None, discount_percentage=0, discount_amount=0, d
         
 @frappe.whitelist()
 def remove_discount(pos_invoice):
-    doc = frappe.get_doc("POS Invoice", pos_invoice)
-    taxes = doc.taxes
-    for tax in taxes:
-        if tax.description == "Discount":
-            doc.remove(tax)
-            doc.save()
-            frappe.db.commit()
-            return {"ok": True, "message": "Diskon berhasil dihapus", "pos_invoice": pos_invoice}
-    return {"ok": False, "message": "Tidak ditemukan diskon untuk dihapus"}
+    from resto.services.discount_service import DiscountService
+    return DiscountService().remove_discount(pos_invoice)
 
 @frappe.whitelist()
 def create_payment(pos_invoice, amount, mode_of_payment):
