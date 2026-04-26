@@ -80,8 +80,8 @@ def generate_keys(user):
 
 @frappe.whitelist(allow_guest=True)
 def get_branch_list():
-    data = frappe.get_all("Branch", fields=["name", "branch"])
-    return data
+    from resto.repositories.menu_repository import MenuRepository
+    return MenuRepository().get_all_branches()
 
 @frappe.whitelist()
 def get_all_branch_menu_with_children(branch=None):
@@ -1681,40 +1681,8 @@ def end_shift(user=None, is_submit=True):
 
 @frappe.whitelist()
 def get_discounts_with_options():
-    discounts = frappe.get_all(
-        "Discount",
-        fields=["name", "description"]
-    )
-
-    result = []
-
-    for d in discounts:
-        doc = frappe.get_doc("Discount", d.name)
-
-        result.append({
-            "name": doc.name,
-            "description": doc.description,
-            "discount_options": [
-                {
-                    "label": o.label,
-                    "discount_type": o.discount_type,
-                    "value": o.value,
-                    "min_sales_price": o.min_sales_price,
-                    "max_discount": o.max_discount,
-                    "start_date": o.start_date,
-                    "end_date": o.end_date,
-                }
-                for o in doc.discount_options
-            ],
-            "menu_category": [
-                {
-                    "menu_name": m.menu_name,
-                }
-                for m in doc.menu_category
-            ]
-        })
-
-    return result
+    from resto.repositories.discount_repository import DiscountRepository
+    return DiscountRepository().get_discounts_with_options()
 
 @frappe.whitelist()
 def get_select_options(doctype, fieldname):
@@ -1739,67 +1707,15 @@ def get_select_options(doctype, fieldname):
 
 @frappe.whitelist()
 def get_active_pos_profile_for_user(user):
-    pos_profiles = frappe.get_all(
-        "POS Profile User",
-        filters={"user": user},
-        pluck="parent"
-    )
-
-    if not pos_profiles:
-        frappe.throw("User tidak punya POS Profile")
-
-    opening = frappe.get_all(
-        "POS Opening Entry",
-        filters={
-            "pos_profile": ["in", pos_profiles],
-            "status": "Open"
-        },
-        fields=["name", "pos_profile", "user", "branch"],
-        order_by="creation desc",
-        limit=1
-    )
-
-    if not opening:
-        frappe.throw("POS belum dibuka")
-
-    return opening[0]
+    from resto.repositories.pos_repository import POSRepository
+    return POSRepository().get_active_pos_profile_for_user(user)
 
 import frappe
 
 @frappe.whitelist()
 def get_active_pos_opening():
-    user = frappe.session.user
-
-    pos_profiles = frappe.get_all(
-        "POS Profile User",
-        filters={"user": user},
-        pluck="parent"
-    )
-
-    if not pos_profiles:
-        frappe.throw("User tidak memiliki POS Profile")
-
-    opening = frappe.get_all(
-        "POS Opening Entry",
-        filters={
-            "pos_profile": ["in", pos_profiles],
-            "docstatus": 1,
-            "status": "Open"
-        },
-        fields=[
-            "name",
-            "pos_profile",
-            "branch",
-            "period_start_date"
-        ],
-        order_by="period_start_date desc",
-        limit=1
-    )
-
-    if not opening:
-        frappe.throw("POS belum dibuka hari ini")
-
-    return opening[0]
+    from resto.repositories.pos_repository import POSRepository
+    return POSRepository().get_active_pos_opening(frappe.session.user)
 
 @frappe.whitelist()
 def check_pos_status_for_user(user=None):
