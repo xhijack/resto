@@ -78,3 +78,31 @@ class TestPOSRepository(RestoPOSTestBase):
         result = self.repo.find_open_pos_entry(profiles)
         self.assertIsNotNone(result)
         self.assertEqual(result["pos_profile"], self.pos_profile.name)
+
+    # ------------------------------------------------------------------
+    # Unit tests — has_pending_end_day & has_today_opening
+    # ------------------------------------------------------------------
+
+    def test_has_pending_end_day_returns_false_when_none(self):
+        """Harus return False jika tidak ada POS open dari hari sebelumnya"""
+        with patch("resto.repositories.pos_repository.frappe.db.exists", return_value=None):
+            result = self.repo.has_pending_end_day(["PROF-001"], "2026-04-26")
+        self.assertFalse(result)
+
+    def test_has_pending_end_day_returns_true_when_found(self):
+        """Harus return True jika ada POS open dari hari sebelumnya"""
+        with patch("resto.repositories.pos_repository.frappe.db.exists", return_value="POS-OPEN-001"):
+            result = self.repo.has_pending_end_day(["PROF-001"], "2026-04-26")
+        self.assertTrue(result)
+
+    def test_has_today_opening_returns_false_when_none(self):
+        """Harus return False jika tidak ada POS open hari ini"""
+        with patch("resto.repositories.pos_repository.frappe.db.exists", return_value=None):
+            result = self.repo.has_today_opening(["PROF-001"], "2026-04-26")
+        self.assertFalse(result)
+
+    def test_has_today_opening_returns_true_when_found(self):
+        """Harus return True jika ada POS open hari ini"""
+        with patch("resto.repositories.pos_repository.frappe.db.exists", return_value="POS-OPEN-001"):
+            result = self.repo.has_today_opening(["PROF-001"], "2026-04-26")
+        self.assertTrue(result)

@@ -35,3 +35,17 @@ class POSRepository:
             limit=1
         )
         return result[0] if result else None
+
+    def has_pending_end_day(self, pos_profiles, today):
+        return bool(frappe.db.exists("POS Opening Entry", {
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open",
+            "posting_date": ["<", today]
+        }))
+
+    def has_today_opening(self, pos_profiles, today):
+        return bool(frappe.db.exists("POS Opening Entry", {
+            "pos_profile": ["in", pos_profiles],
+            "status": "Open",
+            "posting_date": today
+        }))
