@@ -76,6 +76,47 @@ class TestPOSService(RestoPOSTestBase):
         self.assertEqual(result, expected)
 
     # ------------------------------------------------------------------
+    # Unit tests — check_pos_status_for_user
+    # ------------------------------------------------------------------
+
+    def test_check_pos_status_throws_when_no_profile(self):
+        """Harus throw jika user tidak punya POS Profile"""
+        self.mock_repo.get_pos_profiles_for_user.return_value = []
+        with self.assertRaises(frappe.ValidationError):
+            self.service.check_pos_status_for_user("user@test.com")
+
+    def test_check_pos_status_returns_both_flags(self):
+        """Harus return dict dengan end_day_pending dan today_opening"""
+        self.mock_repo.get_pos_profiles_for_user.return_value = ["PROF-001"]
+        self.mock_repo.has_pending_end_day.return_value = False
+        self.mock_repo.has_today_opening.return_value = True
+
+        result = self.service.check_pos_status_for_user("user@test.com")
+
+        self.assertIn("end_day_pending", result)
+        self.assertIn("today_opening", result)
+
+    def test_check_pos_status_end_day_pending_true(self):
+        """end_day_pending harus True jika repo return True"""
+        self.mock_repo.get_pos_profiles_for_user.return_value = ["PROF-001"]
+        self.mock_repo.has_pending_end_day.return_value = True
+        self.mock_repo.has_today_opening.return_value = False
+
+        result = self.service.check_pos_status_for_user("user@test.com")
+        self.assertTrue(result["end_day_pending"])
+        self.assertFalse(result["today_opening"])
+
+    def test_check_pos_status_today_opening_true(self):
+        """today_opening harus True jika repo return True"""
+        self.mock_repo.get_pos_profiles_for_user.return_value = ["PROF-001"]
+        self.mock_repo.has_pending_end_day.return_value = False
+        self.mock_repo.has_today_opening.return_value = True
+
+        result = self.service.check_pos_status_for_user("user@test.com")
+        self.assertFalse(result["end_day_pending"])
+        self.assertTrue(result["today_opening"])
+
+    # ------------------------------------------------------------------
     # Integration test
     # ------------------------------------------------------------------
 
