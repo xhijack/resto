@@ -125,9 +125,13 @@ class TableService:
             target_table_doc = self.repo.get_table(tbl)
             for order in target_table_doc.get("orders", []):
                 target_invoice_name = order.invoice_name
-                invoice_service.move_items_from_invoice(pos_invoice, target_invoice_name)
+                invoice_service.move_items_from_invoice(target_invoice_name, pos_invoice)
 
-        return {"ok": True}
+        invoice_service.delete_merge_invoice(pos_invoice)
+        return {
+            "ok": True,
+            "message": f"Berhasil menggabungkan {len(target_table)} meja ke {source_table}"
+        }
 
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()
