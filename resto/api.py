@@ -1220,6 +1220,48 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
     )
 
     paid_invoice_names = [i.name for i in paid_invoices]
+    
+    time_data = frappe.db.sql("""
+        SELECT
+            HOUR(pi.posting_time) AS hour,
+            COUNT(pi.name) AS total_bill,
+            SUM(pi.grand_total) AS total_amount,
+            SUM(pi.pax) AS total_pax
+        FROM `tabPOS Invoice` pi
+        WHERE pi.name IN %(inv)s
+        GROUP BY HOUR(pi.posting_time)
+    """, {"inv": tuple(paid_invoice_names)}, as_dict=True)
+    
+    time_ranges = [
+        {"label": "09.00-12.00 - Happy Hour", "start": 9, "end": 12},
+        {"label": "12.00-15.00 - Lunch", "start": 12, "end": 15},
+        {"label": "15.00-17.00 - High Tea", "start": 15, "end": 17},
+        {"label": "17.00-21.00 - Dinner", "start": 17, "end": 21},
+    ]
+
+    session_summary = {}
+    
+    for r in time_ranges:
+        bills = 0
+        amount = 0
+        pax = 0
+
+        for t in time_data:
+            if r["start"] <= t.hour < r["end"]:
+                bills += t.total_bill or 0
+                amount += t.total_amount or 0
+                pax += t.total_pax or 0
+
+        avg_pax = (pax / bills) if bills else 0
+        avg_bill = (amount / bills) if bills else 0
+
+        session_summary[r["label"]] = {
+            "pax": int(pax),
+            "bill": int(bills),
+            "amount": flt(amount),
+            "avg_pax": round(avg_pax, 2),
+            "avg_bill": round(avg_bill, 2)
+        }
 
     # =====================================================
     # 2. DRAFT POS INVOICE (BELUM PAID)
@@ -1466,7 +1508,8 @@ def get_end_day_report_v2(posting_date=None, outlet=None, do_print=False):
         "discount_by_order_type": discount_order_type,
         "draft": draft_summary,
         "void_bill": void_bill_summary,
-        "void_menu": void_summary
+        "void_menu": void_summary,
+        "session_time": session_summary
     }
     
     # =====================================================

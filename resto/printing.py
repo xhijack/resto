@@ -2049,7 +2049,7 @@ def print_shift_report(closing_name, printer_name=None):
         frappe.log_error(f"Gagal mencetak laporan shift: {str(e)}", "Print Error")
         raise
     
-def print_end_day_report_v2(report_data, printer_name=None):
+def print_end_day_report_v2(report_data, printer_name=None, debug=False):
     """
     Print End Day Report dari API get_end_day_report_v2
     Layout aman untuk printer thermal 58mm (32 char)
@@ -2098,6 +2098,7 @@ def print_end_day_report_v2(report_data, printer_name=None):
     draft = report_data.get("draft", {})
     void_bill = report_data.get("void_bill", {})
     void_menu = report_data.get("void_menu", {})
+    session_time = report_data.get("session_time", {})
 
     # =========================
     # HEADER
@@ -2288,6 +2289,21 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append(format_lr("Total Bill", void_bill.get("total_bill", 0)))
     lines.append(format_lr("Amount", fmt_amt(void_bill.get("total_amount", 0))))
     lines.append("")
+    
+    # =========================
+    # SESSION TIME
+    # =========================
+    if session_time:
+        lines.append("SESSION TIME")
+        lines.append(line())
+
+        for label, val in session_time.items():
+            lines.append(label)
+            lines.append(format_lr("Pax", val.get("pax", 0)))
+            lines.append(format_lr("Bill", val.get("bill", 0)))
+            lines.append(format_lr("Avg Pax", val.get("avg_pax", 0)))
+            lines.append(format_lr("Avg Bill", fmt_amt(val.get("avg_bill", 0))))
+            lines.append("")
 
     # =========================
     # DRAFT BILL
@@ -2314,6 +2330,11 @@ def print_end_day_report_v2(report_data, printer_name=None):
     lines.append("")
 
     text = "\n".join(lines)
+    
+    if debug:
+        print("\n".join(lines))
+        return text  
+    
     esc_commads = _esc_feed(8) + _esc_cut_full()
     out = text.encode("ascii", "ignore") + esc_commads
 
