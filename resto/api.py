@@ -106,18 +106,6 @@ def add_table_order(table_name, order):
     from resto.services.table_service import TableService
     return TableService().add_table_order(table_name, order)
 
-@frappe.whitelist()
-def get_select_options(doctype, fieldname):
-    meta = frappe.get_meta(doctype)
-    field = next((f for f in meta.fields if f.fieldname == fieldname and f.fieldtype == "Select"), None)
-
-    if not field:
-        frappe.throw(f"Field {fieldname} bukan Select di {doctype}")
-
-    options = [opt for opt in (field.options or "").split("\n") if opt]
-
-    return {"options": options}
-
 def create_pos_invoice(payload):
     from resto.services.invoice_service import InvoiceService
     return InvoiceService().create_pos_invoice(payload)
