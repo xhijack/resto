@@ -270,3 +270,201 @@ class TestTableService(RestoPOSTestBase):
         reloaded = frappe.get_doc("Table", table.name)
         invoice_names = [o.invoice_name for o in reloaded.orders]
         self.assertIn(invoice.name, invoice_names)
+
+    # ------------------------------------------------------------------
+    # Unit tests — merge_table (scenario 1: print check + table move)
+    # ------------------------------------------------------------------
+
+    def test_merge_table_calls_move_items_for_each_target_order(self):
+        """move_items_from_invoice harus dipanggil untuk setiap order di target table"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+
+        order1 = MagicMock()
+        order1.invoice_name = "INV-TGT-001"
+        order2 = MagicMock()
+        order2.invoice_name = "INV-TGT-002"
+        target_doc = MagicMock()
+        target_doc.get.return_value = [order1, order2]
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.return_value = target_doc
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-TGT"])
+
+        self.assertEqual(mock_invoice_service.move_items_from_invoice.call_count, 2)
+
+    def test_merge_table_rejects_submitted_invoice(self):
+        """Harus throw jika source invoice sudah disubmit (docstatus=1)"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 1
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-TGT"])
+
+    def test_merge_table_skips_missing_target_table(self):
+        """Target table yang tidak ada di DB harus di-skip, tidak error"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+
+        def table_exists_side_effect(name):
+            return name != "TBL-MISSING"
+
+        self.mock_repo.table_exists.side_effect = table_exists_side_effect
+        self.mock_repo.invoice_exists.return_value = True
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            result = self.service.merge_table(
+                "INV-SRC",
+                source_table="TBL-SRC",
+                target_table=["TBL-MISSING"]
+            )
+
+        mock_invoice_service.move_items_from_invoice.assert_not_called()
+        self.assertTrue(result["ok"])
+
+    def test_merge_table_skips_self_as_target(self):
+        """Source table yang muncul di target_table harus di-skip"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.return_value = target_doc
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            result = self.service.merge_table(
+                "INV-SRC",
+                source_table="TBL-SRC",
+                target_table=["TBL-SRC"]
+            )
+
+        mock_invoice_service.move_items_from_invoice.assert_not_called()
+        self.assertTrue(result["ok"])
+
+    # ------------------------------------------------------------------
+    # Extreme variation tests — merge_table edge cases
+    # ------------------------------------------------------------------
+
+    def test_merge_table_with_empty_target_table_list_returns_ok(self):
+        """target_table=[] → tidak ada iterasi, langsung return ok=True"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            result = self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=[])
+
+        mock_invoice_service.move_items_from_invoice.assert_not_called()
+        self.assertTrue(result["ok"])
+
+    def test_merge_table_calls_delete_merge_invoice_at_end(self):
+        """delete_merge_invoice harus dipanggil sekali dengan pos_invoice source"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+        target_doc = MagicMock()
+        order1 = MagicMock()
+        order1.invoice_name = "INV-TGT-001"
+        target_doc.get.return_value = [order1]
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.return_value = target_doc
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-TGT"])
+
+        mock_invoice_service.delete_merge_invoice.assert_called_once_with("INV-SRC")
+
+    def test_merge_table_target_with_no_orders_skips_move_items(self):
+        """Target table dengan 0 orders → move_items tidak dipanggil untuk table itu"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+        target_doc = MagicMock()
+        target_doc.get.return_value = []  # no orders in target
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.return_value = target_doc
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            result = self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-TGT"])
+
+        mock_invoice_service.move_items_from_invoice.assert_not_called()
+        self.assertTrue(result["ok"])
+
+    def test_merge_table_multiple_targets_move_items_called_per_order(self):
+        """2 target tables, masing-masing punya 1 order → move_items dipanggil 2x"""
+        mock_inv_repo = MagicMock()
+        mock_source_invoice = MagicMock()
+        mock_source_invoice.docstatus = 0
+        mock_inv_repo.get_invoice.return_value = mock_source_invoice
+
+        mock_invoice_service = MagicMock()
+
+        order_t1 = MagicMock()
+        order_t1.invoice_name = "INV-TGT-A"
+        doc_t1 = MagicMock()
+        doc_t1.get.return_value = [order_t1]
+
+        order_t2 = MagicMock()
+        order_t2.invoice_name = "INV-TGT-B"
+        doc_t2 = MagicMock()
+        doc_t2.get.return_value = [order_t2]
+
+        call_count = [0]
+        def get_table_side(name):
+            call_count[0] += 1
+            return doc_t1 if name == "TBL-A" else doc_t2
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.side_effect = get_table_side
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-A", "TBL-B"])
+
+        self.assertEqual(mock_invoice_service.move_items_from_invoice.call_count, 2)

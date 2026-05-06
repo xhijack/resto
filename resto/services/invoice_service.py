@@ -234,9 +234,19 @@ class InvoiceService:
             row = {f: item.get(f) for f in fields if f not in self.SKIP_FIELDS}
             target.append("items", row)
 
-        source.is_merged = 1
-        source.merge_invoice = target_name
+        # Use set_value to avoid triggering full validate() on source — the invoice
+        # may have tax rows with row_id set for non-row-reference charge types, which
+        # causes ValidationError in calculate_taxes_and_totals when save() runs.
+        frappe.db.set_value("POS Invoice", source_name, {
+            "is_merged": 1,
+            "merge_invoice": target_name,
+        })
 
-        source.save()
+        # Clear row_id from tax rows that don't depend on a previous row before saving
+        # target, to avoid the same ValidationError (same fix used in apply_discount).
+        for tax in target.get("taxes", []):
+            if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
+                tax.row_id = None
+
         target.save()
         frappe.db.commit()

@@ -188,6 +188,105 @@ class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
             service.apply_discount(pos_invoice="INV-001", discount_percentage=10)
 
     # ------------------------------------------------------------------
+    # Unit tests — move_items_from_invoice (scenario 2+3)
+    # ------------------------------------------------------------------
+
+    def test_move_items_appends_items_to_target(self):
+        """move_items_from_invoice harus append item source ke target invoice"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty", "rate", "status_kitchen"]
+        source_item.get.side_effect = lambda f: {"item_code": "ITEM-001", "qty": 2, "rate": 10000, "status_kitchen": ""}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+
+        target_doc = MagicMock()
+        target_doc.get.return_value = []  # no taxes in target
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        target_doc.append.assert_called_once()
+        call_args = target_doc.append.call_args[0]
+        self.assertEqual(call_args[0], "items")
+        self.assertIsInstance(call_args[1], dict)
+        self.assertEqual(call_args[1].get("item_code"), "ITEM-001")
+
+    def test_move_items_marks_source_as_merged(self):
+        """Source invoice harus di-set is_merged=1 dan merge_invoice via frappe.db.set_value"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 1}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db") as mock_db:
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        mock_db.set_value.assert_called_once_with(
+            "POS Invoice", "INV-SRC",
+            {"is_merged": 1, "merge_invoice": "INV-TGT"}
+        )
+
+    def test_move_items_preserves_void_menu_items(self):
+        """Items dengan status_kitchen=Void Menu tetap ter-append ke target (scenario 2)"""
+        mock_repo = MagicMock()
+
+        void_item = MagicMock()
+        void_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty", "status_kitchen"]
+        void_item.get.side_effect = lambda f: {
+            "item_code": "ITEM-VOID", "qty": 1, "status_kitchen": "Void Menu"
+        }[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [void_item]
+        target_doc = MagicMock()
+        target_doc.get.return_value = []  # no taxes
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        target_doc.append.assert_called_once()
+        appended_row = target_doc.append.call_args[0][1]
+        self.assertEqual(appended_row.get("status_kitchen"), "Void Menu")
+
+    def test_delete_merge_invoice_calls_delete_on_merged_invoices(self):
+        """delete_merge_invoice harus hapus semua merged invoices (scenario 2)"""
+        mock_repo = MagicMock()
+        merged_doc1 = MagicMock()
+        merged_doc2 = MagicMock()
+        mock_repo.get_merged_invoices.return_value = [merged_doc1, merged_doc2]
+
+        service = InvoiceService(repo=mock_repo)
+        service.delete_merge_invoice("INV-BASE")
+
+        merged_doc1.delete.assert_called_once()
+        merged_doc2.delete.assert_called_once()
+
+    def test_delete_merge_invoice_does_not_delete_base_invoice(self):
+        """delete_merge_invoice tidak boleh hapus invoice base (target)"""
+        mock_repo = MagicMock()
+        mock_repo.get_merged_invoices.return_value = []
+
+        service = InvoiceService(repo=mock_repo)
+        service.delete_merge_invoice("INV-BASE")
+
+        mock_repo.get_invoice.assert_not_called()
+
+    # ------------------------------------------------------------------
     # Integration test
     # ------------------------------------------------------------------
 
@@ -202,3 +301,131 @@ class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
             user=frappe.session.user
         )
         self.assertTrue(result["ok"])
+
+    # ------------------------------------------------------------------
+    # Extreme variation tests — move_items_from_invoice edge cases
+    # ------------------------------------------------------------------
+
+    def test_move_items_with_zero_items_in_source_appends_nothing(self):
+        """source.get('items') = [] → target.append never called"""
+        mock_repo = MagicMock()
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = []
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        target_doc.append.assert_not_called()
+
+    def test_move_items_excludes_name_and_parent_from_row_dict(self):
+        """Fields 'name' dan 'parent' harus di-exclude dari row yang di-append ke target"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty", "name", "parent"]
+        source_item.get.side_effect = lambda f: {
+            "item_code": "ITEM-001", "qty": 1, "name": "row-001", "parent": "INV-SRC"
+        }[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        call_args = target_doc.append.call_args[0][1]
+        self.assertNotIn("name", call_args)
+        self.assertNotIn("parent", call_args)
+
+    def test_move_items_clears_row_id_for_non_prev_row_charge_type(self):
+        """row_id harus di-clear untuk tax dengan charge_type bukan 'On Previous Row...'"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 1}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+
+        tax_row = MagicMock()
+        tax_row.charge_type = "Actual"
+        tax_row.row_id = "tax-row-001"
+
+        target_doc = MagicMock()
+        target_doc.get.return_value = [tax_row]
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        self.assertIsNone(tax_row.row_id)
+
+    def test_move_items_preserves_row_id_for_prev_row_amount_charge_type(self):
+        """row_id harus DIPERTAHANKAN untuk charge_type 'On Previous Row Amount'"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 1}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+
+        tax_row = MagicMock()
+        tax_row.charge_type = "On Previous Row Amount"
+        tax_row.row_id = "tax-row-999"
+
+        target_doc = MagicMock()
+        target_doc.get.return_value = [tax_row]
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        self.assertEqual(tax_row.row_id, "tax-row-999")
+
+    def test_delete_merge_invoice_with_empty_list_does_nothing(self):
+        """get_merged_invoices returns [] → delete tidak pernah dipanggil"""
+        mock_repo = MagicMock()
+        mock_repo.get_merged_invoices.return_value = []
+
+        service = InvoiceService(repo=mock_repo)
+        service.delete_merge_invoice("INV-BASE")
+
+        mock_repo.get_invoice.assert_not_called()
+
+    def test_move_items_uses_db_set_value_not_source_save(self):
+        """frappe.db.set_value dipanggil untuk source — source.save() tidak boleh dipanggil"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 1}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db") as mock_db:
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        source_doc.save.assert_not_called()
+        mock_db.set_value.assert_called_once_with(
+            "POS Invoice", "INV-SRC",
+            {"is_merged": 1, "merge_invoice": "INV-TGT"}
+        )

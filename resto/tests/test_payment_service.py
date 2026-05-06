@@ -92,3 +92,60 @@ class TestPaymentService(RestoPOSTestBase):
         self.assertTrue(result["ok"])
         updated = frappe.get_doc("POS Invoice", invoice.name)
         self.assertEqual(updated.docstatus, 1)
+
+    # ------------------------------------------------------------------
+    # Extreme variation tests — payment boundary cases
+    # ------------------------------------------------------------------
+
+    def test_create_payment_with_amount_zero_still_appends(self):
+        """amount=0 → append tetap dipanggil (backend tidak validasi amount>0)"""
+        mock_doc = MagicMock()
+        mock_doc.taxes = []
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            self.service.create_payment("INV-001", 0, "Cash")
+
+        mock_doc.append.assert_called_once_with("payments", {
+            "mode_of_payment": "Cash",
+            "amount": 0
+        })
+
+    def test_create_payment_with_very_large_amount_no_crash(self):
+        """amount=99999999 → tidak crash, submit dipanggil normal"""
+        mock_doc = MagicMock()
+        mock_doc.taxes = []
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.create_payment("INV-001", 99999999, "Transfer")
+
+        mock_doc.submit.assert_called_once()
+        self.assertTrue(result["ok"])
+
+    def test_create_payment_result_includes_pos_invoice_name(self):
+        """result['pos_invoice'] harus sama dengan invoice name yang dikirim"""
+        mock_doc = MagicMock()
+        mock_doc.taxes = []
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.create_payment("INV-SPECIFIC-001", 50000, "Cash")
+
+        self.assertEqual(result["pos_invoice"], "INV-SPECIFIC-001")
+
+    def test_create_payment_taxes_not_modified(self):
+        """create_payment tidak boleh menyentuh doc.taxes"""
+        mock_doc = MagicMock()
+        original_taxes = [MagicMock(), MagicMock()]
+        mock_doc.taxes = list(original_taxes)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            self.service.create_payment("INV-001", 50000, "Cash")
+
+        self.assertEqual(len(mock_doc.taxes), len(original_taxes))
