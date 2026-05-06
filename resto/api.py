@@ -307,11 +307,6 @@ def print_void_item(pos_invoice: str):
 
 
 @frappe.whitelist()
-def move_table(pos_invoice):
-    # TODO: implementasi move_table
-    pass
-
-@frappe.whitelist()
 def merge_table(pos_invoice, source_table, target_table=None):
     if isinstance(target_table, str):
         try:
@@ -325,21 +320,6 @@ def move_items_from_invoice(source_invoice_name, target_invoice_name):
     from resto.services.invoice_service import InvoiceService
     InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)
 
-
-@frappe.whitelist()
-def move_item(pos_invoice):
-    # TODO: implementasi move_item (pindah item antar invoice)
-    pass
-
-@frappe.whitelist()
-def split_bill(pos_invoice):
-    # TODO: implementasi split_bill (pecah invoice menjadi beberapa)
-    pass
-
-@frappe.whitelist()
-def remove_item(pos_invoice, item_code, qty):
-    # TODO: implementasi remove_item dengan status VOID MENU di InvoiceService
-    pass
 
 @frappe.whitelist()
 def apply_discount(pos_invoice=None, discount_percentage=0, discount_amount=0, discount_name=None, discount_for_bank=None, user=None):
