@@ -1,6 +1,7 @@
 import json
 import frappe
 from resto.repositories.table_repository import TableRepository
+from resto.repositories.invoice_repository import InvoiceRepository
 from resto.services.invoice_service import InvoiceService
 
 
@@ -110,11 +111,12 @@ class TableService:
         if not self.repo.invoice_exists(pos_invoice):
             frappe.throw(f"POS Invoice '{pos_invoice}' tidak ditemukan")
 
-        source_invoice = self.repo.get_invoice(pos_invoice)
+        inv_repo = InvoiceRepository()
+        source_invoice = inv_repo.get_invoice(pos_invoice)
         if source_invoice.docstatus == 1:
             frappe.throw(f"POS Invoice '{pos_invoice}' sudah disubmit dan tidak dapat di-merge")
 
-        invoice_service = InvoiceService(repo=self.repo)
+        invoice_service = InvoiceService(repo=inv_repo)
 
         for tbl in target_table:
             if tbl == source_table:

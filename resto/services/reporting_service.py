@@ -183,7 +183,7 @@ class ReportingService:
         }
 
         void_summary = {"total_qty": 0, "total_amount": 0, "items": {}}
-        for inv in self.repo.get_void_invoices_with_items(posting_date, outlet):
+        for inv in self.repo.get_void_invoices_with_items(posting_date, outlet_filter):
             for vi in self.repo.get_void_invoice_items(inv.name):
                 qty = int(vi.void_qty or 0)
                 if qty <= 0:
@@ -195,6 +195,29 @@ class ReportingService:
                 void_summary["items"].setdefault(item_name, {"qty": 0, "amount": 0})
                 void_summary["items"][item_name]["qty"] += qty
                 void_summary["items"][item_name]["amount"] += amount
+
+        time_ranges = [
+            {"label": "09.00-12.00 - Happy Hour", "start": 9, "end": 12},
+            {"label": "12.00-15.00 - Lunch", "start": 12, "end": 15},
+            {"label": "15.00-17.00 - High Tea", "start": 15, "end": 17},
+            {"label": "17.00-21.00 - Dinner", "start": 17, "end": 21},
+        ]
+        time_data = self.repo.get_session_time_data(paid_invoice_names) if paid_invoice_names else []
+        session_summary = {}
+        for r in time_ranges:
+            bills = amount_t = pax = 0
+            for t in time_data:
+                if r["start"] <= t.hour < r["end"]:
+                    bills += t.total_bill or 0
+                    amount_t += t.total_amount or 0
+                    pax += t.total_pax or 0
+            session_summary[r["label"]] = {
+                "pax": int(pax),
+                "bill": int(bills),
+                "amount": flt(amount_t),
+                "avg_pax": round(pax / bills, 2) if bills else 0,
+                "avg_bill": round(amount_t / bills, 2) if bills else 0,
+            }
 
         result = {
             "posting_date": posting_date,
@@ -208,7 +231,8 @@ class ReportingService:
             "discount_by_order_type": discount_order_type,
             "draft": draft_summary,
             "void_bill": void_bill_summary,
-            "void_menu": void_summary
+            "void_menu": void_summary,
+            "session_time": session_summary,
         }
 
         if do_print:

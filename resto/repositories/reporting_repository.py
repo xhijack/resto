@@ -241,14 +241,26 @@ class ReportingRepository:
         filters.update(outlet_filter)
         return frappe.get_all("POS Invoice", filters=filters, fields=["name", "rounded_total"])
 
-    def get_void_invoices_with_items(self, posting_date, outlet):
+    def get_void_invoices_with_items(self, posting_date, outlet_filter):
         filters = {
             "docstatus": 1,
             "posting_date": posting_date,
             "status": ["in", ["Paid", "Consolidated"]],
-            "branch": outlet
         }
+        filters.update(outlet_filter)
         return frappe.get_all("POS Invoice", filters=filters)
+
+    def get_session_time_data(self, invoice_names):
+        return frappe.db.sql("""
+            SELECT
+                HOUR(pi.posting_time) AS hour,
+                COUNT(pi.name) AS total_bill,
+                SUM(pi.grand_total) AS total_amount,
+                SUM(pi.pax) AS total_pax
+            FROM `tabPOS Invoice` pi
+            WHERE pi.name IN %(inv)s
+            GROUP BY HOUR(pi.posting_time)
+        """, {"inv": tuple(invoice_names)}, as_dict=True)
 
     def get_void_invoice_items(self, parent):
         return frappe.get_all(
