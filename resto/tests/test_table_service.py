@@ -371,24 +371,11 @@ class TestTableService(RestoPOSTestBase):
     # Extreme variation tests — merge_table edge cases
     # ------------------------------------------------------------------
 
-    def test_merge_table_with_empty_target_table_list_returns_ok(self):
-        """target_table=[] → tidak ada iterasi, langsung return ok=True"""
-        mock_inv_repo = MagicMock()
-        mock_source_invoice = MagicMock()
-        mock_source_invoice.docstatus = 0
-        mock_inv_repo.get_invoice.return_value = mock_source_invoice
-
-        mock_invoice_service = MagicMock()
-
-        self.mock_repo.table_exists.return_value = True
-        self.mock_repo.invoice_exists.return_value = True
-
-        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
-             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
-            result = self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=[])
-
-        mock_invoice_service.move_items_from_invoice.assert_not_called()
-        self.assertTrue(result["ok"])
+    def test_merge_table_with_empty_target_table_list_throws(self):
+        """target_table=[] → frappe.throw('target_table wajib diisi'). Sejajar dengan
+        validasi source_table — kalau kedua sisi kosong tidak ada yang harus di-merge."""
+        with self.assertRaises(frappe.ValidationError):
+            self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=[])
 
     def test_merge_table_calls_delete_merge_invoice_at_end(self):
         """delete_merge_invoice harus dipanggil sekali dengan pos_invoice source"""

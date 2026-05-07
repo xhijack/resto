@@ -18,3 +18,42 @@ build-backend = "flit_core.buildapi"
 # These dependencies are only installed when developer mode is enabled
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
+
+# ---------------------------------------------------------------------------
+# Coverage gate (Fase 6 — backend test threshold)
+# ---------------------------------------------------------------------------
+# Frappe's CodeCoverage instansiasi `Coverage()` programatik tanpa config_file,
+# jadi [tool.coverage.run] TIDAK dipakai untuk koleksi data. Config di sini
+# dipakai oleh `coverage report --rcfile=apps/resto/pyproject.toml` yang
+# dijalankan DARI bench root SETELAH `bench run-tests --coverage`.
+#
+# Pakai:
+#   cd <bench-root>
+#   bench --site resto.test run-tests --app resto --coverage
+#   coverage report --rcfile=apps/resto/pyproject.toml
+#
+# Baseline saat ini ~71% di scope (services+repositories+api). Threshold 70
+# sebagai gate awal — drag terbesar di reporting_service (43%) dan
+# reporting_repository (38%); naikkan setelah area itu ditest.
+[tool.coverage.run]
+data_file = "sites/.coverage"
+
+[tool.coverage.report]
+fail_under = 70
+skip_empty = true
+show_missing = true
+include = [
+    "*/apps/resto/resto/services/*",
+    "*/apps/resto/resto/repositories/*",
+    "*/apps/resto/resto/api.py",
+]
+omit = [
+    "*/__init__.py",
+    "*/tests/*",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
