@@ -35,21 +35,30 @@ class TableService:
             if type_customer is not None:
                 doc.type_customer = type_customer
             if orders is not None:
-                if isinstance(orders, str):
+                parsed_orders = orders
+                if isinstance(parsed_orders, str):
                     try:
-                        orders = json.loads(orders)
+                        parsed_orders = json.loads(parsed_orders)
                     except Exception:
                         frappe.log_error("Gagal parse orders JSON", orders)
-                        orders = []
+                        parsed_orders = None  # invalid → skip update orders
 
-                if not isinstance(orders, list):
-                    orders = []
-
-                existing_invoices = {d.invoice_name for d in doc.orders}
-                for o in orders:
-                    invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
-                    if invoice_name and invoice_name not in existing_invoices:
-                        doc.append("orders", {"invoice_name": invoice_name})
+                # REPLACE semantic: payload = state baru orders. Dedupe by invoice_name.
+                # Sebelumnya append-only — bug: caller yang mau hapus 1 invoice (mis.
+                # MoveItemModal saat source table punya >1 invoice) tidak bisa, karena
+                # invoice yang dihilangkan dari payload tetap ada di DB → LinkExistsError
+                # saat delete invoice tsb.
+                # Input invalid (non-list / parse gagal) → JANGAN sentuh orders, biar
+                # caller yang corrupt payload-nya tidak accidentally clear semua.
+                if isinstance(parsed_orders, list):
+                    seen = set()
+                    new_orders = []
+                    for o in parsed_orders:
+                        invoice_name = o.get("invoice_name") if isinstance(o, dict) else o
+                        if invoice_name and invoice_name not in seen:
+                            seen.add(invoice_name)
+                            new_orders.append({"invoice_name": invoice_name})
+                    doc.set("orders", new_orders)
 
         self.repo.save_table(doc)
         return {

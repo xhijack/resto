@@ -79,8 +79,10 @@ class TestTableService(RestoPOSTestBase):
     # Unit tests — update_table_status: orders parsing
     # ------------------------------------------------------------------
 
-    def test_update_status_appends_new_orders(self):
-        """Harus append order baru yang belum ada"""
+    def test_update_status_replaces_orders_with_payload(self):
+        """REPLACE semantic: payload = state baru orders. Existing yang tidak
+        ada di payload harus dihapus (kalau tidak, MoveItemModal tidak bisa
+        clear source invoice → LinkExistsError)."""
         existing = MagicMock()
         existing.invoice_name = "INV-OLD"
         doc = self._make_table_doc(orders=[existing])
@@ -88,28 +90,51 @@ class TestTableService(RestoPOSTestBase):
 
         self.service.update_table_status("TBL-001", orders=[{"invoice_name": "INV-NEW"}])
 
-        doc.append.assert_called_once_with("orders", {"invoice_name": "INV-NEW"})
+        # set("orders", new_orders) dipanggil dengan list HANYA INV-NEW
+        # (INV-OLD tidak boleh ada — itulah inti replace semantic)
+        doc.set.assert_called_once_with("orders", [{"invoice_name": "INV-NEW"}])
 
-    def test_update_status_skips_duplicate_orders(self):
-        """Tidak boleh menambah order yang sudah ada"""
-        existing = MagicMock()
-        existing.invoice_name = "INV-001"
-        doc = self._make_table_doc(orders=[existing])
+    def test_update_status_dedupes_duplicate_orders_in_payload(self):
+        """Payload dengan invoice_name duplikat → hanya 1 yang masuk."""
+        doc = self._make_table_doc()
         self.mock_repo.get_table.return_value = doc
 
-        self.service.update_table_status("TBL-001", orders=[{"invoice_name": "INV-001"}])
+        self.service.update_table_status(
+            "TBL-001",
+            orders=[{"invoice_name": "INV-001"}, {"invoice_name": "INV-001"}],
+        )
 
-        doc.append.assert_not_called()
+        doc.set.assert_called_once_with("orders", [{"invoice_name": "INV-001"}])
+
+    def test_update_status_removes_existing_when_payload_subset(self):
+        """Regression case: B010 punya 10 invoice, payload kirim 9 (tanpa
+        salah satu). Yang tidak ada di payload HARUS hilang dari orders."""
+        existing_a = MagicMock(); existing_a.invoice_name = "INV-A"
+        existing_b = MagicMock(); existing_b.invoice_name = "INV-B"
+        existing_c = MagicMock(); existing_c.invoice_name = "INV-C"
+        doc = self._make_table_doc(orders=[existing_a, existing_b, existing_c])
+        self.mock_repo.get_table.return_value = doc
+
+        # kirim hanya A & C (B di-skip — simulasi user move semua item dari INV-B)
+        self.service.update_table_status(
+            "TBL-001",
+            orders=[{"invoice_name": "INV-A"}, {"invoice_name": "INV-C"}],
+        )
+
+        doc.set.assert_called_once_with(
+            "orders",
+            [{"invoice_name": "INV-A"}, {"invoice_name": "INV-C"}],
+        )
 
     def test_update_status_parses_json_string_orders(self):
-        """orders berupa JSON string harus di-parse"""
+        """orders berupa JSON string harus di-parse, lalu di-replace"""
         doc = self._make_table_doc()
         self.mock_repo.get_table.return_value = doc
         orders_json = json.dumps([{"invoice_name": "INV-001"}])
 
         self.service.update_table_status("TBL-001", orders=orders_json)
 
-        doc.append.assert_called_once()
+        doc.set.assert_called_once_with("orders", [{"invoice_name": "INV-001"}])
 
     def test_update_status_returns_success_with_checked(self):
         """Harus return dict dengan success=True dan checked"""
