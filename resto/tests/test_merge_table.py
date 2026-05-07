@@ -187,3 +187,115 @@ class TestMergeTable(RestoPOSTestBase):
 
         with self.assertRaises(frappe.ValidationError):
             self.service.merge_table("INV-001", source_table="TBL-001", target_table=["TBL-002"])
+
+    # ------------------------------------------------------------------
+    # Regression: avoid LinkExistsError on delete_merge_invoice
+    # ------------------------------------------------------------------
+
+    def test_repoints_target_table_orders_to_kept_invoice(self):
+        """Setiap row Table Order di absorbed table harus di-repoint ke pos_invoice
+        (kept invoice) sebelum invoice lama dihapus, biar tidak LinkExistsError +
+        biar clear_table_merged() saat payment ketemu absorbed table itu."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock()
+        order_a.invoice_name = "INV-A1-OLD"
+        target_doc = MagicMock()
+        target_doc.get.return_value = [order_a]
+        self.mock_repo.get_table.return_value = target_doc
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-KEPT", target_table=["TBL-ABSORB"]
+            )
+
+        # move_items dipanggil dengan invoice lama
+        mock_invoice_service.move_items_from_invoice.assert_called_once_with(
+            "INV-A1-OLD", "INV-KEPT"
+        )
+        # invoice_name di row dipindah ke pos_invoice (INV-KEPT)
+        self.assertEqual(order_a.invoice_name, "INV-KEPT")
+        # absorbed table doc disimpan supaya perubahan persist
+        self.mock_repo.save_table.assert_called_once_with(target_doc)
+
+    def test_save_table_skipped_when_target_has_no_orders(self):
+        """Kalau absorbed table tidak punya orders, save_table tidak perlu dipanggil
+        (hindari write/timestamp churn yang tidak perlu)."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        self.mock_repo.get_table.return_value = target_doc
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-KEPT", target_table=["TBL-ABSORB"]
+            )
+
+        self.mock_repo.save_table.assert_not_called()
+
+    def test_repoints_orders_for_multiple_targets(self):
+        """2 absorbed tables, masing-masing punya 1 order — semua di-repoint ke pos_invoice
+        + save_table dipanggil 2x (1x per target)."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock(); order_a.invoice_name = "INV-OLD-A"
+        doc_a = MagicMock(); doc_a.get.return_value = [order_a]
+
+        order_b = MagicMock(); order_b.invoice_name = "INV-OLD-B"
+        doc_b = MagicMock(); doc_b.get.return_value = [order_b]
+
+        self.mock_repo.get_table.side_effect = lambda name: doc_a if name == "TBL-A" else doc_b
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-KEPT", target_table=["TBL-A", "TBL-B"]
+            )
+
+        self.assertEqual(order_a.invoice_name, "INV-KEPT")
+        self.assertEqual(order_b.invoice_name, "INV-KEPT")
+        self.assertEqual(self.mock_repo.save_table.call_count, 2)
+
+    def test_repoint_happens_before_delete_merge_invoice(self):
+        """Repoint + save_table HARUS terjadi sebelum delete_merge_invoice,
+        kalau urutannya kebalik delete tetap akan kena LinkExistsError."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock(); order_a.invoice_name = "INV-OLD"
+        target_doc = MagicMock(); target_doc.get.return_value = [order_a]
+        self.mock_repo.get_table.return_value = target_doc
+
+        call_log = []
+        self.mock_repo.save_table.side_effect = lambda doc: call_log.append("save_table")
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+        mock_invoice_service.delete_merge_invoice.side_effect = lambda inv: call_log.append("delete")
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-KEPT", target_table=["TBL-A"]
+            )
+
+        self.assertEqual(call_log, ["save_table", "delete"])

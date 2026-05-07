@@ -125,9 +125,12 @@ class TableService:
                 continue
 
             target_table_doc = self.repo.get_table(tbl)
-            for order in target_table_doc.get("orders", []):
-                target_invoice_name = order.invoice_name
-                invoice_service.move_items_from_invoice(target_invoice_name, pos_invoice)
+            target_orders = target_table_doc.get("orders", [])
+            for order in target_orders:
+                invoice_service.move_items_from_invoice(order.invoice_name, pos_invoice)
+                order.invoice_name = pos_invoice
+            if target_orders:
+                self.repo.save_table(target_table_doc)
 
         invoice_service.delete_merge_invoice(pos_invoice)
         return {
