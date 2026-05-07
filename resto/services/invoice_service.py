@@ -242,6 +242,20 @@ class InvoiceService:
             "merge_invoice": target_name,
         })
 
+        # Repoint semua Table Order row yang masih link ke source ke target.
+        # Tanpa ini, kasus chained merge bikin delete_merge_invoice() throw
+        # LinkExistsError karena tabel-tabel yang sebelumnya merged ke source
+        # masih punya Table Order row → source. Caller (merge_table) cuma
+        # repoint child rows dari `target_table` arg, bukan absorbed sub-tree.
+        frappe.db.sql(
+            """
+            UPDATE `tabTable Order`
+            SET invoice_name = %s
+            WHERE invoice_name = %s
+            """,
+            (target_name, source_name),
+        )
+
         # Clear row_id from tax rows that don't depend on a previous row before saving
         # target, to avoid the same ValidationError (same fix used in apply_discount).
         for tax in target.get("taxes", []):

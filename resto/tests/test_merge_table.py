@@ -36,7 +36,9 @@ class TestMoveItemsFromInvoice(RestoPOSTestBase):
         self.assertEqual(target.append.call_args[0][0], "items")
 
     def test_marks_source_as_merged(self):
-        """Source invoice harus ditandai is_merged=1 dan merge_invoice diisi"""
+        """Source invoice harus ditandai is_merged=1 dan merge_invoice diisi.
+        Implementasi pakai frappe.db.set_value (bukan doc.save) untuk menghindari
+        ValidationError dari calculate_taxes_and_totals di tax rows source."""
         source = MagicMock()
         source.get.return_value = []
         target = MagicMock()
@@ -45,13 +47,18 @@ class TestMoveItemsFromInvoice(RestoPOSTestBase):
         mock_repo.get_invoice.side_effect = lambda name: source if name == "SRC" else target
         service = InvoiceService(repo=mock_repo)
 
-        service.move_items_from_invoice("SRC", "TGT")
+        with patch("frappe.db.set_value") as mock_set_value, \
+             patch("frappe.db.sql"), \
+             patch("frappe.db.commit"):
+            service.move_items_from_invoice("SRC", "TGT")
 
-        self.assertEqual(source.is_merged, 1)
-        self.assertEqual(source.merge_invoice, "TGT")
+        mock_set_value.assert_called_once_with(
+            "POS Invoice", "SRC", {"is_merged": 1, "merge_invoice": "TGT"}
+        )
 
-    def test_saves_both_source_and_target(self):
-        """Harus save source dan target invoice"""
+    def test_saves_target_only_not_source(self):
+        """Hanya target.save() yang dipanggil — source di-update via set_value
+        supaya tidak trigger validate() di source (kena ValidationError tax)."""
         source = MagicMock()
         source.get.return_value = []
         target = MagicMock()
@@ -60,10 +67,70 @@ class TestMoveItemsFromInvoice(RestoPOSTestBase):
         mock_repo.get_invoice.side_effect = lambda name: source if name == "SRC" else target
         service = InvoiceService(repo=mock_repo)
 
-        service.move_items_from_invoice("SRC", "TGT")
+        with patch("frappe.db.set_value"), \
+             patch("frappe.db.sql"), \
+             patch("frappe.db.commit"):
+            service.move_items_from_invoice("SRC", "TGT")
 
-        source.save.assert_called_once()
         target.save.assert_called_once()
+        source.save.assert_not_called()
+
+    def test_repoints_table_order_rows_pointing_to_source(self):
+        """Regression: chained merge — kalau source invoice sebelumnya sudah jadi
+        kept-invoice untuk table-table lain (mis. A1, A10 → 770), Table Order row
+        mereka harus ikut di-repoint ke target saat 770 di-merge ke 771.
+        Tanpa ini, delete_merge_invoice(771) bakal throw LinkExistsError karena
+        Table Order milik A1/A10 masih punya invoice_name=770 sehingga 770 tidak
+        bisa di-delete (POS Invoice link via Table Order child table)."""
+        source = MagicMock()
+        source.get.return_value = []
+        target = MagicMock()
+
+        mock_repo = MagicMock()
+        mock_repo.get_invoice.side_effect = lambda name: source if name == "INV-770" else target
+        service = InvoiceService(repo=mock_repo)
+
+        sql_calls = []
+
+        def capture_sql(query, values=None, *a, **kw):
+            sql_calls.append((query, values))
+
+        with patch("frappe.db.sql", side_effect=capture_sql), \
+             patch("frappe.db.set_value"), \
+             patch("frappe.db.commit"):
+            service.move_items_from_invoice("INV-770", "INV-771")
+
+        # Harus ada UPDATE ke tabTable Order yang me-repoint INV-770 → INV-771
+        update_calls = [c for c in sql_calls if "tabTable Order" in c[0] and "UPDATE" in c[0]]
+        self.assertEqual(len(update_calls), 1, "Harus ada 1 UPDATE pada Table Order")
+        _, args = update_calls[0]
+        self.assertEqual(args, ("INV-771", "INV-770"))
+
+    def test_repoint_runs_after_marking_source_merged(self):
+        """Repoint Table Order HARUS terjadi setelah set_value is_merged=1, supaya
+        kalau ada interleaving query, source sudah konsisten ditandai merged."""
+        source = MagicMock()
+        source.get.return_value = []
+        target = MagicMock()
+
+        mock_repo = MagicMock()
+        mock_repo.get_invoice.side_effect = lambda name: source if name == "SRC" else target
+        service = InvoiceService(repo=mock_repo)
+
+        order_log = []
+
+        def log_set_value(*a, **kw):
+            order_log.append("set_value")
+
+        def log_sql(*a, **kw):
+            order_log.append("sql_update")
+
+        with patch("frappe.db.set_value", side_effect=log_set_value), \
+             patch("frappe.db.sql", side_effect=log_sql), \
+             patch("frappe.db.commit"):
+            service.move_items_from_invoice("SRC", "TGT")
+
+        self.assertEqual(order_log[:2], ["set_value", "sql_update"])
 
     def test_skips_system_fields_when_copying(self):
         """Field name, parent, idx tidak boleh disalin"""
@@ -141,13 +208,17 @@ class TestMergeTable(RestoPOSTestBase):
         """Target table yang sama dengan source harus dilewati"""
         self.mock_repo.table_exists.return_value = True
         self.mock_repo.invoice_exists.return_value = True
-        self.mock_repo.get_invoice.return_value = MagicMock(docstatus=0)
 
         mock_target_table = MagicMock()
         mock_target_table.get.return_value = []
         self.mock_repo.get_table.return_value = mock_target_table
 
-        self.service.merge_table("INV-001", source_table="TBL-001", target_table=["TBL-001"])
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService"):
+            self.service.merge_table("INV-001", source_table="TBL-001", target_table=["TBL-001"])
 
         # get_table tidak dipanggil untuk proses merge (dilewati)
         self.mock_repo.get_table.assert_not_called()
@@ -156,11 +227,15 @@ class TestMergeTable(RestoPOSTestBase):
         """Target table yang tidak ada harus dilewati, bukan throw"""
         self.mock_repo.table_exists.side_effect = lambda name: name != "TBL-NOTFOUND"
         self.mock_repo.invoice_exists.return_value = True
-        self.mock_repo.get_invoice.return_value = MagicMock(docstatus=0)
 
-        result = self.service.merge_table(
-            "INV-001", source_table="TBL-001", target_table=["TBL-NOTFOUND"]
-        )
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService"):
+            result = self.service.merge_table(
+                "INV-001", source_table="TBL-001", target_table=["TBL-NOTFOUND"]
+            )
 
         self.assertTrue(result["ok"])
 
@@ -168,14 +243,18 @@ class TestMergeTable(RestoPOSTestBase):
         """Harus return ok=True setelah merge"""
         self.mock_repo.table_exists.return_value = True
         self.mock_repo.invoice_exists.return_value = True
-        self.mock_repo.get_invoice.return_value = MagicMock(docstatus=0)
         mock_target_table = MagicMock()
         mock_target_table.get.return_value = []
         self.mock_repo.get_table.return_value = mock_target_table
 
-        result = self.service.merge_table(
-            "INV-001", source_table="TBL-001", target_table=["TBL-002"]
-        )
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService"):
+            result = self.service.merge_table(
+                "INV-001", source_table="TBL-001", target_table=["TBL-002"]
+            )
 
         self.assertTrue(result["ok"])
 
