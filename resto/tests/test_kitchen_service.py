@@ -212,6 +212,38 @@ class TestPrintToKsNow(RestoPOSTestBase):
 
         mock_print.assert_not_called()
 
+    def test_one_station_failure_does_not_abort_others(self):
+        """Satu station gagal print tidak boleh menggagalkan station lain (multi-station fault isolation)"""
+        tickets = [
+            {"kitchen_station": "BUTCHER", "printer_name": "PRT-BUTCHER",
+             "pos_invoice": "INV-001", "items": [{"name": "ITEM-001"}]},
+            {"kitchen_station": "PANTRY", "printer_name": "PRT-PANTRY",
+             "pos_invoice": "INV-001", "items": [{"name": "ITEM-002"}]},
+            {"kitchen_station": "TAHO", "printer_name": "PRT-TAHO",
+             "pos_invoice": "INV-001", "items": [{"name": "ITEM-003"}]},
+        ]
+
+        self.mock_repo.get_item_print_status.return_value = 0
+
+        def side_effect(payload):
+            if payload["kitchen_station"] == "PANTRY":
+                raise Exception("CUPS printer not found")
+
+        with patch.object(self.service, "get_branch_menu_for_kitchen_printing",
+                          return_value=tickets):
+            with patch("resto.services.kitchen_service.kitchen_print_from_payload",
+                       side_effect=side_effect) as mock_print:
+                self.service.print_to_ks_now("INV-001")
+
+        # All 3 stations attempted (no abort cascade)
+        self.assertEqual(mock_print.call_count, 3)
+
+        # Only successful items get marked printed (PANTRY's ITEM-002 retried later)
+        marked = [c.args[0] for c in self.mock_repo.mark_item_printed.call_args_list]
+        self.assertIn("ITEM-001", marked)
+        self.assertIn("ITEM-003", marked)
+        self.assertNotIn("ITEM-002", marked)
+
 
 class TestSendToKitchen(RestoPOSTestBase):
     """Test KitchenService.send_to_kitchen"""

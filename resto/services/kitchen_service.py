@@ -116,7 +116,7 @@ class KitchenService:
 
                     if station not in station_data:
                         station_data[station] = {
-                            "printer_name": printer_name,
+                            "printer_name": printer_name or station,
                             "items": [],
                             "printing_type": printing_type
                         }
@@ -187,11 +187,25 @@ class KitchenService:
                     "items": items_to_send
                 })
 
+        printed_names = set()
         for payload in station_payloads:
-            kitchen_print_from_payload(payload)
+            try:
+                kitchen_print_from_payload(payload)
+            except Exception:
+                frappe.log_error(
+                    frappe.get_traceback(),
+                    "Kitchen Print Station Failed: "
+                    f"{payload.get('kitchen_station')} / "
+                    f"{payload.get('printer_name')} / {pos_invoice}"
+                )
+                continue
+            for it in payload.get("items", []):
+                if it.get("name"):
+                    printed_names.add(it["name"])
 
         for name in items_to_lock:
-            self.repo.mark_item_printed(name)
+            if name in printed_names:
+                self.repo.mark_item_printed(name)
 
         frappe.db.commit()
 
