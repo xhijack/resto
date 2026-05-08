@@ -72,6 +72,17 @@ class TestProcessKitchenPrintingWorker(RestoPOSTestBase):
             mock_print.assert_called_once_with("POS-1")
             mock_printing.enqueue_checker_after_kitchen.assert_called_once_with("POS-1", "BR-1")
 
+    def test_printing_service_uses_its_own_repo(self):
+        """PrintingService harus pakai PrintingRepository sendiri,
+        bukan repo KitchenService (yang tidak punya get_checker_printer).
+        """
+        self.mock_repo.get_invoice_branch.return_value = "BR-1"
+        with patch.object(self.service, "print_to_ks_now"), \
+             patch("resto.services.printing_service.PrintingService") as MockPrinting:
+            self.service.process_kitchen_printing_worker("POS-1")
+            # PrintingService di-instantiate TANPA repo arg → pakai PrintingRepository default
+            MockPrinting.assert_called_once_with()
+
     def test_swallows_exception_and_logs(self):
         """Worker tidak boleh crash — error ditangkap dan di-log."""
         with patch.object(self.service, "print_to_ks_now", side_effect=RuntimeError("boom")), \

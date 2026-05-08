@@ -44,7 +44,7 @@ class KitchenService:
 
             from resto.services.printing_service import PrintingService
             branch = self.repo.get_invoice_branch(pos_invoice)
-            PrintingService(repo=self.repo).enqueue_checker_after_kitchen(pos_invoice, branch)
+            PrintingService().enqueue_checker_after_kitchen(pos_invoice, branch)
         except Exception:
             frappe.log_error(
                 frappe.get_traceback(),
