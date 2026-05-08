@@ -134,7 +134,7 @@ def get_data(filters):
                 ABS(SUM(base_tax_amount_after_discount_amount))
             FROM `tabSales Taxes and Charges`
             WHERE parenttype = 'POS Invoice'
-            AND account_head LIKE '%%Diskon%%'
+            AND account_head LIKE '%%Potongan%%'
             AND parent IN (
                 SELECT name
                 FROM `tabPOS Invoice`
