@@ -316,6 +316,23 @@ def merge_table(pos_invoice, source_table, target_table=None):
     from resto.services.table_service import TableService
     return TableService().merge_table(pos_invoice, source_table=source_table, target_table=target_table)
 
+
+@frappe.whitelist()
+def get_merged_group_size(source_table):
+    from resto.services.table_service import TableService
+    return TableService().get_merged_group_size(source_table)
+
+
+@frappe.whitelist()
+def move_merged_group(source_table, target_tables):
+    if isinstance(target_tables, str):
+        try:
+            target_tables = json.loads(target_tables)
+        except Exception:
+            target_tables = [target_tables]
+    from resto.services.table_service import TableService
+    return TableService().move_merged_group(source_table, target_tables)
+
 def move_items_from_invoice(source_invoice_name, target_invoice_name):
     from resto.services.invoice_service import InvoiceService
     InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)

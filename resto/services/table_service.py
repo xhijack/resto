@@ -147,6 +147,96 @@ class TableService:
             "message": f"Berhasil menggabungkan {len(target_table)} meja ke {source_table}"
         }
 
+    def get_merged_group_size(self, source_table):
+        if not self.repo.table_exists(source_table):
+            frappe.throw(f"Table '{source_table}' tidak ditemukan")
+
+        doc = self.repo.get_table(source_table)
+        invoice_names = list({o.invoice_name for o in (doc.orders or []) if o.invoice_name})
+        if not invoice_names:
+            return 1
+
+        parents = frappe.get_all(
+            "Table Order",
+            filters={"invoice_name": ["in", invoice_names]},
+            pluck="parent",
+        )
+        members = set(parents) | {source_table}
+        return len(members)
+
+    def move_merged_group(self, source_table, target_tables):
+        if isinstance(target_tables, str):
+            try:
+                target_tables = json.loads(target_tables)
+            except Exception:
+                target_tables = [target_tables]
+
+        if not isinstance(target_tables, list) or not target_tables:
+            frappe.throw("target_tables wajib diisi (minimal 1 meja).")
+
+        if not self.repo.table_exists(source_table):
+            frappe.throw(f"Table '{source_table}' tidak ditemukan")
+
+        source_doc = self.repo.get_table(source_table)
+        invoice_names = list({o.invoice_name for o in (source_doc.orders or []) if o.invoice_name})
+        if invoice_names:
+            parents = frappe.get_all(
+                "Table Order",
+                filters={"invoice_name": ["in", invoice_names]},
+                pluck="parent",
+            )
+            members = sorted(set(parents) | {source_table})
+        else:
+            members = [source_table]
+
+        if len(target_tables) != len(members):
+            frappe.throw(
+                f"Tabel ini hasil gabung {len(members)} meja, target harus {len(members)} meja juga "
+                f"(sekarang {len(target_tables)})."
+            )
+
+        member_set = set(members)
+        for t in target_tables:
+            if t in member_set:
+                frappe.throw(f"Target '{t}' tidak boleh sama dengan meja sumber.")
+            if not self.repo.table_exists(t):
+                frappe.throw(f"Table '{t}' tidak ditemukan")
+            tgt_doc = self.repo.get_table(t)
+            if (tgt_doc.status or "Kosong") != "Kosong":
+                frappe.throw(f"Table target '{t}' tidak kosong (status: {tgt_doc.status}).")
+
+        for src, tgt in zip(members, list(target_tables)):
+            src_doc = self.repo.get_table(src)
+            tgt_doc = self.repo.get_table(tgt)
+
+            tgt_doc.status = src_doc.status
+            tgt_doc.taken_by = src_doc.taken_by
+            tgt_doc.pax = src_doc.pax
+            tgt_doc.customer = src_doc.customer
+            tgt_doc.type_customer = src_doc.type_customer
+            tgt_doc.checked = src_doc.checked
+            tgt_doc.set(
+                "orders",
+                [{"invoice_name": o.invoice_name} for o in (src_doc.orders or []) if o.invoice_name],
+            )
+
+            src_doc.status = "Kosong"
+            src_doc.taken_by = ""
+            src_doc.pax = 0
+            src_doc.customer = ""
+            src_doc.type_customer = ""
+            src_doc.checked = 0
+            src_doc.set("orders", [])
+
+            self.repo.save_table(tgt_doc)
+            self.repo.save_table(src_doc)
+
+        return {
+            "ok": True,
+            "moved_count": len(members),
+            "message": f"Berhasil memindahkan {len(members)} meja",
+        }
+
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()
         taken_by_emails = [t.taken_by for t in tables if t.taken_by]

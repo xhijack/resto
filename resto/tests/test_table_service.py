@@ -504,6 +504,195 @@ class TestTableService(RestoPOSTestBase):
         mock_invoice_service.move_items_from_invoice.assert_not_called()
         self.assertTrue(result["ok"])
 
+    # ------------------------------------------------------------------
+    # Unit tests — get_merged_group_size & move_merged_group
+    # ------------------------------------------------------------------
+
+    def test_get_merged_group_size_throws_when_source_missing(self):
+        """Source table tidak ada → throw"""
+        self.mock_repo.table_exists.return_value = False
+        with self.assertRaises(frappe.ValidationError):
+            self.service.get_merged_group_size("MISSING")
+
+    def test_get_merged_group_size_returns_1_when_no_orders(self):
+        """Tidak ada orders → bukan merged → return 1"""
+        self.mock_repo.table_exists.return_value = True
+        doc = self._make_table_doc(orders=[])
+        self.mock_repo.get_table.return_value = doc
+
+        with patch("resto.services.table_service.frappe.get_all", return_value=[]):
+            self.assertEqual(self.service.get_merged_group_size("TBL-001"), 1)
+
+    def test_get_merged_group_size_returns_member_count_when_merged(self):
+        """2 meja share 1 invoice → member count = 2"""
+        self.mock_repo.table_exists.return_value = True
+        order = MagicMock(); order.invoice_name = "INV-X"
+        doc = self._make_table_doc(orders=[order])
+        self.mock_repo.get_table.return_value = doc
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001", "TBL-002"],
+        ):
+            self.assertEqual(self.service.get_merged_group_size("TBL-001"), 2)
+
+    def test_get_merged_group_size_includes_source_in_members(self):
+        """Walaupun frappe.get_all hanya return parent yang lain,
+        source_table tetap masuk hitungan via union."""
+        self.mock_repo.table_exists.return_value = True
+        order = MagicMock(); order.invoice_name = "INV-X"
+        doc = self._make_table_doc(orders=[order])
+        self.mock_repo.get_table.return_value = doc
+
+        # frappe.get_all hanya return dirinya sendiri (kasus belum ada sibling)
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001"],
+        ):
+            self.assertEqual(self.service.get_merged_group_size("TBL-001"), 1)
+
+    def test_move_merged_group_rejects_empty_target(self):
+        """target_tables=[] → throw"""
+        with self.assertRaises(frappe.ValidationError):
+            self.service.move_merged_group("TBL-001", [])
+
+    def test_move_merged_group_rejects_count_mismatch(self):
+        """Source merged 2 meja → target 1 meja → throw dengan pesan jelas"""
+        self.mock_repo.table_exists.return_value = True
+        order = MagicMock(); order.invoice_name = "INV-X"
+        source_doc = self._make_table_doc(orders=[order])
+        self.mock_repo.get_table.return_value = source_doc
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001", "TBL-002"],
+        ):
+            with self.assertRaises(frappe.ValidationError) as ctx:
+                self.service.move_merged_group("TBL-001", ["TBL-NEW"])
+            self.assertIn("2", str(ctx.exception))
+            self.assertIn("1", str(ctx.exception))
+
+    def test_move_merged_group_rejects_target_in_source_set(self):
+        """Target overlap dengan source members → throw"""
+        self.mock_repo.table_exists.return_value = True
+        order = MagicMock(); order.invoice_name = "INV-X"
+        source_doc = self._make_table_doc(orders=[order])
+        self.mock_repo.get_table.return_value = source_doc
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001", "TBL-002"],
+        ):
+            with self.assertRaises(frappe.ValidationError) as ctx:
+                self.service.move_merged_group("TBL-001", ["TBL-002", "TBL-NEW"])
+            self.assertIn("TBL-002", str(ctx.exception))
+
+    def test_move_merged_group_rejects_non_kosong_target(self):
+        """Salah satu target status != Kosong → throw"""
+        order = MagicMock(); order.invoice_name = "INV-X"
+        source_doc = self._make_table_doc(orders=[order])
+        source_doc.status = "Terisi"
+
+        occupied_target = MagicMock()
+        occupied_target.status = "Terisi"
+
+        empty_target = self._make_table_doc(status="Kosong")
+        empty_target.name = "TBL-EMPTY"
+
+        def get_table_side(name):
+            if name == "TBL-001":
+                return source_doc
+            if name == "TBL-002":
+                # second source member
+                return self._make_table_doc(status="Terisi")
+            if name == "TBL-OCC":
+                return occupied_target
+            return empty_target
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = get_table_side
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001", "TBL-002"],
+        ):
+            with self.assertRaises(frappe.ValidationError) as ctx:
+                self.service.move_merged_group("TBL-001", ["TBL-OCC", "TBL-EMPTY"])
+            self.assertIn("TBL-OCC", str(ctx.exception))
+
+    def test_move_merged_group_single_source_to_single_target_succeeds(self):
+        """Source bukan merged (1 meja) → target 1 meja → sukses, transfer state"""
+        # source memiliki 1 order tapi tidak ada sibling parent → group size = 1
+        order = MagicMock(); order.invoice_name = "INV-X"
+        source_doc = self._make_table_doc(status="Terisi", orders=[order])
+        source_doc.taken_by = "kasir@x.com"
+        source_doc.pax = 3
+        source_doc.customer = "Budi"
+        source_doc.type_customer = "Walk In"
+        source_doc.checked = 1
+
+        target_doc = self._make_table_doc(status="Kosong", orders=[])
+        target_doc.name = "TBL-NEW"
+
+        def get_table_side(name):
+            return source_doc if name == "TBL-001" else target_doc
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = get_table_side
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001"],  # only itself
+        ):
+            result = self.service.move_merged_group("TBL-001", ["TBL-NEW"])
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["moved_count"], 1)
+        # state copied
+        self.assertEqual(target_doc.status, "Terisi")
+        self.assertEqual(target_doc.taken_by, "kasir@x.com")
+        self.assertEqual(target_doc.pax, 3)
+        # source cleared
+        self.assertEqual(source_doc.status, "Kosong")
+        self.assertEqual(source_doc.taken_by, "")
+        self.assertEqual(source_doc.pax, 0)
+        # save called for both per pair
+        self.assertEqual(self.mock_repo.save_table.call_count, 2)
+
+    def test_move_merged_group_two_source_to_two_target_succeeds(self):
+        """Source merged 2 meja → target 2 meja → sukses, transfer 1:1"""
+        order = MagicMock(); order.invoice_name = "INV-X"
+        src1 = self._make_table_doc(status="Terisi", orders=[order])
+        src2 = self._make_table_doc(status="Terisi", orders=[order])
+        src2.name = "TBL-002"
+
+        tgt1 = self._make_table_doc(status="Kosong"); tgt1.name = "TBL-NEW1"
+        tgt2 = self._make_table_doc(status="Kosong"); tgt2.name = "TBL-NEW2"
+
+        table_map = {
+            "TBL-001": src1, "TBL-002": src2,
+            "TBL-NEW1": tgt1, "TBL-NEW2": tgt2,
+        }
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = lambda n: table_map[n]
+
+        with patch(
+            "resto.services.table_service.frappe.get_all",
+            return_value=["TBL-001", "TBL-002"],
+        ):
+            result = self.service.move_merged_group("TBL-001", ["TBL-NEW1", "TBL-NEW2"])
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["moved_count"], 2)
+        # both sources cleared
+        self.assertEqual(src1.status, "Kosong")
+        self.assertEqual(src2.status, "Kosong")
+        # both targets occupied
+        self.assertEqual(tgt1.status, "Terisi")
+        self.assertEqual(tgt2.status, "Terisi")
+        # 4 saves total (2 pair × 2)
+        self.assertEqual(self.mock_repo.save_table.call_count, 4)
+
     def test_merge_table_multiple_targets_move_items_called_per_order(self):
         """2 target tables, masing-masing punya 1 order → move_items dipanggil 2x"""
         mock_inv_repo = MagicMock()
