@@ -176,15 +176,21 @@ class InvoiceService:
             tax_rate = 0
             tax_amount = 0
 
-        # Cari account_head dari template
-        tax_template = self.repo.get_tax_template(pos_profile.taxes_and_charges)
+        # Cari account_head dari template — pakai template yang doc benar-benar pakai
+        template_name = doc.taxes_and_charges or pos_profile.taxes_and_charges
+        if not template_name:
+            frappe.throw(
+                "Tax template tidak ditemukan di POS Invoice maupun di POS Profile. "
+                "Set 'taxes_and_charges' di salah satunya."
+            )
+        tax_template = self.repo.get_tax_template(template_name)
         account_head = next(
             (t.account_head for t in tax_template.taxes if t.description == "Discount"),
             None
         )
         if not account_head:
             frappe.throw(
-                f"Row 'Discount' tidak ditemukan di template pajak '{pos_profile.taxes_and_charges}'. "
+                f"Row 'Discount' tidak ditemukan di template pajak '{template_name}'. "
                 "Tambahkan row dengan description 'Discount' di template tersebut."
             )
 

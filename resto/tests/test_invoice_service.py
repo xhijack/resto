@@ -187,6 +187,60 @@ class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
         with self.assertRaises(frappe.ValidationError):
             service.apply_discount(pos_invoice="INV-001", discount_percentage=10)
 
+    def test_apply_discount_uses_doc_template_not_pos_profile(self):
+        """Regression: apply_discount harus pakai doc.taxes_and_charges sebagai
+        source of truth — bukan pos_profile.taxes_and_charges. Skenario split
+        bill di mana doc pakai template yang berbeda dari POS Profile.
+        """
+        mock_repo = MagicMock()
+        mock_repo.invoice_exists.return_value = True
+
+        mock_doc = MagicMock()
+        mock_doc.taxes = []
+        mock_doc.taxes_and_charges = "DOC-TPL"
+        mock_repo.get_invoice.return_value = mock_doc
+
+        mock_repo.get_pos_profile.return_value = MagicMock(taxes_and_charges="PROFILE-TPL")
+        mock_repo.get_active_profile_for_user.return_value = {"pos_profile": "PROF-001"}
+
+        # Template DOC punya row Discount, profile template-nya tidak relevan
+        # karena apply_discount harus baca DOC-TPL, bukan PROFILE-TPL.
+        discount_row = MagicMock()
+        discount_row.description = "Discount"
+        discount_row.account_head = "Discount - _TC"
+        mock_repo.get_tax_template.return_value = MagicMock(taxes=[discount_row])
+
+        service = InvoiceService(repo=mock_repo)
+        result = service.apply_discount(pos_invoice="INV-SPLIT", discount_percentage=10)
+
+        self.assertTrue(result["ok"])
+        # Pastikan get_tax_template dipanggil dengan template DOC, bukan profile
+        mock_repo.get_tax_template.assert_called_with("DOC-TPL")
+
+    def test_apply_discount_falls_back_to_pos_profile_when_doc_template_missing(self):
+        """Kalau doc.taxes_and_charges kosong, fallback ke pos_profile.taxes_and_charges."""
+        mock_repo = MagicMock()
+        mock_repo.invoice_exists.return_value = True
+
+        mock_doc = MagicMock()
+        mock_doc.taxes = []
+        mock_doc.taxes_and_charges = None  # doc tidak punya template
+        mock_repo.get_invoice.return_value = mock_doc
+
+        mock_repo.get_pos_profile.return_value = MagicMock(taxes_and_charges="PROFILE-TPL")
+        mock_repo.get_active_profile_for_user.return_value = {"pos_profile": "PROF-001"}
+
+        discount_row = MagicMock()
+        discount_row.description = "Discount"
+        discount_row.account_head = "Discount - _TC"
+        mock_repo.get_tax_template.return_value = MagicMock(taxes=[discount_row])
+
+        service = InvoiceService(repo=mock_repo)
+        result = service.apply_discount(pos_invoice="INV-001", discount_percentage=10)
+
+        self.assertTrue(result["ok"])
+        mock_repo.get_tax_template.assert_called_with("PROFILE-TPL")
+
     # ------------------------------------------------------------------
     # Unit tests — move_items_from_invoice (scenario 2+3)
     # ------------------------------------------------------------------
