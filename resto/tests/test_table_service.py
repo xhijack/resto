@@ -332,6 +332,78 @@ class TestTableService(RestoPOSTestBase):
             self.service.update_table_meta("")
 
     # ------------------------------------------------------------------
+    # Unit tests — Realtime publish (Paket 2 Stage A)
+    # ------------------------------------------------------------------
+    # Backend broadcast event ke socket.io subscriber setiap mutation table
+    # berhasil commit. Mobile listen via socket.io (Stage B) → instant
+    # cross-device update. after_commit=True wajib supaya event tidak terbang
+    # sebelum DB commit (rollback → ghost event).
+
+    def test_add_table_order_publishes_realtime_event(self):
+        doc = self._make_table_doc(status="Kosong")
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with patch("resto.services.table_service.frappe.publish_realtime") as mock_pub:
+            self.service.add_table_order("TBL-001", {"invoice_name": "INV-NEW"})
+
+        mock_pub.assert_called_once()
+        args, kwargs = mock_pub.call_args
+        self.assertEqual(args[0], "table_order_added")
+        payload = args[1]
+        self.assertEqual(payload["table_name"], "TBL-001")
+        self.assertEqual(payload["invoice_name"], "INV-NEW")
+        self.assertEqual(payload["status"], "Terisi")
+        self.assertTrue(kwargs.get("after_commit"))
+
+    def test_remove_table_order_publishes_realtime_event(self):
+        existing = MagicMock(); existing.invoice_name = "INV-001"
+        doc = self._make_table_doc(orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with patch("resto.services.table_service.frappe.publish_realtime") as mock_pub:
+            self.service.remove_table_order("TBL-001", "INV-001")
+
+        mock_pub.assert_called_once()
+        args, kwargs = mock_pub.call_args
+        self.assertEqual(args[0], "table_order_removed")
+        self.assertEqual(args[1], {"table_name": "TBL-001", "invoice_name": "INV-001"})
+        self.assertTrue(kwargs.get("after_commit"))
+
+    def test_update_table_meta_publishes_realtime_event(self):
+        doc = self._make_table_doc(status="Kosong")
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with patch("resto.services.table_service.frappe.publish_realtime") as mock_pub:
+            self.service.update_table_meta(
+                "TBL-001", status="Terisi", taken_by="kasir@x.com",
+                pax=3, customer="Budi", type_customer="Personal",
+            )
+
+        mock_pub.assert_called_once()
+        args, kwargs = mock_pub.call_args
+        self.assertEqual(args[0], "table_meta_updated")
+        payload = args[1]
+        self.assertEqual(payload["table_name"], "TBL-001")
+        self.assertEqual(payload["status"], "Terisi")
+        self.assertEqual(payload["pax"], 3)
+        self.assertEqual(payload["customer"], "Budi")
+        self.assertEqual(payload["type_customer"], "Personal")
+        self.assertEqual(payload["taken_by"], "kasir@x.com")
+        self.assertTrue(kwargs.get("after_commit"))
+
+    def test_remove_table_order_no_op_does_not_publish(self):
+        """Kalau invoice tidak ada di table, no event terbang (tidak ada perubahan)."""
+        existing = MagicMock(); existing.invoice_name = "INV-001"
+        doc = self._make_table_doc(orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with patch("resto.services.table_service.frappe.publish_realtime") as mock_pub:
+            result = self.service.remove_table_order("TBL-001", "INV-NOT-EXISTING")
+
+        self.assertFalse(result["success"])
+        mock_pub.assert_not_called()
+
+    # ------------------------------------------------------------------
     # Unit tests — get_all_tables_with_details
     # ------------------------------------------------------------------
 

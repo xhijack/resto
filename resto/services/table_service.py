@@ -104,6 +104,20 @@ class TableService:
         # sebelum salah satu commit, optimistic check gagal walau lock-nya benar.
         doc.flags.ignore_version = True
         self.repo.save_table(doc)
+
+        # Realtime push: notify subscribers (mobile devices) bahwa table ini
+        # punya order baru. Pakai after_commit=True supaya event tidak terbang
+        # sebelum DB commit (kalau transaksi rollback, tidak ada ghost event).
+        # No room param → broadcast ke semua subscriber site (single-tenant).
+        frappe.publish_realtime(
+            "table_order_added",
+            {
+                "table_name": table_name,
+                "invoice_name": invoice_name,
+                "status": doc.status,
+            },
+            after_commit=True,
+        )
         return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
 
     def remove_table_order(self, table_name, invoice_name):
@@ -126,6 +140,12 @@ class TableService:
         doc.set("orders", new_orders)
         doc.flags.ignore_version = True
         self.repo.save_table(doc)
+
+        frappe.publish_realtime(
+            "table_order_removed",
+            {"table_name": table_name, "invoice_name": invoice_name},
+            after_commit=True,
+        )
         return {"success": True, "message": f"Order {invoice_name} dihapus dari Table {table_name}"}
 
     def update_table_meta(self, name, status=None, taken_by=None, pax=None,
@@ -169,6 +189,19 @@ class TableService:
 
         doc.flags.ignore_version = True
         self.repo.save_table(doc)
+
+        frappe.publish_realtime(
+            "table_meta_updated",
+            {
+                "table_name": name,
+                "status": doc.status,
+                "pax": doc.pax,
+                "customer": doc.customer,
+                "type_customer": doc.type_customer,
+                "taken_by": doc.taken_by,
+            },
+            after_commit=True,
+        )
         return {
             "success": True,
             "message": f"Table {doc.name} meta updated",
