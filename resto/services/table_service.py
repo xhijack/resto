@@ -68,6 +68,8 @@ class TableService:
         }
 
     def add_table_order(self, table_name, order):
+        """Atomic APPEND order ke Table.orders. Pakai row-level lock supaya
+        2 thread bersamaan tidak saling overwrite (race condition)."""
         if not table_name or not order:
             frappe.throw("Table name dan order wajib diisi.")
 
@@ -81,17 +83,97 @@ class TableService:
         if not invoice_name:
             frappe.throw("Field 'invoice_name' wajib ada di order.")
 
-        doc = self.repo.get_table(table_name)
+        # Pakai get_table_for_update: combined lock + locking read.
+        # Penting: read HARUS locking (FOR UPDATE) supaya dapat latest committed
+        # data. Non-locking read di REPEATABLE READ akan return snapshot
+        # transaksi → _original_modified stale → TimestampMismatchError.
+        doc = self.repo.get_table_for_update(table_name)
         existing_invoices = {o.invoice_name for o in doc.orders}
         if invoice_name in existing_invoices:
+            # Tetap commit untuk release lock walau no-op.
+            frappe.db.commit()
             return {"success": False, "message": f"Invoice {invoice_name} sudah ada di Table {table_name}"}
 
         doc.append("orders", {"invoice_name": invoice_name})
         if doc.status == "Kosong":
             doc.status = "Terisi"
 
+        # Skip optimistic timestamp check — kita pakai pessimistic lock
+        # (SELECT ... FOR UPDATE), jadi check_if_latest jadi redundant DAN
+        # bikin false-positive: kalau 2 thread keduanya sempat load doc
+        # sebelum salah satu commit, optimistic check gagal walau lock-nya benar.
+        doc.flags.ignore_version = True
         self.repo.save_table(doc)
         return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
+
+    def remove_table_order(self, table_name, invoice_name):
+        """Atomic REMOVE invoice dari Table.orders. Dipakai saat invoice
+        di-pay-off / clear individual. Locking pattern sama dengan add."""
+        if not table_name or not invoice_name:
+            frappe.throw("Table name dan invoice_name wajib diisi.")
+
+        doc = self.repo.get_table_for_update(table_name)
+        before = len(doc.orders or [])
+        new_orders = [
+            {"invoice_name": o.invoice_name}
+            for o in (doc.orders or [])
+            if o.invoice_name and o.invoice_name != invoice_name
+        ]
+        if len(new_orders) == before:
+            frappe.db.commit()
+            return {"success": False, "message": f"Invoice {invoice_name} tidak ada di Table {table_name}"}
+
+        doc.set("orders", new_orders)
+        doc.flags.ignore_version = True
+        self.repo.save_table(doc)
+        return {"success": True, "message": f"Order {invoice_name} dihapus dari Table {table_name}"}
+
+    def update_table_meta(self, name, status=None, taken_by=None, pax=None,
+                          customer=None, type_customer=None, checked=None):
+        """Update field metadata Table TANPA menyentuh orders. Dipakai oleh
+        send_to_kitchen pasca-refactor: orders di-update via add_table_order
+        atomic, meta lain via method ini.
+
+        Status='Kosong' juga clear field operasional (taken_by/pax/customer/
+        type_customer/checked) supaya konsisten dengan update_table_status.
+
+        Pakai lock_table_for_update sama seperti add_table_order — tanpa lock,
+        kalau add_table_order + update_table_meta dipanggil berurutan oleh 2
+        thread, gap antar-call bikin TimestampMismatchError karena optimistic
+        concurrency check Frappe (loaded.modified vs db.modified)."""
+        if not name:
+            frappe.throw("name wajib diisi.")
+
+        doc = self.repo.get_table_for_update(name)
+
+        if status == "Kosong":
+            doc.status = "Kosong"
+            doc.taken_by = ""
+            doc.pax = 0
+            doc.customer = ""
+            doc.type_customer = ""
+            doc.checked = 0
+        else:
+            if checked is not None:
+                doc.checked = int(checked)
+            if status is not None:
+                doc.status = status
+            if taken_by is not None:
+                doc.taken_by = taken_by
+            if pax is not None:
+                doc.pax = int(pax)
+            if customer is not None:
+                doc.customer = customer
+            if type_customer is not None:
+                doc.type_customer = type_customer
+
+        doc.flags.ignore_version = True
+        self.repo.save_table(doc)
+        return {
+            "success": True,
+            "message": f"Table {doc.name} meta updated",
+            "checked": getattr(doc, "checked", None),
+        }
 
     def clear_table(self, table_name):
         doc = self.repo.get_table(table_name)

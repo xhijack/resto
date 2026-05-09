@@ -230,37 +230,32 @@ class KitchenService:
             from resto.services.table_service import TableService
             table_service = TableService()
 
+        # Sertakan field `table` ke payload supaya invoice baru ter-link langsung
+        # ke meja via custom field — single source of truth (lihat invoice_service).
+        if table_name:
+            payload["table"] = table_name
+
         result = invoice_service.create_pos_invoice(payload)
         pos_name = result["name"]
+
+        # `orders` dari frontend SUDAH TIDAK DIPAKAI lagi — kita pakai atomic
+        # add_table_order (DB row-lock) supaya 2 thread bersamaan tidak saling
+        # overwrite (race condition lama: REPLACE dgn snapshot stale).
+        # Param `orders` tetap diterima untuk backwards-compat signature, tapi
+        # diabaikan.
 
         table_update_result = None
         if table_name:
             if self.repo.table_exists(table_name):
-                if orders is None:
-                    orders = []
-                elif isinstance(orders, str):
-                    try:
-                        orders = json.loads(orders)
-                    except Exception:
-                        orders = []
-                if not isinstance(orders, list):
-                    orders = []
-
-                if not any(
-                    isinstance(o, dict) and o.get("invoice_name") == pos_name
-                    for o in orders
-                ):
-                    orders.append({"invoice_name": pos_name})
-
-                table_update_result = table_service.update_table_status(
+                table_service.add_table_order(table_name, {"invoice_name": pos_name})
+                table_update_result = table_service.update_table_meta(
                     name=table_name,
                     status=status or "Terisi",
                     taken_by=taken_by,
                     pax=pax,
                     customer=customer,
                     type_customer=type_customer,
-                    orders=orders,
-                    checked=checked
+                    checked=checked,
                 )
             else:
                 frappe.log_error(

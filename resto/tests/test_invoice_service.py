@@ -104,6 +104,96 @@ class TestInvoiceServiceCreatePOSInvoice(RestoPOSTestBase):
         doc = frappe.get_doc("POS Invoice", result["name"])
         self.assertEqual(doc.docstatus, 0)
 
+    # ------------------------------------------------------------------
+    # Unit tests — `table` field di doc dict (foundation buat list_paid_invoices)
+    # ------------------------------------------------------------------
+
+    def test_create_pos_invoice_passes_table_to_doc_dict(self):
+        """Field `table` di payload harus diteruskan ke POS Invoice doc dict.
+        Foundation untuk relasi invoice→meja yang dipakai list_paid_invoices &
+        Bill Function (replace JOIN-via-`tabTable Order` yang rapuh ke clear_table)."""
+        mock_repo = MagicMock()
+        mock_repo.get_default_company.return_value = "TestCo"
+        # has_additional_items_field=True + additional_items=[] supaya for-loop
+        # skip TANPA cabang else yang call frappe.log_error (yang internally
+        # bikin Error Log via frappe.get_doc → polusi mock_get_doc.call_args).
+        mock_repo.has_additional_items_field.return_value = True
+
+        mock_doc = MagicMock()
+        mock_doc.name = "INV-T1-001"
+
+        with patch("resto.services.invoice_service.frappe.get_doc",
+                   return_value=mock_doc) as mock_get_doc:
+            service = InvoiceService(repo=mock_repo)
+            service.create_pos_invoice({
+                "customer": "C",
+                "pos_profile": "P",
+                "items": [{"item_code": "X", "qty": 1, "rate": 100}],
+                "order_type": None,
+                "table": "TBL-001",
+            })
+
+        # Ambil call PERTAMA (frappe.get_doc({...POS Invoice...})) — robust
+        # walau ada call lain dari log_error/error path.
+        first_call_args = mock_get_doc.call_args_list[0][0]
+        self.assertTrue(first_call_args, "frappe.get_doc tidak dipanggil dengan positional dict")
+        doctype_dict = first_call_args[0]
+        self.assertEqual(doctype_dict.get("doctype"), "POS Invoice")
+        self.assertEqual(doctype_dict.get("table"), "TBL-001")
+
+    def test_create_pos_invoice_table_is_none_when_not_in_payload(self):
+        """Tanpa `table` di payload (Take Away) → field `table` tetap dikirim None
+        (tidak crash, tidak inherit dari state lain)."""
+        mock_repo = MagicMock()
+        mock_repo.get_default_company.return_value = "TestCo"
+        mock_repo.has_additional_items_field.return_value = True
+        mock_doc = MagicMock(); mock_doc.name = "INV-NOTABLE"
+
+        with patch("resto.services.invoice_service.frappe.get_doc",
+                   return_value=mock_doc) as mock_get_doc:
+            service = InvoiceService(repo=mock_repo)
+            service.create_pos_invoice({
+                "customer": "C",
+                "pos_profile": "P",
+                "items": [{"item_code": "X", "qty": 1, "rate": 100}],
+                "order_type": None,
+            })
+
+        first_call_args = mock_get_doc.call_args_list[0][0]
+        doctype_dict = first_call_args[0]
+        self.assertIsNone(doctype_dict.get("table"))
+
+    # ------------------------------------------------------------------
+    # Unit tests — list_paid_invoices (delegates to repo)
+    # ------------------------------------------------------------------
+
+    def test_list_paid_invoices_passes_filters_to_repo(self):
+        """Service hanya delegate ke repo dengan filter yang sama (keyword args)."""
+        mock_repo = MagicMock()
+        mock_repo.list_paid_invoices.return_value = [{"name": "INV-1"}]
+        service = InvoiceService(repo=mock_repo)
+
+        result = service.list_paid_invoices(
+            posting_date="2026-01-15", branch="BR-001", table_name="T1"
+        )
+
+        mock_repo.list_paid_invoices.assert_called_once_with(
+            posting_date="2026-01-15", branch="BR-001", table_name="T1"
+        )
+        self.assertEqual(result, [{"name": "INV-1"}])
+
+    def test_list_paid_invoices_default_passes_none_to_repo(self):
+        """Tanpa filter, service pass None ke repo (repo decide CURDATE default)."""
+        mock_repo = MagicMock()
+        mock_repo.list_paid_invoices.return_value = []
+        service = InvoiceService(repo=mock_repo)
+
+        service.list_paid_invoices()
+
+        mock_repo.list_paid_invoices.assert_called_once_with(
+            posting_date=None, branch=None, table_name=None
+        )
+
 
 class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
     def setUp(self):

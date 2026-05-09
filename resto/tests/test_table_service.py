@@ -1,6 +1,6 @@
 import frappe
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, call
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
 from resto.services.table_service import TableService
 
@@ -159,7 +159,7 @@ class TestTableService(RestoPOSTestBase):
     def test_add_table_order_throws_when_no_invoice_name(self):
         """Harus throw jika invoice_name tidak ada di order"""
         doc = self._make_table_doc()
-        self.mock_repo.get_table.return_value = doc
+        self.mock_repo.get_table_for_update.return_value = doc
         with self.assertRaises(frappe.ValidationError):
             self.service.add_table_order("TBL-001", {})
 
@@ -168,7 +168,7 @@ class TestTableService(RestoPOSTestBase):
         existing = MagicMock()
         existing.invoice_name = "INV-001"
         doc = self._make_table_doc(orders=[existing])
-        self.mock_repo.get_table.return_value = doc
+        self.mock_repo.get_table_for_update.return_value = doc
 
         result = self.service.add_table_order("TBL-001", {"invoice_name": "INV-001"})
 
@@ -177,7 +177,7 @@ class TestTableService(RestoPOSTestBase):
     def test_add_table_order_appends_and_saves(self):
         """Harus append order dan save"""
         doc = self._make_table_doc()
-        self.mock_repo.get_table.return_value = doc
+        self.mock_repo.get_table_for_update.return_value = doc
 
         result = self.service.add_table_order("TBL-001", {"invoice_name": "INV-NEW"})
 
@@ -188,7 +188,7 @@ class TestTableService(RestoPOSTestBase):
     def test_add_table_order_changes_status_to_terisi(self):
         """Status harus berubah jadi Terisi jika sebelumnya Kosong"""
         doc = self._make_table_doc(status="Kosong")
-        self.mock_repo.get_table.return_value = doc
+        self.mock_repo.get_table_for_update.return_value = doc
 
         self.service.add_table_order("TBL-001", {"invoice_name": "INV-NEW"})
 
@@ -197,12 +197,139 @@ class TestTableService(RestoPOSTestBase):
     def test_add_table_order_parses_json_string(self):
         """order berupa JSON string harus di-parse"""
         doc = self._make_table_doc()
-        self.mock_repo.get_table.return_value = doc
+        self.mock_repo.get_table_for_update.return_value = doc
         order_json = json.dumps({"invoice_name": "INV-001"})
 
         result = self.service.add_table_order("TBL-001", order_json)
 
         self.assertTrue(result["success"])
+
+    def test_add_table_order_uses_locking_read(self):
+        """Race condition guard: harus pakai get_table_for_update (locking read,
+        SELECT ... FOR UPDATE) — bukan get_table biasa. Tanpa locking read, di
+        REPEATABLE READ MySQL akan dapat snapshot transaksi (stale) → check_if_latest
+        TimestampMismatchError saat 2 thread sequential modify meja yang sama."""
+        doc = self._make_table_doc()
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.add_table_order("TBL-001", {"invoice_name": "INV-NEW"})
+
+        self.mock_repo.get_table_for_update.assert_called_once_with("TBL-001")
+        # get_table biasa (non-locking) TIDAK boleh dipanggil di flow ini
+        self.mock_repo.get_table.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Unit tests — remove_table_order (atomic removal)
+    # ------------------------------------------------------------------
+
+    def test_remove_table_order_throws_when_no_table_name(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.remove_table_order("", "INV-001")
+
+    def test_remove_table_order_throws_when_no_invoice_name(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.remove_table_order("TBL-001", "")
+
+    def test_remove_table_order_uses_locking_read(self):
+        """Harus pakai get_table_for_update (locking read) — sama pattern dengan add."""
+        existing = MagicMock(); existing.invoice_name = "INV-001"
+        doc = self._make_table_doc(orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.remove_table_order("TBL-001", "INV-001")
+
+        self.mock_repo.get_table_for_update.assert_called_once_with("TBL-001")
+        self.mock_repo.get_table.assert_not_called()
+
+    def test_remove_table_order_removes_matching_invoice(self):
+        existing_a = MagicMock(); existing_a.invoice_name = "INV-A"
+        existing_b = MagicMock(); existing_b.invoice_name = "INV-B"
+        doc = self._make_table_doc(orders=[existing_a, existing_b])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        result = self.service.remove_table_order("TBL-001", "INV-A")
+
+        self.assertTrue(result["success"])
+        doc.set.assert_called_once_with(
+            "orders", [{"invoice_name": "INV-B"}]
+        )
+        self.mock_repo.save_table.assert_called_once_with(doc)
+
+    def test_remove_table_order_no_op_when_invoice_not_present(self):
+        """Invoice tidak ada di table → return success=False, no save (idempoten)."""
+        existing = MagicMock(); existing.invoice_name = "INV-A"
+        doc = self._make_table_doc(orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with patch("resto.services.table_service.frappe.db.commit"):
+            result = self.service.remove_table_order("TBL-001", "INV-NOT-THERE")
+
+        self.assertFalse(result["success"])
+        self.mock_repo.save_table.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # Unit tests — update_table_meta (no orders touch)
+    # ------------------------------------------------------------------
+
+    def test_update_table_meta_does_not_touch_orders(self):
+        """Critical invariant: update_table_meta TIDAK boleh menyentuh
+        doc.orders — itu otoritasnya add_table_order/remove_table_order."""
+        existing = MagicMock(); existing.invoice_name = "INV-X"
+        doc = self._make_table_doc(orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta("TBL-001", status="Terisi", taken_by="John", pax=2)
+
+        # set() tidak boleh dipanggil dengan key 'orders'
+        for c in doc.set.call_args_list:
+            self.assertNotEqual(c.args[0] if c.args else None, "orders")
+        # Original orders array tidak disentuh (still same reference)
+        self.assertEqual(doc.orders, [existing])
+
+    def test_update_table_meta_kosong_resets_meta_but_keeps_orders_field(self):
+        """Status Kosong reset meta fields (taken_by, pax, customer, dll) tapi
+        TIDAK mengkosongkan doc.orders — itu tugas remove_table_order."""
+        existing = MagicMock(); existing.invoice_name = "INV-X"
+        doc = self._make_table_doc(status="Terisi", orders=[existing])
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta("TBL-001", status="Kosong")
+
+        self.assertEqual(doc.status, "Kosong")
+        self.assertEqual(doc.taken_by, "")
+        self.assertEqual(doc.pax, 0)
+        # orders tidak di-clear
+        self.assertEqual(doc.orders, [existing])
+
+    def test_update_table_meta_skips_none_fields(self):
+        doc = self._make_table_doc(status="Terisi")
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta("TBL-001", taken_by=None, pax=None)
+
+        self.assertEqual(doc.status, "Terisi")
+
+    def test_update_table_meta_saves(self):
+        doc = self._make_table_doc()
+        self.mock_repo.get_table_for_update.return_value = doc
+        self.service.update_table_meta("TBL-001", status="Terisi")
+        self.mock_repo.save_table.assert_called_once_with(doc)
+
+    def test_update_table_meta_uses_locking_read(self):
+        """Harus pakai get_table_for_update (locking read SELECT ... FOR UPDATE)
+        — tanpa ini, gap antara add_table_order dan update_table_meta jadi race
+        window (TimestampMismatchError check_if_latest Frappe)."""
+        doc = self._make_table_doc()
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta("TBL-001", status="Terisi")
+
+        self.mock_repo.get_table_for_update.assert_called_once_with("TBL-001")
+        self.mock_repo.get_table.assert_not_called()
+
+    def test_update_table_meta_throws_when_no_name(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.update_table_meta("")
 
     # ------------------------------------------------------------------
     # Unit tests — get_all_tables_with_details

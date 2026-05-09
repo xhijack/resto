@@ -37,6 +37,36 @@ class InvoiceRepository:
             as_dict=True,
         )
 
+    def list_paid_invoices(self, posting_date=None, branch=None, table_name=None):
+        """List Paid POS Invoice — query menggunakan field `table` (custom field)
+        sebagai source of truth, bukan JOIN ke `tabTable Order` yang rapuh
+        terhadap clear_table. Default filter posting_date = today."""
+        filters = ["pi.status = 'Paid'", "pi.docstatus = 1"]
+        params = {}
+        if posting_date:
+            filters.append("pi.posting_date = %(posting_date)s")
+            params["posting_date"] = posting_date
+        else:
+            filters.append("pi.posting_date = CURDATE()")
+        if branch:
+            filters.append("pi.branch = %(branch)s")
+            params["branch"] = branch
+        if table_name:
+            filters.append("pi.`table` = %(table_name)s")
+            params["table_name"] = table_name
+        return frappe.db.sql(
+            f"""
+            SELECT pi.name, pi.posting_date, pi.posting_time, pi.grand_total,
+                   pi.customer, pi.customer_name, pi.pax, pi.`table` AS `table`,
+                   pi.status, pi.docstatus
+            FROM `tabPOS Invoice` pi
+            WHERE {' AND '.join(filters)}
+            ORDER BY pi.posting_date DESC, pi.posting_time DESC
+            """,
+            params,
+            as_dict=True,
+        )
+
     def get_invoice(self, name):
         return frappe.get_doc("POS Invoice", name)
 

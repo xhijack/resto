@@ -273,7 +273,8 @@ class TestSendToKitchen(RestoPOSTestBase):
         self.assertEqual(result["pos_invoice"], "INV-001")
 
     def test_updates_table_when_table_name_given(self):
-        """Harus update table jika table_name diberikan"""
+        """Harus update table jika table_name diberikan — pakai atomic
+        add_table_order + update_table_meta (post-refactor race condition fix)."""
         mock_invoice_svc = MagicMock()
         mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
 
@@ -289,7 +290,56 @@ class TestSendToKitchen(RestoPOSTestBase):
                 status="Terisi"
             )
 
-        mock_table_svc.update_table_status.assert_called_once()
+        mock_table_svc.add_table_order.assert_called_once_with(
+            "TBL-001", {"invoice_name": "INV-001"}
+        )
+        mock_table_svc.update_table_meta.assert_called_once()
+        # Legacy REPLACE TIDAK boleh dipanggil — itu yang dulu menyebabkan race.
+        mock_table_svc.update_table_status.assert_not_called()
+
+    def test_send_to_kitchen_sets_table_field_on_payload(self):
+        """Field `table` di payload harus di-set ke table_name supaya
+        invoice baru ter-link langsung ke meja via custom field."""
+        mock_invoice_svc = MagicMock()
+        mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
+        mock_table_svc = MagicMock()
+        self.mock_repo.table_exists.return_value = True
+
+        payload = {"customer": "C", "items": [], "pos_profile": "P", "order_type": None}
+        with patch.object(self.service, "print_to_ks_now"):
+            self.service.send_to_kitchen(
+                payload=payload,
+                invoice_service=mock_invoice_svc,
+                table_service=mock_table_svc,
+                table_name="TBL-001",
+            )
+
+        sent_payload = mock_invoice_svc.create_pos_invoice.call_args[0][0]
+        self.assertEqual(sent_payload.get("table"), "TBL-001")
+
+    def test_send_to_kitchen_ignores_orders_param_legacy(self):
+        """Param `orders` dari frontend SUDAH TIDAK DIPAKAI — backwards-compat
+        signature, tapi tidak boleh re-introduce REPLACE semantic."""
+        mock_invoice_svc = MagicMock()
+        mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
+        mock_table_svc = MagicMock()
+        self.mock_repo.table_exists.return_value = True
+
+        with patch.object(self.service, "print_to_ks_now"):
+            self.service.send_to_kitchen(
+                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": None},
+                invoice_service=mock_invoice_svc,
+                table_service=mock_table_svc,
+                table_name="TBL-001",
+                orders=[{"invoice_name": "STALE-001"}],
+            )
+
+        # update_table_status (yang menerima orders) TIDAK dipanggil sama sekali.
+        mock_table_svc.update_table_status.assert_not_called()
+        # add_table_order tetap dipanggil dengan invoice baru, BUKAN yang stale.
+        mock_table_svc.add_table_order.assert_called_once_with(
+            "TBL-001", {"invoice_name": "INV-001"}
+        )
 
     def test_skips_table_update_when_table_not_found(self):
         """Jika table tidak ada, skip update table (Take Away)"""
@@ -308,6 +358,8 @@ class TestSendToKitchen(RestoPOSTestBase):
             )
 
         mock_table_svc.update_table_status.assert_not_called()
+        mock_table_svc.add_table_order.assert_not_called()
+        mock_table_svc.update_table_meta.assert_not_called()
 
     def test_print_error_does_not_crash(self):
         """Error saat printing tidak boleh crash send_to_kitchen"""

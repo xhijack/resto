@@ -5,9 +5,31 @@ class TableRepository:
     def get_table(self, name):
         return frappe.get_doc("Table", name)
 
+    def get_table_for_update(self, name):
+        """Load Table doc with row-level lock (SELECT ... FOR UPDATE).
+        Penting: dipakai oleh add/remove/update locked methods supaya read
+        bersifat locking — kalau hanya pakai get_table biasa (non-locking
+        consistent read), di REPEATABLE READ isolation MySQL akan return
+        snapshot transaksi, bukan latest committed data → _original_modified
+        stale → check_if_latest TimestampMismatchError saat 2 thread sequensial
+        meng-update meja yang sama."""
+        return frappe.get_doc("Table", name, for_update=True)
+
     def save_table(self, doc):
         doc.save(ignore_permissions=True)
         frappe.db.commit()
+
+    def lock_table_for_update(self, name):
+        """Acquire row-level lock on Table doc (SELECT ... FOR UPDATE).
+        Caller MUST follow with read-modify-save in the same transaction;
+        save_table() commits and releases the lock.
+
+        Catatan: kalau caller juga butuh load doc, prefer get_table_for_update
+        — itu sekaligus lock + locking read (latest committed data)."""
+        frappe.db.sql(
+            "SELECT name FROM `tabTable` WHERE name = %s FOR UPDATE",
+            (name,),
+        )
 
     def get_all_tables(self):
         return frappe.get_all(

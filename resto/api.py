@@ -106,6 +106,22 @@ def add_table_order(table_name, order):
     from resto.services.table_service import TableService
     return TableService().add_table_order(table_name, order)
 
+
+@frappe.whitelist()
+def remove_table_order(table_name, invoice_name):
+    from resto.services.table_service import TableService
+    return TableService().remove_table_order(table_name, invoice_name)
+
+
+@frappe.whitelist()
+def update_table_meta(name, status=None, taken_by=None, pax=None,
+                      customer=None, type_customer=None, checked=None):
+    from resto.services.table_service import TableService
+    return TableService().update_table_meta(
+        name, status=status, taken_by=taken_by, pax=pax,
+        customer=customer, type_customer=type_customer, checked=checked,
+    )
+
 def create_pos_invoice(payload):
     from resto.services.invoice_service import InvoiceService
     return InvoiceService().create_pos_invoice(payload)
@@ -212,6 +228,16 @@ def test_print(printer_name: str):
 def list_paid_invoices_for_table(table_name: str):
     from resto.services.invoice_service import InvoiceService
     return InvoiceService().list_paid_invoices_for_table(table_name)
+
+
+@frappe.whitelist()
+def list_paid_invoices(posting_date=None, branch=None, table_name=None):
+    """List Paid POS Invoice — query menggunakan custom field `table` di POS Invoice
+    (bukan JOIN ke `tabTable Order`). Default filter posting_date = today."""
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().list_paid_invoices(
+        posting_date=posting_date, branch=branch, table_name=table_name,
+    )
 
 
 @frappe.whitelist()

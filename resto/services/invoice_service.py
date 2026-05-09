@@ -35,6 +35,7 @@ class InvoiceService:
         additional_discount_percentage = payload.get("additional_discount_percentage")
         pax = payload.get("pax")
         type_customer = payload.get("type_customer")
+        table = payload.get("table")
 
         # --- Validasi wajib ---
         if not customer:
@@ -86,7 +87,8 @@ class InvoiceService:
             "discount_name": discount_name,
             "ordered_by": frappe.session.user,
             "pax": pax,
-            "type_customer": type_customer
+            "type_customer": type_customer,
+            "table": table,
         })
 
         for item in items:
@@ -231,6 +233,13 @@ class InvoiceService:
 
     def list_paid_invoices_for_table(self, table_name):
         return self.repo.list_paid_invoices_for_table(table_name)
+
+    def list_paid_invoices(self, posting_date=None, branch=None, table_name=None):
+        return self.repo.list_paid_invoices(
+            posting_date=posting_date,
+            branch=branch,
+            table_name=table_name,
+        )
 
     SKIP_FIELDS = {"name", "parent", "parenttype", "parentfield", "idx"}
 

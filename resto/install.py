@@ -454,5 +454,21 @@ def after_migrate():
                 "options": "\nPersonal\nFamily\nCorporate",
                 "insert_after": "pax"
             }).insert(ignore_permissions=True)
-        
+
+        # Field `table` di POS Invoice — single source of truth relasi invoice→meja.
+        # Dipakai oleh Bill Function query (list Paid by tanggal) dan menggantikan
+        # JOIN ke `tabTable Order` yang rapuh terhadap clear_table.
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice", "fieldname": "table"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice",
+                "fieldname": "table",
+                "label": "Table",
+                "fieldtype": "Link",
+                "options": "Table",
+                "insert_after": "type_customer",
+                "read_only": 1,
+                "no_copy": 1,
+            }).insert(ignore_permissions=True)
+
     add_custom_field()
