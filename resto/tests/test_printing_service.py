@@ -65,6 +65,79 @@ class TestPrintBillNow(RestoPOSTestBase):
         mock_table_svc.update_table_status.assert_not_called()
 
 
+class TestPrintCheckNow(RestoPOSTestBase):
+    """Test PrintingService.print_check_now"""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_repo = MagicMock()
+        self.service = PrintingService(repo=self.mock_repo)
+
+    def test_throws_when_no_printer_found(self):
+        """Harus throw jika tidak ada printer bill di branch"""
+        self.mock_repo.get_bill_printer.return_value = None
+        with self.assertRaises(frappe.ValidationError):
+            self.service.print_check_now("INV-001", branch="BR-001")
+
+    def test_returns_ok_with_job_id(self):
+        """Harus return ok=True dan job_id"""
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+
+        with patch("resto.services.printing_service._enqueue_check_worker",
+                   return_value="JOB-CHK"):
+            result = self.service.print_check_now("INV-001", branch="BR-001")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["job_id"], "JOB-CHK")
+
+    def test_enqueues_correct_printer(self):
+        """Harus enqueue ke printer Bill (sama dengan print_bill_now)"""
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+
+        with patch("resto.services.printing_service._enqueue_check_worker",
+                   return_value="J") as mock_enqueue:
+            self.service.print_check_now("INV-001", branch="BR-001")
+
+        mock_enqueue.assert_called_once_with("INV-001", "PRT-BILL")
+
+    def test_uses_check_worker_not_bill_worker(self):
+        """Harus pakai _enqueue_check_worker, bukan _enqueue_bill_worker"""
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+
+        with patch("resto.services.printing_service._enqueue_bill_worker") as mock_bill:
+            with patch("resto.services.printing_service._enqueue_check_worker",
+                       return_value="J"):
+                self.service.print_check_now("INV-001", branch="BR-001")
+
+        mock_bill.assert_not_called()
+
+    def test_updates_table_when_table_name_given(self):
+        """Harus update table status ke 'Print Bill' jika table_name diberikan"""
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+        mock_table_svc = MagicMock()
+
+        with patch("resto.services.printing_service._enqueue_check_worker", return_value="J"):
+            self.service.print_check_now(
+                "INV-001", branch="BR-001",
+                table_name="TBL-001", table_service=mock_table_svc
+            )
+
+        mock_table_svc.update_table_status.assert_called_once()
+        call_kwargs = mock_table_svc.update_table_status.call_args[1]
+        self.assertEqual(call_kwargs["status"], "Print Bill")
+
+    def test_skips_table_update_when_no_table(self):
+        """Tidak update table jika table_name tidak diberikan"""
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+        mock_table_svc = MagicMock()
+
+        with patch("resto.services.printing_service._enqueue_check_worker", return_value="J"):
+            self.service.print_check_now("INV-001", branch="BR-001",
+                                         table_service=mock_table_svc)
+
+        mock_table_svc.update_table_status.assert_not_called()
+
+
 class TestPrintReceiptNow(RestoPOSTestBase):
     """Test PrintingService.print_receipt_now"""
 
@@ -160,3 +233,32 @@ class TestPrintVoidItem(RestoPOSTestBase):
                     result = self.service.print_void_item("INV-001")
 
         self.assertEqual(result["items_printed"], 2)
+
+    def test_passes_printer_name_to_default_void_builder(self):
+        """build_void_item_receipt harus dipanggil dengan printer_name di default void print"""
+        void_item = {"name": "ITEM-001", "item_code": "FOOD-001", "item_name": "Nasi",
+                     "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_void_items_to_print.return_value = [void_item]
+        self.mock_repo.get_void_printer.return_value = "PRT-VOID"
+        self.mock_repo.get_invoice_branch.return_value = "BR-001"
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw", return_value="J"):
+                with patch.object(self.service, "_print_void_to_other_stations"):
+                    self.service.print_void_item("INV-001")
+
+        mock_build.assert_called_with("INV-001", [void_item], "PRT-VOID")
+
+    def test_passes_printer_name_to_other_station_builder(self):
+        """_print_void_to_other_stations harus pass printer_name per station"""
+        void_item = {"name": "ITEM-001", "item_code": "FOOD-001", "item_name": "Nasi",
+                     "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-KITCHEN-A"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw", return_value="J"):
+                self.service._print_void_to_other_stations("INV-001", [void_item], "BR-001")
+
+        mock_build.assert_called_with("INV-001", [void_item], "PRT-KITCHEN-A")

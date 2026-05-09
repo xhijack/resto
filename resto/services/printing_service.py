@@ -4,11 +4,12 @@ from resto.repositories.printing_repository import PrintingRepository
 
 try:
     from resto.printing import (
-        _enqueue_bill_worker, _enqueue_receipt_worker,
+        _enqueue_bill_worker, _enqueue_check_worker, _enqueue_receipt_worker,
         _enqueue_checker_worker, build_void_item_receipt, cups_print_raw
     )
 except Exception:
     _enqueue_bill_worker = None
+    _enqueue_check_worker = None
     _enqueue_receipt_worker = None
     _enqueue_checker_worker = None
     build_void_item_receipt = None
@@ -55,6 +56,45 @@ class PrintingService:
             )
 
         job_id = _enqueue_bill_worker(invoice_name, printer)
+        frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
+        return {"ok": True, "job_id": job_id}
+
+    # ------------------------------------------------------------------
+    # print_check_now
+    # ------------------------------------------------------------------
+
+    def print_check_now(self, invoice_name, branch, table_name=None,
+                        status=None, taken_by=None, pax=0, customer=None,
+                        type_customer=None, orders=None, checked=None,
+                        table_service=None):
+        printer = self.repo.get_bill_printer(branch)
+        if not printer:
+            frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
+
+        if table_name and table_service is not None:
+            if orders is None:
+                orders = []
+            elif isinstance(orders, str):
+                try:
+                    orders = json.loads(orders)
+                except Exception:
+                    frappe.log_error("Gagal parse orders JSON", orders)
+                    orders = []
+            if not isinstance(orders, list):
+                orders = []
+
+            table_service.update_table_status(
+                name=table_name,
+                status="Print Bill",
+                taken_by=taken_by,
+                pax=pax,
+                customer=customer,
+                type_customer=type_customer,
+                orders=orders,
+                checked=checked
+            )
+
+        job_id = _enqueue_check_worker(invoice_name, printer)
         frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
         return {"ok": True, "job_id": job_id}
 
@@ -126,5 +166,5 @@ class PrintingService:
             for printer_name in self.repo.get_branch_menu_printers_for_item(
                 item["item_code"], branch
             ):
-                raw = build_void_item_receipt(pos_invoice, items_to_print)
+                raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
                 cups_print_raw(raw, printer_name)

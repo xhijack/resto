@@ -178,6 +178,19 @@ def print_bill_now(invoice_name: str, branch: str, table_name=None,
     )
 
 @frappe.whitelist()
+def print_check_now(invoice_name: str, branch: str, table_name=None,
+                    status=None, taken_by=None, pax=0,
+                    customer=None, type_customer=None, orders=None, checked=None):
+    from resto.services.printing_service import PrintingService
+    from resto.services.table_service import TableService
+    return PrintingService().print_check_now(
+        invoice_name, branch, table_name=table_name, status=status,
+        taken_by=taken_by, pax=pax, customer=customer,
+        type_customer=type_customer, orders=orders, checked=checked,
+        table_service=TableService() if table_name else None
+    )
+
+@frappe.whitelist()
 def print_receipt_now(invoice_name: str, branch: str):
     from resto.services.printing_service import PrintingService
     return PrintingService().print_receipt_now(invoice_name, branch)

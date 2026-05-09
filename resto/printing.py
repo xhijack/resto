@@ -1016,7 +1016,7 @@ def get_current_cashier_name(pos_invoice_name: str) -> str:
 
     return owner_user.full_name or invoice.owner
 
-def build_escpos_bill(name: str) -> bytes:
+def build_escpos_bill(name: str, include_header_address: bool = True) -> bytes:
     data = _collect_pos_invoice(name)
 
     items = data.get("items", [])
@@ -1098,18 +1098,19 @@ def build_escpos_bill(name: str) -> bytes:
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
 
-    # Nama company + city
-    company_city_line = f"{company} {city}".strip()
-    if company_city_line:
-        out += (company_city_line + "\n").encode("ascii", "ignore")
+    if include_header_address:
+        # Nama company + city
+        company_city_line = f"{company} {city}".strip()
+        if company_city_line:
+            out += (company_city_line + "\n").encode("ascii", "ignore")
 
-    # Alamat lengkap
-    if address1:
-        out += (address1 + "\n").encode("ascii", "ignore")
-    if address2:
-        out += (address2 + "\n").encode("ascii", "ignore")
-    if phone:
-        out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
+        # Alamat lengkap
+        if address1:
+            out += (address1 + "\n").encode("ascii", "ignore")
+        if address2:
+            out += (address2 + "\n").encode("ascii", "ignore")
+        if phone:
+            out += (f"Tlp. {phone}\n").encode("ascii", "ignore")
 
     # if company or branch:
     #     header_line = f"{company}"
@@ -1336,6 +1337,19 @@ def _enqueue_bill_worker(name: str, printer_name: str):
         "printer": printer_name,
         "job_id": job_id,
         "type": "bill"
+    })
+
+    return job_id
+
+def _enqueue_check_worker(name: str, printer_name: str):
+    raw = build_escpos_bill(name, include_header_address=False)
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "invoice": name,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "check"
     })
 
     return job_id
@@ -2406,6 +2420,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
     # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    out += (f"Station : {printer_name or '-'}\n").encode("ascii", "ignore")
     out += (format_lr(f"Table : {table_short}", tanggal)).encode("ascii", "ignore") + b"\n"
     out += (format_lr(f"Pax   : {int(flt(pax))}", jam)).encode("ascii", "ignore") + b"\n"
     out += (f"Petugas : {get_waiter_name(data['name'])}\n").encode("ascii", "ignore")
@@ -2430,9 +2445,9 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
                 out += (f"  + {a}\n").encode("ascii", "ignore")
 
         # Notes
-        # notes = it.get("quick_notes") or ""
-        # if notes:
-        #     out += (f"  # {notes}\n").encode("ascii", "ignore")
+        notes = it.get("quick_notes") or ""
+        if notes:
+            out += (f"  # {notes}\n").encode("ascii", "ignore")
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += _esc_feed(5)
