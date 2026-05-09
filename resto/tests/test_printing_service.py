@@ -518,9 +518,10 @@ class TestPrintTemplates(RestoPOSTestBase):
                 items=[{"qty": 1, "item_name": "Nasi"}],
                 printer_name="BAR",
             )
-        self.assertIn(b"Kitchen :", raw)
-        self.assertIn(b"Kitchen Bar", raw)
-        self.assertIn(b"Station :", raw)
+        self.assertIn(b"VOID MENU", raw)
+        self.assertIn(b"KITCHEN BAR", raw)
+        self.assertNotIn(b"Kitchen :", raw)
+        self.assertNotIn(b"Station :", raw)
 
 
 class TestUserFullNameLookup(RestoPOSTestBase):
