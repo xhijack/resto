@@ -23,7 +23,12 @@ def end_day_from_shift(posting_date, user=None):
     from resto.api import get_end_day_report_v2
     user = user or frappe.session.user
 
-    end_shift(user=user)
+    end_shift_result = end_shift(user=user)
+    just_closed = (
+        end_shift_result.get("closing_entry")
+        if isinstance(end_shift_result, dict)
+        else None
+    )
 
     shift_names = frappe.get_all(
         "POS Closing Entry",
@@ -34,6 +39,11 @@ def end_day_from_shift(posting_date, user=None):
         },
         pluck="name"
     )
+
+    # Pastikan Closing Entry yang baru saja dibuat oleh end_shift selalu masuk,
+    # walau posting_date-nya beda (mis. timezone server beda dengan client).
+    if just_closed and just_closed not in shift_names:
+        shift_names.append(just_closed)
 
     if not shift_names:
         frappe.throw("No POS Closing Entry found to process End Day")
