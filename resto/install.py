@@ -469,6 +469,22 @@ def after_migrate():
                 "insert_after": "type_customer",
                 "read_only": 1,
                 "no_copy": 1,
+                "search_index": 1,
             }).insert(ignore_permissions=True)
+        else:
+            # Backfill: kalau field sudah ada tapi tanpa search_index → set + add DB index.
+            cf_name = frappe.db.get_value(
+                "Custom Field",
+                {"dt": "POS Invoice", "fieldname": "table"},
+                "name",
+            )
+            cf = frappe.get_doc("Custom Field", cf_name)
+            if not cf.search_index:
+                cf.search_index = 1
+                cf.save(ignore_permissions=True)
+                try:
+                    frappe.db.add_index("POS Invoice", ["table"])
+                except Exception:
+                    pass
 
     add_custom_field()

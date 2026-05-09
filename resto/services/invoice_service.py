@@ -241,6 +241,18 @@ class InvoiceService:
             table_name=table_name,
         )
 
+    def void_pos_invoice(self, invoice_name):
+        # Cancel POS Invoice + cleanup table.orders kalau invoice ter-link ke meja.
+        # Pakai TableService.remove_table_order yang sudah row-locked → race-safe
+        # vs. add_table_order/remove_table_order paralel dari device lain.
+        from resto.services.table_service import TableService
+        doc = frappe.get_doc("POS Invoice", invoice_name)
+        table_name = doc.get("table")
+        doc.cancel()
+        if table_name:
+            TableService().remove_table_order(table_name, invoice_name)
+        return {"success": True, "name": invoice_name, "table": table_name}
+
     SKIP_FIELDS = {"name", "parent", "parenttype", "parentfield", "idx"}
 
     def move_items_from_invoice(self, source_name, target_name):

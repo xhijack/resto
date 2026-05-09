@@ -241,6 +241,15 @@ def list_paid_invoices(posting_date=None, branch=None, table_name=None):
 
 
 @frappe.whitelist()
+def void_pos_invoice(invoice_name):
+    """Cancel POS Invoice + cleanup `Table.orders` kalau invoice ter-link ke meja.
+    Domain endpoint — replace cancelDoctype generic agar table.orders tidak orphan
+    setelah void dari Bill Function."""
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().void_pos_invoice(invoice_name)
+
+
+@frappe.whitelist()
 def get_end_day_report():
     from resto.services.reporting_service import ReportingService
     return ReportingService().get_end_day_report()

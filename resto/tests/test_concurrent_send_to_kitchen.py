@@ -30,6 +30,14 @@ CONCURRENT_TABLE = "_TestConcT1"
 class TestConcurrentSendToKitchen(RestoPOSTestBase):
     def setUp(self):
         super().setUp()
+        # SQLite parses `SELECT ... FOR UPDATE` tapi no-op → race-condition
+        # diam-diam tidak ke-detect. Guard agar test fail-loud kalau dev pakai
+        # SQLite (production resmi: MariaDB).
+        if frappe.db.db_type != "mariadb":
+            self.skipTest(
+                f"Concurrent test butuh row-lock; db_type={frappe.db.db_type} "
+                "(SELECT FOR UPDATE jadi no-op)."
+            )
         self._cleanup_state()
         if not frappe.db.exists("Table", CONCURRENT_TABLE):
             frappe.get_doc({

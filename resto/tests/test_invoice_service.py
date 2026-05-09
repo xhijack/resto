@@ -573,3 +573,35 @@ class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
             "POS Invoice", "INV-SRC",
             {"is_merged": 1, "merge_invoice": "INV-TGT"}
         )
+
+
+class TestInvoiceServiceVoidPosInvoice(RestoPOSTestBase):
+    """void_pos_invoice harus cancel doc + cleanup Table.orders kalau doc.table ada.
+
+    Sebelum endpoint domain ini, frontend BillList void via cancelDoctype generic
+    yang skip cleanup → entry orphan di table.orders nyangkut ke invoice cancelled.
+    """
+
+    def test_calls_cancel_and_cleanup_when_invoice_linked_to_table(self):
+        mock_doc = MagicMock()
+        mock_doc.get.side_effect = lambda f: {"table": "T-A1"}.get(f)
+        with patch("resto.services.invoice_service.frappe.get_doc", return_value=mock_doc) as mock_get_doc, \
+             patch("resto.services.table_service.TableService.remove_table_order") as mock_remove:
+            result = InvoiceService().void_pos_invoice("INV-001")
+
+        mock_get_doc.assert_called_once_with("POS Invoice", "INV-001")
+        mock_doc.cancel.assert_called_once()
+        mock_remove.assert_called_once_with("T-A1", "INV-001")
+        self.assertEqual(result, {"success": True, "name": "INV-001", "table": "T-A1"})
+
+    def test_skips_cleanup_when_invoice_has_no_table(self):
+        """Take Away invoice / invoice tanpa table tidak boleh trigger remove_table_order."""
+        mock_doc = MagicMock()
+        mock_doc.get.side_effect = lambda f: {"table": None}.get(f)
+        with patch("resto.services.invoice_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.table_service.TableService.remove_table_order") as mock_remove:
+            result = InvoiceService().void_pos_invoice("INV-002")
+
+        mock_doc.cancel.assert_called_once()
+        mock_remove.assert_not_called()
+        self.assertEqual(result, {"success": True, "name": "INV-002", "table": None})
