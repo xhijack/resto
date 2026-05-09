@@ -369,3 +369,185 @@ class TestListPrintersWithStatus(RestoPOSTestBase):
 
         self.assertEqual(result[0]["state"], "not_found")
         self.assertFalse(result[0]["is_online"])
+
+
+class TestMergedTablesStatusUpdate(RestoPOSTestBase):
+    """Item 3: print_check_now & print_bill_now harus update status SEMUA meja
+    yang ter-link ke invoice (kasus merged tables)."""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_repo = MagicMock()
+        self.service = PrintingService(repo=self.mock_repo)
+        self.mock_repo.get_bill_printer.return_value = "PRT-BILL"
+
+    def _build_table_service_with_related(self, related):
+        ts = MagicMock()
+        ts.repo.get_tables_for_invoice.return_value = related
+        return ts
+
+    def test_print_check_updates_all_merged_tables(self):
+        related = ["TBL-001", "TBL-002", "TBL-003"]
+        ts = self._build_table_service_with_related(related)
+
+        with patch("resto.services.printing_service._enqueue_check_worker",
+                   return_value="J"):
+            self.service.print_check_now(
+                "INV-MERGE", branch="BR-001",
+                table_name="TBL-001", table_service=ts,
+            )
+
+        self.assertEqual(ts.update_table_status.call_count, 3)
+        called_names = [c.kwargs["name"] for c in ts.update_table_status.call_args_list]
+        self.assertEqual(set(called_names), set(related))
+        for c in ts.update_table_status.call_args_list:
+            self.assertEqual(c.kwargs["status"], "Print Bill")
+
+    def test_print_bill_updates_all_merged_tables(self):
+        related = ["TBL-A", "TBL-B"]
+        ts = self._build_table_service_with_related(related)
+
+        with patch("resto.services.printing_service._enqueue_bill_worker",
+                   return_value="J"):
+            self.service.print_bill_now(
+                "INV-MERGE", branch="BR-001",
+                table_name="TBL-A", table_service=ts,
+            )
+
+        self.assertEqual(ts.update_table_status.call_count, 2)
+        called_names = [c.kwargs["name"] for c in ts.update_table_status.call_args_list]
+        self.assertEqual(set(called_names), set(related))
+        for c in ts.update_table_status.call_args_list:
+            self.assertEqual(c.kwargs["status"], "Print Bill")
+
+    def test_includes_table_name_when_not_in_related(self):
+        """Fallback safety: kalau get_tables_for_invoice return [] tapi
+        table_name diberikan, tetap update meja itu."""
+        ts = self._build_table_service_with_related([])
+
+        with patch("resto.services.printing_service._enqueue_check_worker",
+                   return_value="J"):
+            self.service.print_check_now(
+                "INV-001", branch="BR-001",
+                table_name="TBL-X", table_service=ts,
+            )
+
+        ts.update_table_status.assert_called_once()
+        self.assertEqual(ts.update_table_status.call_args.kwargs["name"], "TBL-X")
+
+
+class TestTestPrintEndpoint(RestoPOSTestBase):
+    """Item 1b: PrintingService.test_print()"""
+
+    def setUp(self):
+        super().setUp()
+        self.service = PrintingService(repo=MagicMock())
+
+    def test_throws_when_no_printer_name(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.test_print("")
+
+    def test_calls_cups_print_raw_with_payload(self):
+        with patch("resto.services.printing_service.build_test_print_payload",
+                   return_value=b"PAYLOAD") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value=42) as mock_print:
+                result = self.service.test_print("BAR-PRINTER")
+
+        mock_build.assert_called_once_with("BAR-PRINTER")
+        mock_print.assert_called_once_with(b"PAYLOAD", "BAR-PRINTER")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["job_id"], 42)
+        self.assertEqual(result["printer"], "BAR-PRINTER")
+
+
+class TestPrintTemplates(RestoPOSTestBase):
+    """Item 4 & 5: ESC/POS payload mengandung label header yang benar."""
+
+    def test_check_print_includes_check_header(self):
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            from resto.printing import build_escpos_bill
+        with patch("resto.printing._collect_pos_invoice", return_value={
+            "name": "INV-001",
+            "items": [],
+            "payments": [],
+            "taxes": [],
+            "company": "TEST",
+            "order_type": "Dine In",
+            "customer_name": "X",
+            "customer": "X",
+            "total": 0, "discount_amount": 0, "total_taxes_and_charges": 0,
+            "grand_total": 0, "paid_amount": 0, "change_amount": 0,
+            "queue": None, "branch": "BR-001",
+        }):
+            with patch("resto.printing.frappe.get_all", return_value=[]):
+                with patch("resto.printing.get_table_names_from_pos_invoice",
+                           return_value="T-1"):
+                    with patch("resto.printing.get_total_pax_from_pos_invoice",
+                               return_value=1):
+                        with patch("resto.printing.get_current_cashier_name",
+                                   return_value="Kasir"):
+                            raw = build_escpos_bill(
+                                "INV-001",
+                                include_header_address=False,
+                                print_label="CHECK",
+                            )
+        self.assertIn(b"CHECK", raw)
+
+    def test_void_print_includes_kitchen_label(self):
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            from resto.printing import build_void_item_receipt
+        with patch("resto.printing._collect_pos_invoice", return_value={
+            "name": "INV-001", "posting_date": "2026-05-09",
+            "posting_time": "12:00:00",
+        }), \
+            patch("resto.printing.get_table_names_from_pos_invoice",
+                  return_value="T-1"), \
+            patch("resto.printing.get_total_pax_from_pos_invoice",
+                  return_value=1), \
+            patch("resto.printing.get_waiter_name", return_value="W"), \
+            patch("resto.printing.frappe.session") as mock_sess, \
+            patch("resto.printing.frappe.db.get_value",
+                  side_effect=[
+                      "User Full Name",
+                      {"name": "BAR Station", "description": "Kitchen Bar"},
+                  ]):
+            mock_sess.user = "user@x.com"
+            raw = build_void_item_receipt(
+                "INV-001",
+                items=[{"qty": 1, "item_name": "Nasi"}],
+                printer_name="BAR",
+            )
+        self.assertIn(b"Kitchen :", raw)
+        self.assertIn(b"Kitchen Bar", raw)
+        self.assertIn(b"Station :", raw)
+
+
+class TestUserFullNameLookup(RestoPOSTestBase):
+    """Item 2: TableRepository.get_user_full_names harus tetap mengembalikan
+    mapping (fallback ke email) supaya UI selalu punya display name."""
+
+    def test_fallback_to_email_when_user_doc_not_found(self):
+        from resto.repositories.table_repository import TableRepository
+        with patch("frappe.get_all", return_value=[]):
+            result = TableRepository().get_user_full_names(["unknown@x.com"])
+        self.assertEqual(result, {"unknown@x.com": "unknown@x.com"})
+
+    def test_uses_full_name_when_user_doc_found(self):
+        from resto.repositories.table_repository import TableRepository
+        with patch("frappe.get_all", return_value=[
+            {"name": "alice@x.com", "full_name": "Alice Wonderland"},
+        ]):
+            result = TableRepository().get_user_full_names(["alice@x.com"])
+        self.assertEqual(result["alice@x.com"], "Alice Wonderland")
+
+    def test_mixes_known_and_unknown(self):
+        from resto.repositories.table_repository import TableRepository
+        with patch("frappe.get_all", return_value=[
+            {"name": "alice@x.com", "full_name": "Alice"},
+        ]):
+            result = TableRepository().get_user_full_names(
+                ["alice@x.com", "ghost@x.com"]
+            )
+        self.assertEqual(result["alice@x.com"], "Alice")
+        self.assertEqual(result["ghost@x.com"], "ghost@x.com")

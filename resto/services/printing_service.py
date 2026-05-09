@@ -6,7 +6,7 @@ try:
     from resto.printing import (
         _enqueue_bill_worker, _enqueue_check_worker, _enqueue_receipt_worker,
         _enqueue_checker_worker, build_void_item_receipt, cups_print_raw,
-        get_printer_state,
+        get_printer_state, build_test_print_payload,
     )
 except Exception:
     _enqueue_bill_worker = None
@@ -16,6 +16,7 @@ except Exception:
     build_void_item_receipt = None
     cups_print_raw = None
     get_printer_state = None
+    build_test_print_payload = None
 
 
 class PrintingService:
@@ -26,6 +27,40 @@ class PrintingService:
     # print_bill_now
     # ------------------------------------------------------------------
 
+    def _update_status_for_invoice_tables(self, invoice_name, table_name, table_service,
+                                          taken_by, pax, customer, type_customer,
+                                          orders, checked):
+        if not (table_name and table_service is not None):
+            return
+
+        if orders is None:
+            orders = []
+        elif isinstance(orders, str):
+            try:
+                orders = json.loads(orders)
+            except Exception:
+                frappe.log_error("Gagal parse orders JSON", orders)
+                orders = []
+        if not isinstance(orders, list):
+            orders = []
+
+        related = table_service.repo.get_tables_for_invoice(invoice_name) or []
+        targets = list(related)
+        if table_name and table_name not in targets:
+            targets.insert(0, table_name)
+
+        for tname in targets:
+            table_service.update_table_status(
+                name=tname,
+                status="Print Bill",
+                taken_by=taken_by,
+                pax=pax,
+                customer=customer,
+                type_customer=type_customer,
+                orders=orders,
+                checked=checked,
+            )
+
     def print_bill_now(self, invoice_name, branch, table_name=None,
                        status=None, taken_by=None, pax=0, customer=None,
                        type_customer=None, orders=None, checked=None,
@@ -34,28 +69,10 @@ class PrintingService:
         if not printer:
             frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
 
-        if table_name and table_service is not None:
-            if orders is None:
-                orders = []
-            elif isinstance(orders, str):
-                try:
-                    orders = json.loads(orders)
-                except Exception:
-                    frappe.log_error("Gagal parse orders JSON", orders)
-                    orders = []
-            if not isinstance(orders, list):
-                orders = []
-
-            table_service.update_table_status(
-                name=table_name,
-                status="Print Bill",
-                taken_by=taken_by,
-                pax=pax,
-                customer=customer,
-                type_customer=type_customer,
-                orders=orders,
-                checked=checked
-            )
+        self._update_status_for_invoice_tables(
+            invoice_name, table_name, table_service,
+            taken_by, pax, customer, type_customer, orders, checked,
+        )
 
         job_id = _enqueue_bill_worker(invoice_name, printer)
         frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
@@ -73,28 +90,10 @@ class PrintingService:
         if not printer:
             frappe.throw(f"Tidak ditemukan printer untuk branch {branch}")
 
-        if table_name and table_service is not None:
-            if orders is None:
-                orders = []
-            elif isinstance(orders, str):
-                try:
-                    orders = json.loads(orders)
-                except Exception:
-                    frappe.log_error("Gagal parse orders JSON", orders)
-                    orders = []
-            if not isinstance(orders, list):
-                orders = []
-
-            table_service.update_table_status(
-                name=table_name,
-                status="Print Bill",
-                taken_by=taken_by,
-                pax=pax,
-                customer=customer,
-                type_customer=type_customer,
-                orders=orders,
-                checked=checked
-            )
+        self._update_status_for_invoice_tables(
+            invoice_name, table_name, table_service,
+            taken_by, pax, customer, type_customer, orders, checked,
+        )
 
         job_id = _enqueue_check_worker(invoice_name, printer)
         frappe.msgprint(f"Invoice {invoice_name} dikirim ke printer {printer}")
@@ -198,6 +197,22 @@ class PrintingService:
                 pass  # state stays "not_found"
             result.append(entry)
         return result
+
+    # ------------------------------------------------------------------
+    # test_print
+    # ------------------------------------------------------------------
+
+    def test_print(self, printer_name: str):
+        if not printer_name:
+            frappe.throw("printer_name wajib diisi")
+        raw = build_test_print_payload(printer_name)
+        job_id = cups_print_raw(raw, printer_name)
+        frappe.logger("pos_print").info({
+            "printer": printer_name,
+            "job_id": job_id,
+            "type": "test_print",
+        })
+        return {"ok": True, "job_id": job_id, "printer": printer_name}
 
     def enqueue_checker_after_kitchen(self, pos_name, branch):
         try:

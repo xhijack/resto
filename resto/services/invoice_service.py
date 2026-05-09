@@ -223,6 +223,9 @@ class InvoiceService:
         for doc in self.repo.get_merged_invoices(pos_invoice):
             doc.delete()
 
+    def list_paid_invoices_for_table(self, table_name):
+        return self.repo.list_paid_invoices_for_table(table_name)
+
     SKIP_FIELDS = {"name", "parent", "parenttype", "parentfield", "idx"}
 
     def move_items_from_invoice(self, source_name, target_name):

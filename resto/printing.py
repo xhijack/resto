@@ -1037,7 +1037,7 @@ def get_current_cashier_name(pos_invoice_name: str) -> str:
 
     return owner_user.full_name or invoice.owner
 
-def build_escpos_bill(name: str, include_header_address: bool = True) -> bytes:
+def build_escpos_bill(name: str, include_header_address: bool = True, print_label: str = None) -> bytes:
     data = _collect_pos_invoice(name)
 
     items = data.get("items", [])
@@ -1115,6 +1115,13 @@ def build_escpos_bill(name: str, include_header_address: bool = True) -> bytes:
     out = b""
     out += _esc_init()
     out += _esc_font_a()
+
+    # ===== LABEL (CHECK / BILL) =====
+    if print_label:
+        out += _esc_align_center() + _esc_bold(True) + _esc_char_size_dotmatrix(2, 2)
+        out += (print_label + "\n").encode("ascii", "ignore")
+        out += _esc_char_size_dotmatrix(0, 0) + _esc_bold(False)
+        out += _esc_align_left()
 
     # ===== HEADER =====
     out += _esc_align_center() + _esc_bold(True)
@@ -1363,7 +1370,7 @@ def _enqueue_bill_worker(name: str, printer_name: str):
     return job_id
 
 def _enqueue_check_worker(name: str, printer_name: str):
-    raw = build_escpos_bill(name, include_header_address=False)
+    raw = build_escpos_bill(name, include_header_address=False, print_label="CHECK")
     job_id = cups_print_raw(raw, printer_name)
 
     frappe.logger("pos_print").info({
@@ -2431,7 +2438,18 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     except:
         jam = str(posting_time)[:8] if posting_time else "-"
     table_short = str(table_name)[:12]
-    
+
+    ks_label = "-"
+    if printer_name:
+        ks = frappe.db.get_value(
+            "Kitchen Station",
+            {"printer_name": printer_name},
+            ["name", "description"],
+            as_dict=True,
+        )
+        if ks:
+            ks_label = ks.get("description") or ks.get("name") or printer_name
+
     out = b""
     out += _esc_init()
     out += _esc_font_a()
@@ -2441,6 +2459,7 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_align_left()
     out += (_line("-") + "\n").encode("ascii", "ignore")
     # out += (f"Invoice : {pos_invoice}\n").encode("ascii", "ignore")
+    out += (f"Kitchen : {ks_label}\n").encode("ascii", "ignore")
     out += (f"Station : {printer_name or '-'}\n").encode("ascii", "ignore")
     out += (format_lr(f"Table : {table_short}", tanggal)).encode("ascii", "ignore") + b"\n"
     out += (format_lr(f"Pax   : {int(flt(pax))}", jam)).encode("ascii", "ignore") + b"\n"
@@ -2474,4 +2493,25 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
     out += _esc_feed(5)
     out += _esc_cut_full()
 
+    return out
+
+
+def build_test_print_payload(printer_name: str) -> bytes:
+    """ESC/POS payload sederhana untuk uji konektivitas printer."""
+    timestamp = now_datetime().strftime("%d-%m-%Y %H:%M:%S")
+
+    out = b""
+    out += _esc_init() + _esc_font_a()
+    out += _esc_align_center() + _esc_bold(True) + _esc_char_size_dotmatrix(2, 2)
+    out += b"TEST PRINT\n"
+    out += _esc_char_size_dotmatrix(0, 0) + _esc_bold(False)
+    out += _esc_align_left()
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += (f"Printer : {printer_name}\n").encode("ascii", "ignore")
+    out += (f"Time    : {timestamp}\n").encode("ascii", "ignore")
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += b"Halo dari Sopwer Resto POS!\n"
+    out += b"Kalau cetakan ini muncul,\n"
+    out += b"berarti printer siap dipakai.\n"
+    out += _esc_feed(5) + _esc_cut_full()
     return out

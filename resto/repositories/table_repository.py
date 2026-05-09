@@ -37,9 +37,17 @@ class TableRepository:
     def get_user_full_names(self, user_emails):
         if not user_emails:
             return {}
+        unique_emails = list(set(user_emails))
         rows = frappe.get_all(
             "User",
-            filters={"name": ["in", list(set(user_emails))]},
+            filters={"name": ["in", unique_emails]},
             fields=["name", "full_name"],
+            ignore_permissions=True,
         )
-        return {r["name"]: (r.get("full_name") or r["name"]) for r in rows}
+        result = {r["name"]: (r.get("full_name") or r["name"]) for r in rows}
+        # Fallback: untuk email yang tidak ditemukan di tabel User,
+        # tetap kembalikan email tsb sebagai display name supaya UI
+        # punya sesuatu untuk dirender (caption "oleh <email>").
+        for email in unique_emails:
+            result.setdefault(email, email)
+        return result

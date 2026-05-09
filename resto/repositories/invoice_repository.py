@@ -18,6 +18,25 @@ class InvoiceRepository:
     def invoice_exists(self, name):
         return bool(frappe.db.exists("POS Invoice", name))
 
+    def list_paid_invoices_for_table(self, table_name):
+        if not table_name:
+            return []
+        return frappe.db.sql(
+            """
+            SELECT DISTINCT pi.name, pi.posting_date, pi.posting_time,
+                   pi.grand_total, pi.customer, pi.customer_name, pi.pax,
+                   pi.status, pi.docstatus
+            FROM `tabPOS Invoice` pi
+            INNER JOIN `tabTable Order` tor ON tor.invoice_name = pi.name
+            WHERE tor.parent = %(table)s
+              AND pi.status = 'Paid'
+              AND pi.docstatus = 1
+            ORDER BY pi.posting_date DESC, pi.posting_time DESC
+            """,
+            {"table": table_name},
+            as_dict=True,
+        )
+
     def get_invoice(self, name):
         return frappe.get_doc("POS Invoice", name)
 

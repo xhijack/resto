@@ -203,6 +203,18 @@ def list_printers_with_status():
 
 
 @frappe.whitelist()
+def test_print(printer_name: str):
+    from resto.services.printing_service import PrintingService
+    return PrintingService().test_print(printer_name)
+
+
+@frappe.whitelist()
+def list_paid_invoices_for_table(table_name: str):
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().list_paid_invoices_for_table(table_name)
+
+
+@frappe.whitelist()
 def get_end_day_report():
     from resto.services.reporting_service import ReportingService
     return ReportingService().get_end_day_report()
