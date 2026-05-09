@@ -196,6 +196,11 @@ def print_receipt_now(invoice_name: str, branch: str):
     return PrintingService().print_receipt_now(invoice_name, branch)
 
 
+@frappe.whitelist()
+def list_printers_with_status():
+    from resto.services.printing_service import PrintingService
+    return PrintingService().list_printers_with_status()
+
 
 @frappe.whitelist()
 def get_end_day_report():

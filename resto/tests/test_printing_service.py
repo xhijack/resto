@@ -1,3 +1,4 @@
+import sys
 import frappe
 from unittest.mock import MagicMock, patch
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
@@ -262,3 +263,109 @@ class TestPrintVoidItem(RestoPOSTestBase):
                 self.service._print_void_to_other_stations("INV-001", [void_item], "BR-001")
 
         mock_build.assert_called_with("INV-001", [void_item], "PRT-KITCHEN-A")
+
+
+class TestListPrintersWithStatus(RestoPOSTestBase):
+    """Test PrintingService.list_printers_with_status"""
+
+    def setUp(self):
+        super().setUp()
+        self.service = PrintingService(repo=MagicMock())
+
+    @staticmethod
+    def _stations(*specs):
+        return [
+            {"name": n, "printer_name": p, "description": d}
+            for (n, p, d) in specs
+        ]
+
+    def test_happy_path_all_online(self):
+        """Semua station online → is_online=True dan state='idle'"""
+        stations = self._stations(
+            ("KS-001", "Kitchen-Epson", "Kitchen 1"),
+            ("KS-002", "Bar-XP58", "Bar"),
+        )
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            with patch("frappe.get_all", return_value=stations):
+                with patch(
+                    "resto.services.printing_service.get_printer_state",
+                    return_value={"state": "idle", "is_online": True, "state_reasons": []},
+                ):
+                    result = self.service.list_printers_with_status()
+
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(r["is_online"] for r in result))
+        self.assertEqual(result[0]["label"], "Kitchen 1")
+
+    def test_mixed_online_and_stopped(self):
+        """1 idle + 1 stopped → mixed status"""
+        stations = self._stations(
+            ("KS-001", "Kitchen-Epson", "Kitchen"),
+            ("KS-002", "Bar-XP58", "Bar"),
+        )
+
+        def fake_state(printer, conn=None):
+            if printer == "Kitchen-Epson":
+                return {"state": "idle", "is_online": True, "state_reasons": []}
+            return {"state": "stopped", "is_online": False, "state_reasons": ["offline-report"]}
+
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            with patch("frappe.get_all", return_value=stations):
+                with patch(
+                    "resto.services.printing_service.get_printer_state",
+                    side_effect=fake_state,
+                ):
+                    result = self.service.list_printers_with_status()
+
+        by_name = {r["name"]: r for r in result}
+        self.assertTrue(by_name["KS-001"]["is_online"])
+        self.assertFalse(by_name["KS-002"]["is_online"])
+        self.assertEqual(by_name["KS-002"]["state"], "stopped")
+
+    def test_printer_not_registered_in_cups(self):
+        """Printer Kitchen Station tidak ada di CUPS → state='not_found', is_online=False"""
+        stations = self._stations(("KS-009", "Lama-Printer", "Old"))
+
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            with patch("frappe.get_all", return_value=stations):
+                with patch(
+                    "resto.services.printing_service.get_printer_state",
+                    side_effect=frappe.ValidationError("not found"),
+                ):
+                    result = self.service.list_printers_with_status()
+
+        self.assertEqual(len(result), 1)
+        self.assertFalse(result[0]["is_online"])
+        self.assertEqual(result[0]["state"], "not_found")
+
+    def test_cups_daemon_unavailable(self):
+        """Connection raise → semua entry state='cups_unavailable'"""
+        stations = self._stations(
+            ("KS-001", "P1", "Bar"),
+            ("KS-002", "P2", "Kitchen"),
+        )
+        fake_cups = MagicMock()
+        fake_cups.Connection.side_effect = Exception("CUPS daemon down")
+
+        with patch.dict(sys.modules, {"cups": fake_cups}):
+            with patch("frappe.get_all", return_value=stations):
+                result = self.service.list_printers_with_status()
+
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(r["state"] == "cups_unavailable" for r in result))
+        self.assertTrue(all(not r["is_online"] for r in result))
+
+    def test_skips_station_with_empty_printer_name(self):
+        """Station tanpa printer_name tidak crash; entry tetap dikembalikan as not_found"""
+        stations = [{"name": "KS-X", "printer_name": "", "description": "Tanpa Printer"}]
+
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            with patch("frappe.get_all", return_value=stations):
+                with patch(
+                    "resto.services.printing_service.get_printer_state",
+                ) as mock_state:
+                    result = self.service.list_printers_with_status()
+                    mock_state.assert_not_called()
+
+        self.assertEqual(result[0]["state"], "not_found")
+        self.assertFalse(result[0]["is_online"])

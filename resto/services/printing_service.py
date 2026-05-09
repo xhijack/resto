@@ -5,7 +5,8 @@ from resto.repositories.printing_repository import PrintingRepository
 try:
     from resto.printing import (
         _enqueue_bill_worker, _enqueue_check_worker, _enqueue_receipt_worker,
-        _enqueue_checker_worker, build_void_item_receipt, cups_print_raw
+        _enqueue_checker_worker, build_void_item_receipt, cups_print_raw,
+        get_printer_state,
     )
 except Exception:
     _enqueue_bill_worker = None
@@ -14,6 +15,7 @@ except Exception:
     _enqueue_checker_worker = None
     build_void_item_receipt = None
     cups_print_raw = None
+    get_printer_state = None
 
 
 class PrintingService:
@@ -145,6 +147,57 @@ class PrintingService:
         })
 
         return {"ok": True, "job_id": job_id, "items_printed": len(items_to_print)}
+
+    # ------------------------------------------------------------------
+    # list_printers_with_status
+    # ------------------------------------------------------------------
+
+    def list_printers_with_status(self):
+        """Return Kitchen Station list dengan status pycups (online/offline).
+
+        Bila CUPS tidak tersedia (daemon down / pycups missing), tetap return
+        list Kitchen Station dengan state="cups_unavailable" supaya UI tidak crash.
+        """
+        stations = frappe.get_all(
+            "Kitchen Station",
+            fields=["name", "printer_name", "description"],
+        )
+
+        try:
+            import cups
+            conn = cups.Connection()
+        except Exception:
+            return [
+                {
+                    "name": s["name"],
+                    "printer_name": s.get("printer_name") or "",
+                    "label": s.get("description") or s["name"],
+                    "is_online": False,
+                    "state": "cups_unavailable",
+                }
+                for s in stations
+            ]
+
+        result = []
+        for s in stations:
+            entry = {
+                "name": s["name"],
+                "printer_name": s.get("printer_name") or "",
+                "label": s.get("description") or s["name"],
+                "is_online": False,
+                "state": "not_found",
+            }
+            if not entry["printer_name"]:
+                result.append(entry)
+                continue
+            try:
+                info = get_printer_state(entry["printer_name"], conn=conn)
+                entry["is_online"] = info["is_online"]
+                entry["state"] = info["state"]
+            except frappe.ValidationError:
+                pass  # state stays "not_found"
+            result.append(entry)
+        return result
 
     def enqueue_checker_after_kitchen(self, pos_name, branch):
         try:

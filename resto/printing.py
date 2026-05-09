@@ -472,6 +472,27 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
         frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
         raise
 
+def get_printer_state(printer_name: str, conn=None) -> Dict[str, Any]:
+    """Return CUPS state for a printer.
+
+    Raises ValidationError jika printer tidak terdaftar di CUPS server.
+    Pass `conn` untuk reuse satu Connection saat batch query.
+    """
+    import cups
+    conn = conn or cups.Connection()
+    printers = conn.getPrinters()
+    if printer_name not in printers:
+        raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
+    attrs = conn.getPrinterAttributes(printer_name)
+    state_code = attrs.get("printer-state")
+    state_map = {3: "idle", 4: "processing", 5: "stopped"}
+    return {
+        "state": state_map.get(state_code, "unknown"),
+        "is_online": state_code in (3, 4),
+        "state_reasons": attrs.get("printer-state-reasons") or [],
+    }
+
+
 def get_item_printers(item: Dict) -> List[str]:
     branch_menu = item.get("resto_menu")
     if not branch_menu:
