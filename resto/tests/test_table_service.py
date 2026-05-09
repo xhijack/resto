@@ -211,6 +211,7 @@ class TestTableService(RestoPOSTestBase):
     def test_get_all_tables_returns_list(self):
         """Harus return list"""
         self.mock_repo.get_all_tables.return_value = []
+        self.mock_repo.get_user_full_names.return_value = {}
         result = self.service.get_all_tables_with_details()
         self.assertIsInstance(result, list)
 
@@ -225,10 +226,11 @@ class TestTableService(RestoPOSTestBase):
             "name": "TBL-001", "table_name": "Meja 1", "status": "Terisi",
             "table_type": "Regular", "zone": "A", "customer": "Budi",
             "pax": 2, "type_customer": "Walk In", "floor": "1",
-            "taken_by": "John", "checked": 0
+            "taken_by": "john@example.com", "checked": 0
         })
         self.mock_repo.get_all_tables.return_value = [table_row]
         self.mock_repo.get_table.return_value = mock_doc
+        self.mock_repo.get_user_full_names.return_value = {"john@example.com": "John Doe"}
 
         result = self.service.get_all_tables_with_details()
 
@@ -238,6 +240,8 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(item["name"], "Meja 1")
         self.assertEqual(item["status"], "Terisi")
         self.assertEqual(item["orders"], [{"invoice_name": "INV-001"}])
+        self.assertEqual(item["takenBy"], "john@example.com")
+        self.assertEqual(item["takenByName"], "John Doe")
 
     def test_get_all_tables_defaults_status_to_kosong(self):
         """Status None harus default ke 'Kosong'"""
@@ -251,12 +255,65 @@ class TestTableService(RestoPOSTestBase):
         })
         self.mock_repo.get_all_tables.return_value = [table_row]
         self.mock_repo.get_table.return_value = mock_doc
+        self.mock_repo.get_user_full_names.return_value = {}
 
         result = self.service.get_all_tables_with_details()
 
         self.assertEqual(result[0]["status"], "Kosong")
         self.assertEqual(result[0]["pax"], 0)
         self.assertEqual(result[0]["floor"], "1")
+        self.assertIsNone(result[0]["takenByName"])
+
+    def test_get_all_tables_taken_by_without_user_record_falls_back_to_email(self):
+        """Kalau User record tidak ada, repo fallback ke email — service pass through"""
+        mock_doc = MagicMock()
+        mock_doc.orders = []
+        table_row = frappe._dict({
+            "name": "TBL-001", "table_name": "Meja 1", "status": "Has Taken",
+            "table_type": None, "zone": None, "customer": None,
+            "pax": None, "type_customer": None, "floor": None,
+            "taken_by": "ghost@example.com", "checked": None
+        })
+        self.mock_repo.get_all_tables.return_value = [table_row]
+        self.mock_repo.get_table.return_value = mock_doc
+        # User tidak ada → repo return empty map
+        self.mock_repo.get_user_full_names.return_value = {}
+
+        result = self.service.get_all_tables_with_details()
+
+        self.assertEqual(result[0]["takenBy"], "ghost@example.com")
+        self.assertIsNone(result[0]["takenByName"])
+
+    def test_get_all_tables_bulk_fetches_full_names_once(self):
+        """Optimisasi: get_user_full_names dipanggil 1x dengan list semua taken_by, bukan N+1"""
+        mock_doc = MagicMock()
+        mock_doc.orders = []
+        rows = [
+            frappe._dict({"name": "T1", "table_name": "M1", "status": "Has Taken",
+                          "table_type": None, "zone": None, "customer": None, "pax": 0,
+                          "type_customer": None, "floor": "1", "taken_by": "a@x.com", "checked": 0}),
+            frappe._dict({"name": "T2", "table_name": "M2", "status": "Has Taken",
+                          "table_type": None, "zone": None, "customer": None, "pax": 0,
+                          "type_customer": None, "floor": "1", "taken_by": "b@x.com", "checked": 0}),
+            frappe._dict({"name": "T3", "table_name": "M3", "status": "Kosong",
+                          "table_type": None, "zone": None, "customer": None, "pax": 0,
+                          "type_customer": None, "floor": "1", "taken_by": None, "checked": 0}),
+        ]
+        self.mock_repo.get_all_tables.return_value = rows
+        self.mock_repo.get_table.return_value = mock_doc
+        self.mock_repo.get_user_full_names.return_value = {
+            "a@x.com": "Alice", "b@x.com": "Bob"
+        }
+
+        result = self.service.get_all_tables_with_details()
+
+        self.mock_repo.get_user_full_names.assert_called_once()
+        called_arg = self.mock_repo.get_user_full_names.call_args[0][0]
+        self.assertIn("a@x.com", called_arg)
+        self.assertIn("b@x.com", called_arg)
+        self.assertEqual(result[0]["takenByName"], "Alice")
+        self.assertEqual(result[1]["takenByName"], "Bob")
+        self.assertIsNone(result[2]["takenByName"])
 
     # ------------------------------------------------------------------
     # Integration tests

@@ -149,6 +149,9 @@ class TableService:
 
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()
+        taken_by_emails = [t.taken_by for t in tables if t.taken_by]
+        full_name_map = self.repo.get_user_full_names(taken_by_emails)
+
         result = []
         for t in tables:
             doc = self.repo.get_table(t.name)
@@ -163,6 +166,7 @@ class TableService:
                 "typeCustomer": t.type_customer or None,
                 "floor": t.floor or "1",
                 "takenBy": t.taken_by or None,
+                "takenByName": full_name_map.get(t.taken_by) if t.taken_by else None,
                 "checked": t.checked,
                 "orders": [{"invoice_name": o.invoice_name} for o in doc.orders],
             })

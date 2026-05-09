@@ -33,3 +33,13 @@ class TableRepository:
             distinct=True
         )
         return [r["parent"] for r in rows]
+
+    def get_user_full_names(self, user_emails):
+        if not user_emails:
+            return {}
+        rows = frappe.get_all(
+            "User",
+            filters={"name": ["in", list(set(user_emails))]},
+            fields=["name", "full_name"],
+        )
+        return {r["name"]: (r.get("full_name") or r["name"]) for r in rows}
