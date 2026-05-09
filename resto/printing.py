@@ -274,6 +274,8 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
     for p in doc.get("payments", []):
         amt = float(p.get("amount") or 0)
         total_paid += amt
+        if amt <= 0:
+            continue
         payments.append({
             "mode_of_payment": p.get("mode_of_payment") or "Payment",
             "amount": amt,

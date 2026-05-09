@@ -524,6 +524,87 @@ class TestPrintTemplates(RestoPOSTestBase):
         self.assertNotIn(b"Station :", raw)
 
 
+class TestPrintReceiptPaymentFiltering(RestoPOSTestBase):
+    """v1.2.6 fix: payment row dengan amount=0 (default POS Profile) tidak boleh muncul di struk."""
+
+    def _make_doc(self, payments):
+        fake_doc = MagicMock()
+        fake_doc.reload.return_value = fake_doc
+        data = {
+            "currency": "IDR",
+            "items": [],
+            "taxes": [],
+            "payments": payments,
+            "branch": "",
+            "company": "TEST",
+            "customer": "X",
+            "customer_name": "X",
+            "order_type": "Dine In",
+            "name": "INV-001",
+            "posting_date": "2026-05-09",
+            "posting_time": "12:00:00",
+            "total": 500000,
+            "discount_amount": 0,
+            "total_taxes_and_charges": 0,
+            "grand_total": 500000,
+            "rounded_total": 500000,
+            "paid_amount": 500000,
+            "change_amount": 0,
+            "remarks": "",
+        }
+        fake_doc.get.side_effect = lambda k, default=None: data.get(k, default)
+        return fake_doc
+
+    def test_zero_amount_payment_row_excluded(self):
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            from resto.printing import _collect_pos_invoice
+
+        fake_doc = self._make_doc([
+            {"mode_of_payment": "Cash", "amount": 0},
+            {"mode_of_payment": "Debit BCA", "amount": 500000},
+        ])
+
+        with patch("resto.printing.frappe.get_doc", return_value=fake_doc):
+            result = _collect_pos_invoice("INV-001")
+
+        modes = [p["mode_of_payment"] for p in result["payments"]]
+        self.assertEqual(modes, ["Debit BCA"])
+        self.assertEqual(result["payments"][0]["amount"], 500000)
+
+    def test_negative_amount_payment_row_excluded(self):
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            from resto.printing import _collect_pos_invoice
+
+        fake_doc = self._make_doc([
+            {"mode_of_payment": "Cash", "amount": -100},
+            {"mode_of_payment": "Cash", "amount": 500000},
+        ])
+
+        with patch("resto.printing.frappe.get_doc", return_value=fake_doc):
+            result = _collect_pos_invoice("INV-001")
+
+        self.assertEqual(len(result["payments"]), 1)
+        self.assertEqual(result["payments"][0]["amount"], 500000)
+
+    def test_split_payment_keeps_all_positive_rows(self):
+        with patch.dict(sys.modules, {"cups": MagicMock()}):
+            from resto.printing import _collect_pos_invoice
+
+        fake_doc = self._make_doc([
+            {"mode_of_payment": "Cash", "amount": 0},
+            {"mode_of_payment": "Cash", "amount": 200000},
+            {"mode_of_payment": "Debit BCA", "amount": 300000},
+        ])
+
+        with patch("resto.printing.frappe.get_doc", return_value=fake_doc):
+            result = _collect_pos_invoice("INV-001")
+
+        modes = [p["mode_of_payment"] for p in result["payments"]]
+        amounts = [p["amount"] for p in result["payments"]]
+        self.assertEqual(modes, ["Cash", "Debit BCA"])
+        self.assertEqual(amounts, [200000, 300000])
+
+
 class TestUserFullNameLookup(RestoPOSTestBase):
     """Item 2: TableRepository.get_user_full_names harus tetap mengembalikan
     mapping (fallback ke email) supaya UI selalu punya display name."""
