@@ -2293,17 +2293,17 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
     # =========================
     # SESSION TIME
     # =========================
-    if session_time:
-        lines.append("SESSION TIME")
-        lines.append(line())
+    # if session_time:
+    #     lines.append("SESSION TIME")
+    #     lines.append(line())
 
-        for label, val in session_time.items():
-            lines.append(label)
-            lines.append(format_lr("Pax", val.get("pax", 0)))
-            lines.append(format_lr("Bill", val.get("bill", 0)))
-            lines.append(format_lr("Avg Pax", val.get("avg_pax", 0)))
-            lines.append(format_lr("Avg Bill", fmt_amt(val.get("avg_bill", 0))))
-            lines.append("")
+    #     for label, val in session_time.items():
+    #         lines.append(label)
+    #         lines.append(format_lr("Pax", val.get("pax", 0)))
+    #         lines.append(format_lr("Bill", val.get("bill", 0)))
+    #         lines.append(format_lr("Avg Pax", val.get("avg_pax", 0)))
+    #         lines.append(format_lr("Avg Bill", fmt_amt(val.get("avg_bill", 0))))
+    #         lines.append("")
 
     # =========================
     # DRAFT BILL
