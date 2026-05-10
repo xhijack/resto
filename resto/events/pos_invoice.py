@@ -131,6 +131,23 @@ def exclude_void_items_from_total(doc, method):
     #         p.base_amount = gt
     #     doc.outstanding_amount = 0
 
+def block_partial_payment(doc, method):
+    """Anti-partial guard untuk POS Invoice.
+    Tolak submit kalau total paid < grand_total. Tolerance 1 rupiah untuk
+    floating-point pembulatan (rounded_total bisa beda <1 dari grand_total).
+    Cancel/amend tetap diizinkan — guard cuma di submit path."""
+    if not doc.is_pos:
+        return
+    grand = flt(doc.rounded_total or doc.grand_total)
+    paid = sum(flt(p.amount) for p in (doc.payments or []))
+    if grand - paid > 1:
+        frappe.throw(
+            f"Pembayaran kurang dari total. Total: Rp{grand:,.0f}, "
+            f"Dibayar: Rp{paid:,.0f}, Kurang: Rp{grand - paid:,.0f}.",
+            title="Pembayaran Belum Lunas",
+        )
+
+
 def lock_void_value_after_submit(doc, method):
     for item in doc.items:
         if item.status_kitchen == "Void Menu":

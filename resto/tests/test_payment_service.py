@@ -1,7 +1,18 @@
 import frappe
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
 from resto.services.payment_service import PaymentService
+
+
+def _full_paid_mock(amount=50000, existing_payments=None):
+    """Mock POS Invoice doc dengan grand_total=amount + existing payments
+    yang menambah ke fully-paid kalau caller bayar sisanya."""
+    mock_doc = MagicMock()
+    mock_doc.taxes = []
+    mock_doc.payments = list(existing_payments or [])
+    mock_doc.grand_total = amount
+    mock_doc.rounded_total = amount
+    return mock_doc
 
 
 class TestPaymentService(RestoPOSTestBase):
@@ -10,13 +21,12 @@ class TestPaymentService(RestoPOSTestBase):
         self.service = PaymentService()
 
     # ------------------------------------------------------------------
-    # Unit tests — create_payment
+    # Unit tests — create_payment (full payment cases)
     # ------------------------------------------------------------------
 
     def test_create_payment_appends_payment_to_invoice(self):
         """Harus append payment ke doc.payments"""
-        mock_doc = MagicMock()
-        mock_doc.taxes = []
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -30,7 +40,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_submits_invoice(self):
         """Harus memanggil doc.submit() setelah append payment"""
-        mock_doc = MagicMock()
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -41,7 +51,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_calls_clear_table_merged(self):
         """Harus memanggil clear_table_merged setelah submit"""
-        mock_doc = MagicMock()
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -52,7 +62,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_calls_db_commit(self):
         """Harus memanggil frappe.db.commit()"""
-        mock_doc = MagicMock()
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db") as mock_db, \
@@ -63,7 +73,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_returns_ok_true(self):
         """Harus return ok=True dan pos_invoice name"""
-        mock_doc = MagicMock()
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -73,6 +83,49 @@ class TestPaymentService(RestoPOSTestBase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["pos_invoice"], "INV-001")
         self.assertIn("message", result)
+
+    # ------------------------------------------------------------------
+    # Anti-partial validation
+    # ------------------------------------------------------------------
+
+    def test_create_payment_rejects_underpayment(self):
+        """amount < grand_total → throws ValidationError, doc.submit tidak dipanggil"""
+        mock_doc = _full_paid_mock(100000)  # grand_total 100K
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            with self.assertRaises(frappe.ValidationError) as ctx:
+                self.service.create_payment("INV-001", 50000, "Cash")
+
+        self.assertIn("Kurang", str(ctx.exception))
+        mock_doc.submit.assert_not_called()
+        mock_doc.append.assert_not_called()
+
+    def test_create_payment_allows_topup_to_full(self):
+        """existing partial payment + new payment yang melengkapi → success"""
+        existing = [MagicMock(amount=30000)]
+        mock_doc = _full_paid_mock(100000, existing_payments=existing)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.create_payment("INV-001", 70000, "Cash")
+
+        self.assertTrue(result["ok"])
+        mock_doc.submit.assert_called_once()
+
+    def test_create_payment_tolerance_under_one_rupiah(self):
+        """Selisih <1 rupiah (rounding) → tetap diterima"""
+        mock_doc = _full_paid_mock(100000.5)  # grand_total 100,000.5
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.create_payment("INV-001", 100000, "Cash")
+
+        self.assertTrue(result["ok"])
+        mock_doc.submit.assert_called_once()
 
     # ------------------------------------------------------------------
     # Integration test
@@ -94,28 +147,24 @@ class TestPaymentService(RestoPOSTestBase):
         self.assertEqual(updated.docstatus, 1)
 
     # ------------------------------------------------------------------
-    # Extreme variation tests — payment boundary cases
+    # Boundary cases
     # ------------------------------------------------------------------
 
-    def test_create_payment_with_amount_zero_still_appends(self):
-        """amount=0 → append tetap dipanggil (backend tidak validasi amount>0)"""
-        mock_doc = MagicMock()
-        mock_doc.taxes = []
+    def test_create_payment_with_amount_zero_rejects(self):
+        """amount=0 (under-payment) → reject (kebijakan baru anti-partial)"""
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
              patch("resto.services.payment_service.clear_table_merged"):
-            self.service.create_payment("INV-001", 0, "Cash")
+            with self.assertRaises(frappe.ValidationError):
+                self.service.create_payment("INV-001", 0, "Cash")
 
-        mock_doc.append.assert_called_once_with("payments", {
-            "mode_of_payment": "Cash",
-            "amount": 0
-        })
+        mock_doc.append.assert_not_called()
 
     def test_create_payment_with_very_large_amount_no_crash(self):
-        """amount=99999999 → tidak crash, submit dipanggil normal"""
-        mock_doc = MagicMock()
-        mock_doc.taxes = []
+        """amount=99999999 (over-payment) → tetap allowed, submit dipanggil"""
+        mock_doc = _full_paid_mock(100)  # grand_total kecil
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -127,8 +176,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_result_includes_pos_invoice_name(self):
         """result['pos_invoice'] harus sama dengan invoice name yang dikirim"""
-        mock_doc = MagicMock()
-        mock_doc.taxes = []
+        mock_doc = _full_paid_mock(50000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
@@ -139,7 +187,7 @@ class TestPaymentService(RestoPOSTestBase):
 
     def test_create_payment_taxes_not_modified(self):
         """create_payment tidak boleh menyentuh doc.taxes"""
-        mock_doc = MagicMock()
+        mock_doc = _full_paid_mock(50000)
         original_taxes = [MagicMock(), MagicMock()]
         mock_doc.taxes = list(original_taxes)
 
