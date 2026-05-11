@@ -61,6 +61,26 @@ class TableService:
                     doc.set("orders", new_orders)
 
         self.repo.save_table(doc)
+
+        # Realtime push: legacy endpoint ini hot path utama dari mobile
+        # (useHandleSelectTable, useCancelOrder, useVoidFlow, useMoveTable,
+        # MoveItemModal, dst). Tanpa publish_realtime di sini, mobile lain
+        # hanya update via polling 30s — terlihat ~10s lag. Reuse event
+        # `table_meta_updated` supaya mobile useTableRealtime hook (yang
+        # sudah subscribe) langsung trigger reload tanpa perlu event baru.
+        frappe.publish_realtime(
+            "table_meta_updated",
+            {
+                "table_name": doc.name,
+                "status": doc.status,
+                "pax": doc.pax,
+                "customer": doc.customer,
+                "type_customer": doc.type_customer,
+                "taken_by": doc.taken_by,
+            },
+            room="website",
+            after_commit=True,
+        )
         return {
             "success": True,
             "message": f"Table {doc.name} updated successfully",

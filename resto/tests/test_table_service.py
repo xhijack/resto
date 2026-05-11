@@ -394,6 +394,35 @@ class TestTableService(RestoPOSTestBase):
         self.assertTrue(kwargs.get("after_commit"))
         self.assertEqual(kwargs.get("room"), "website")
 
+    def test_update_table_status_publishes_realtime_event(self):
+        """update_table_status (legacy hot-path endpoint dari useHandleSelectTable
+        dkk) harus fire `table_meta_updated` supaya mobile lain instant reload."""
+        doc = self._make_table_doc(status="Kosong")
+        doc.pax = 3
+        doc.customer = "Budi"
+        doc.type_customer = "Personal"
+        doc.taken_by = "kasir@x.com"
+        self.mock_repo.get_table.return_value = doc
+
+        with patch("resto.services.table_service.frappe.publish_realtime") as mock_pub:
+            self.service.update_table_status(
+                "TBL-001", status="Terisi", taken_by="kasir@x.com",
+                pax=3, customer="Budi", type_customer="Personal",
+            )
+
+        mock_pub.assert_called_once()
+        args, kwargs = mock_pub.call_args
+        self.assertEqual(args[0], "table_meta_updated")
+        payload = args[1]
+        self.assertEqual(payload["table_name"], "TBL-001")
+        self.assertEqual(payload["status"], "Terisi")
+        self.assertEqual(payload["pax"], 3)
+        self.assertEqual(payload["customer"], "Budi")
+        self.assertEqual(payload["type_customer"], "Personal")
+        self.assertEqual(payload["taken_by"], "kasir@x.com")
+        self.assertTrue(kwargs.get("after_commit"))
+        self.assertEqual(kwargs.get("room"), "website")
+
     def test_remove_table_order_no_op_does_not_publish(self):
         """Kalau invoice tidak ada di table, no event terbang (tidak ada perubahan)."""
         existing = MagicMock(); existing.invoice_name = "INV-001"
