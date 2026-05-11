@@ -436,6 +436,57 @@ class TestTableService(RestoPOSTestBase):
         mock_pub.assert_not_called()
 
     # ------------------------------------------------------------------
+    # Unit tests — update_table_status: atomic claim (expected_status)
+    # ------------------------------------------------------------------
+
+    def test_update_status_expected_status_match_proceeds(self):
+        """Kalau expected_status sama dengan current status di DB, update jalan."""
+        from resto.services.table_service import TableAlreadyClaimedError
+        doc = self._make_table_doc(status="Kosong")
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        result = self.service.update_table_status(
+            "TBL-001", status="Terisi", taken_by="kasir@a.com",
+            pax=2, customer="Andi", type_customer="Personal",
+            expected_status="Kosong",
+        )
+
+        self.assertTrue(result["success"])
+        self.mock_repo.get_table_for_update.assert_called_once_with("TBL-001")
+        self.mock_repo.get_table.assert_not_called()
+        self.mock_repo.save_table.assert_called_once()
+        self.assertEqual(doc.status, "Terisi")
+        self.assertEqual(doc.taken_by, "kasir@a.com")
+
+    def test_update_status_expected_status_mismatch_raises(self):
+        """Kalau expected_status beda dengan current di DB (race-loss),
+        raise TableAlreadyClaimedError dan TIDAK save."""
+        from resto.services.table_service import TableAlreadyClaimedError
+        doc = self._make_table_doc(status="Terisi")
+        doc.taken_by = "kasir@a.com"
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        with self.assertRaises(TableAlreadyClaimedError):
+            self.service.update_table_status(
+                "TBL-001", status="Terisi", taken_by="kasir@b.com",
+                pax=2, customer="Budi", type_customer="Personal",
+                expected_status="Kosong",
+            )
+
+        self.mock_repo.save_table.assert_not_called()
+
+    def test_update_status_no_expected_uses_non_locking_read(self):
+        """Tanpa expected_status (legacy caller), pakai get_table biasa
+        — backward compatible, tidak ada lock overhead."""
+        doc = self._make_table_doc(status="Terisi")
+        self.mock_repo.get_table.return_value = doc
+
+        self.service.update_table_status("TBL-001", status="Terisi", pax=4)
+
+        self.mock_repo.get_table.assert_called_once_with("TBL-001")
+        self.mock_repo.get_table_for_update.assert_not_called()
+
+    # ------------------------------------------------------------------
     # Unit tests — get_all_tables_with_details
     # ------------------------------------------------------------------
 

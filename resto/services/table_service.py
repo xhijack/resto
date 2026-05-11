@@ -5,13 +5,36 @@ from resto.repositories.invoice_repository import InvoiceRepository
 from resto.services.invoice_service import InvoiceService
 
 
+class TableAlreadyClaimedError(frappe.ValidationError):
+    """Raised saat caller pass expected_status tapi current status di DB beda.
+    Dipakai mobile untuk distinguish race-loss dari error generic, supaya
+    bisa surface alert spesifik 'meja barusan dipilih kasir lain' + revert UI."""
+    pass
+
+
 class TableService:
     def __init__(self, repo=None):
         self.repo = repo or TableRepository()
 
     def update_table_status(self, name, status=None, taken_by=None, pax=None,
-                            customer=None, type_customer=None, orders=None, checked=None):
-        doc = self.repo.get_table(name)
+                            customer=None, type_customer=None, orders=None, checked=None,
+                            expected_status=None):
+        # Atomic claim path: caller (mis. useHandleSelectTable saat tap meja
+        # kosong) pass expected_status untuk guard race condition 2 waiter
+        # claim meja sama bersamaan. Pakai locking read (SELECT FOR UPDATE)
+        # supaya thread kedua lihat hasil commit thread pertama, bukan snapshot
+        # transaksi stale.
+        if expected_status is not None:
+            doc = self.repo.get_table_for_update(name)
+            current = doc.status or "Kosong"
+            if current != expected_status:
+                claimer = doc.taken_by or "kasir lain"
+                frappe.throw(
+                    f"Meja {name} barusan dipilih oleh {claimer} (status: {current})",
+                    exc=TableAlreadyClaimedError,
+                )
+        else:
+            doc = self.repo.get_table(name)
 
         if status == "Kosong":
             doc.status = "Kosong"

@@ -102,11 +102,12 @@ def create_customer(name, mobile_no=None):
     return CustomerRepository().create_customer(name, mobile_no=mobile_no)
 
 @frappe.whitelist()
-def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None):
+def update_table_status(name, status=None, taken_by=None, pax=None, customer=None, type_customer=None, orders=None, checked=None, expected_status=None):
     from resto.services.table_service import TableService
     return TableService().update_table_status(
         name, status=status, taken_by=taken_by, pax=pax,
-        customer=customer, type_customer=type_customer, orders=orders, checked=checked
+        customer=customer, type_customer=type_customer, orders=orders, checked=checked,
+        expected_status=expected_status,
     )
 
 @frappe.whitelist()
