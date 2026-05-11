@@ -10,6 +10,14 @@ def print_now():
     from resto.printing import pos_invoice_print_now
     return pos_invoice_print_now()
 
+@frappe.whitelist()
+def get_realtime_namespace():
+    # Site name yang Frappe routing untuk request ini. Mobile pakai sebagai
+    # path namespace socketio (`io(${baseUrl}/${site})`). Tanpa ini, mobile
+    # connect ke namespace default `/` sementara backend emit ke `/<site>` →
+    # event tidak nyampe (lihat apps/frappe/realtime/index.js:48-56).
+    return {"site": frappe.local.site}
+
 @frappe.whitelist(allow_guest=True)
 def login_with_pin(pin):
     try:
