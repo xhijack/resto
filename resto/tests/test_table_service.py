@@ -354,6 +354,7 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(payload["invoice_name"], "INV-NEW")
         self.assertEqual(payload["status"], "Terisi")
         self.assertTrue(kwargs.get("after_commit"))
+        self.assertEqual(kwargs.get("room"), "website")
 
     def test_remove_table_order_publishes_realtime_event(self):
         existing = MagicMock(); existing.invoice_name = "INV-001"
@@ -368,6 +369,7 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(args[0], "table_order_removed")
         self.assertEqual(args[1], {"table_name": "TBL-001", "invoice_name": "INV-001"})
         self.assertTrue(kwargs.get("after_commit"))
+        self.assertEqual(kwargs.get("room"), "website")
 
     def test_update_table_meta_publishes_realtime_event(self):
         doc = self._make_table_doc(status="Kosong")
@@ -390,6 +392,7 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(payload["type_customer"], "Personal")
         self.assertEqual(payload["taken_by"], "kasir@x.com")
         self.assertTrue(kwargs.get("after_commit"))
+        self.assertEqual(kwargs.get("room"), "website")
 
     def test_remove_table_order_no_op_does_not_publish(self):
         """Kalau invoice tidak ada di table, no event terbang (tidak ada perubahan)."""

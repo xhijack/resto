@@ -108,7 +108,10 @@ class TableService:
         # Realtime push: notify subscribers (mobile devices) bahwa table ini
         # punya order baru. Pakai after_commit=True supaya event tidak terbang
         # sebelum DB commit (kalau transaksi rollback, tidak ada ghost event).
-        # No room param → broadcast ke semua subscriber site (single-tenant).
+        # room="website": Frappe socketio handler join SITE_ROOM ("all") cuma
+        # untuk System User. Kasir mobile bukan System User → tidak akan terima
+        # broadcast default. WEBSITE_ROOM di-join unconditional oleh semua
+        # authenticated socket, jadi pakai itu untuk reach mobile cashiers.
         frappe.publish_realtime(
             "table_order_added",
             {
@@ -116,6 +119,7 @@ class TableService:
                 "invoice_name": invoice_name,
                 "status": doc.status,
             },
+            room="website",
             after_commit=True,
         )
         return {"success": True, "message": f"Order {invoice_name} berhasil ditambahkan ke Table {table_name}"}
@@ -144,6 +148,7 @@ class TableService:
         frappe.publish_realtime(
             "table_order_removed",
             {"table_name": table_name, "invoice_name": invoice_name},
+            room="website",
             after_commit=True,
         )
         return {"success": True, "message": f"Order {invoice_name} dihapus dari Table {table_name}"}
@@ -200,6 +205,7 @@ class TableService:
                 "type_customer": doc.type_customer,
                 "taken_by": doc.taken_by,
             },
+            room="website",
             after_commit=True,
         )
         return {
