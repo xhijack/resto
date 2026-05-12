@@ -165,6 +165,18 @@ class TestMergeTable(RestoPOSTestBase):
         self.mock_repo = MagicMock()
         self.service = TableService(repo=self.mock_repo)
 
+    @staticmethod
+    def _make_doc(orders=None, **overrides):
+        doc = MagicMock()
+        doc.status = overrides.get("status", "Terisi")
+        doc.taken_by = overrides.get("taken_by", "kasir@test.com")
+        doc.pax = overrides.get("pax", 4)
+        doc.customer = overrides.get("customer", "John Doe")
+        doc.type_customer = overrides.get("type_customer", "Personal")
+        doc.checked = overrides.get("checked", 0)
+        doc.get.return_value = orders if orders is not None else []
+        return doc
+
     # ------------------------------------------------------------------
     # Validasi input
     # ------------------------------------------------------------------
@@ -209,9 +221,7 @@ class TestMergeTable(RestoPOSTestBase):
         self.mock_repo.table_exists.return_value = True
         self.mock_repo.invoice_exists.return_value = True
 
-        mock_target_table = MagicMock()
-        mock_target_table.get.return_value = []
-        self.mock_repo.get_table.return_value = mock_target_table
+        self.mock_repo.get_table.return_value = self._make_doc()
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -220,13 +230,16 @@ class TestMergeTable(RestoPOSTestBase):
              patch("resto.services.table_service.InvoiceService"):
             self.service.merge_table("INV-001", source_table="TBL-001", target_table=["TBL-001"])
 
-        # get_table tidak dipanggil untuk proses merge (dilewati)
-        self.mock_repo.get_table.assert_not_called()
+        # Source di-fetch sekali (snapshot state), tapi target sama dengan source → dilewati.
+        # Jadi total get_table call cuma 1 (untuk source), bukan untuk target.
+        self.mock_repo.get_table.assert_called_once_with("TBL-001")
+        self.mock_repo.save_table.assert_not_called()
 
     def test_skips_nonexistent_target_table(self):
         """Target table yang tidak ada harus dilewati, bukan throw"""
         self.mock_repo.table_exists.side_effect = lambda name: name != "TBL-NOTFOUND"
         self.mock_repo.invoice_exists.return_value = True
+        self.mock_repo.get_table.return_value = self._make_doc()
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -243,9 +256,7 @@ class TestMergeTable(RestoPOSTestBase):
         """Harus return ok=True setelah merge"""
         self.mock_repo.table_exists.return_value = True
         self.mock_repo.invoice_exists.return_value = True
-        mock_target_table = MagicMock()
-        mock_target_table.get.return_value = []
-        self.mock_repo.get_table.return_value = mock_target_table
+        self.mock_repo.get_table.return_value = self._make_doc()
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -280,9 +291,11 @@ class TestMergeTable(RestoPOSTestBase):
 
         order_a = MagicMock()
         order_a.invoice_name = "INV-A1-OLD"
-        target_doc = MagicMock()
-        target_doc.get.return_value = [order_a]
-        self.mock_repo.get_table.return_value = target_doc
+        source_doc = self._make_doc()
+        target_doc = self._make_doc(orders=[order_a])
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-KEPT" else target_doc
+        )
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -309,9 +322,7 @@ class TestMergeTable(RestoPOSTestBase):
         self.mock_repo.table_exists.return_value = True
         self.mock_repo.invoice_exists.return_value = True
 
-        target_doc = MagicMock()
-        target_doc.get.return_value = []
-        self.mock_repo.get_table.return_value = target_doc
+        self.mock_repo.get_table.return_value = self._make_doc()
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -332,12 +343,16 @@ class TestMergeTable(RestoPOSTestBase):
         self.mock_repo.invoice_exists.return_value = True
 
         order_a = MagicMock(); order_a.invoice_name = "INV-OLD-A"
-        doc_a = MagicMock(); doc_a.get.return_value = [order_a]
-
         order_b = MagicMock(); order_b.invoice_name = "INV-OLD-B"
-        doc_b = MagicMock(); doc_b.get.return_value = [order_b]
+        source_doc = self._make_doc()
+        doc_a = self._make_doc(orders=[order_a])
+        doc_b = self._make_doc(orders=[order_b])
 
-        self.mock_repo.get_table.side_effect = lambda name: doc_a if name == "TBL-A" else doc_b
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-KEPT"
+            else doc_a if name == "TBL-A"
+            else doc_b
+        )
 
         mock_inv_repo = MagicMock()
         mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
@@ -360,8 +375,11 @@ class TestMergeTable(RestoPOSTestBase):
         self.mock_repo.invoice_exists.return_value = True
 
         order_a = MagicMock(); order_a.invoice_name = "INV-OLD"
-        target_doc = MagicMock(); target_doc.get.return_value = [order_a]
-        self.mock_repo.get_table.return_value = target_doc
+        source_doc = self._make_doc()
+        target_doc = self._make_doc(orders=[order_a])
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-KEPT" else target_doc
+        )
 
         call_log = []
         self.mock_repo.save_table.side_effect = lambda doc: call_log.append("save_table")
@@ -378,3 +396,144 @@ class TestMergeTable(RestoPOSTestBase):
             )
 
         self.assertEqual(call_log, ["save_table", "delete"])
+
+    # ------------------------------------------------------------------
+    # Regression v1.2.15: bug "Meja sedang dipake oleh X" pasca merge
+    # ------------------------------------------------------------------
+
+    def test_target_table_state_mirrors_source_after_merge(self):
+        """Bug v1.2.15: kasir lain (atau session baru) klik meja anak (109/21)
+        kena alert 'sedang dipake oleh X' padahal merged dengan 108.
+        Root cause: child table simpan status/taken_by/checked sendiri dari
+        sebelum merge → beda dengan source → alert mismatch.
+        Fix: post-merge, semua state visual child di-mirror dari source."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock(); order_a.invoice_name = "INV-OLD"
+        source_doc = self._make_doc(
+            status="Terisi", taken_by="ramdani@test.com",
+            pax=6, customer="Pak Andi", type_customer="Family", checked=1,
+        )
+        target_doc = self._make_doc(
+            orders=[order_a],
+            # State target SEBELUM fix: beda banget dari source (bug scenario)
+            status="Has Taken", taken_by="ramdani@test.com",
+            pax=2, customer="Walk In Cust", type_customer="Personal", checked=1,
+        )
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-108" else target_doc
+        )
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-108", target_table=["TBL-109"]
+            )
+
+        # Target di-mirror ke source
+        self.assertEqual(target_doc.status, "Terisi")
+        self.assertEqual(target_doc.taken_by, "ramdani@test.com")
+        self.assertEqual(target_doc.pax, 6)
+        self.assertEqual(target_doc.customer, "Pak Andi")
+        self.assertEqual(target_doc.type_customer, "Family")
+        self.assertEqual(target_doc.checked, 1)
+
+    def test_multiple_targets_all_mirror_source_state(self):
+        """3 meja (108, 109, 21) — semua anak harus mirror state 108."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock(); order_a.invoice_name = "INV-OLD-A"
+        order_b = MagicMock(); order_b.invoice_name = "INV-OLD-B"
+        source_doc = self._make_doc(
+            status="Terisi", taken_by="ramdani@test.com",
+            pax=8, customer="Bu Sinta", type_customer="Corporate", checked=0,
+        )
+        doc_109 = self._make_doc(orders=[order_a], status="Has Taken", pax=3)
+        doc_21 = self._make_doc(orders=[order_b], status="Has Taken", pax=2)
+
+        self.mock_repo.get_table.side_effect = lambda name: {
+            "TBL-108": source_doc, "TBL-109": doc_109, "TBL-21": doc_21,
+        }[name]
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-108", target_table=["TBL-109", "TBL-21"]
+            )
+
+        for child in (doc_109, doc_21):
+            self.assertEqual(child.status, "Terisi")
+            self.assertEqual(child.taken_by, "ramdani@test.com")
+            self.assertEqual(child.pax, 8)
+            self.assertEqual(child.customer, "Bu Sinta")
+            self.assertEqual(child.type_customer, "Corporate")
+            self.assertEqual(child.checked, 0)
+
+    def test_no_state_mirror_when_target_has_no_orders(self):
+        """Target tanpa orders tidak di-merge (semantik) → state tidak diubah."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        source_doc = self._make_doc(status="Terisi", checked=1)
+        target_doc = self._make_doc(
+            orders=[],
+            status="Kosong", taken_by="", pax=0,
+            customer="", type_customer="", checked=0,
+        )
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-KEPT" else target_doc
+        )
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-KEPT", target_table=["TBL-EMPTY"]
+            )
+
+        # State target tetap (tidak di-overwrite)
+        self.assertEqual(target_doc.status, "Kosong")
+        self.assertEqual(target_doc.checked, 0)
+        self.assertEqual(target_doc.taken_by, "")
+
+    def test_source_state_snapshot_taken_before_target_mutation(self):
+        """Edge: kalau ada error di tengah, snapshot source jangan ke-overwrite
+        oleh state target yang sebagian sudah di-process."""
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.invoice_exists.return_value = True
+
+        order_a = MagicMock(); order_a.invoice_name = "INV-OLD"
+        source_doc = self._make_doc(status="Terisi", pax=4, checked=1)
+        target_doc = self._make_doc(orders=[order_a], status="Has Taken", pax=99)
+
+        self.mock_repo.get_table.side_effect = lambda name: (
+            source_doc if name == "TBL-108" else target_doc
+        )
+
+        mock_inv_repo = MagicMock()
+        mock_inv_repo.get_invoice.return_value = MagicMock(docstatus=0)
+        mock_invoice_service = MagicMock()
+
+        with patch("resto.services.table_service.InvoiceRepository", return_value=mock_inv_repo), \
+             patch("resto.services.table_service.InvoiceService", return_value=mock_invoice_service):
+            self.service.merge_table(
+                "INV-KEPT", source_table="TBL-108", target_table=["TBL-109"]
+            )
+
+        # Target dapat state source orisinal (pax=4, bukan pax=99)
+        self.assertEqual(target_doc.pax, 4)
+        self.assertEqual(target_doc.status, "Terisi")
+        self.assertEqual(target_doc.checked, 1)

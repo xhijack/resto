@@ -291,6 +291,23 @@ class TableService:
 
         invoice_service = InvoiceService(repo=inv_repo)
 
+        # Snapshot source state untuk sync ke children (bug v1.2.15):
+        # Sebelumnya children cuma di-repoint orders → invoice baru, tapi
+        # status/taken_by/checked/dst tetap value lama dari sebelum merge.
+        # Akibat: kalau child masih status='Has Taken' (atau checked=1
+        # leftover), kasir lain klik child → alert "Meja sedang dipake oleh
+        # X" — padahal harusnya satu group dengan source.
+        # Fix: mirror state source ke setiap child yang punya orders.
+        source_doc = self.repo.get_table(source_table)
+        src_state = {
+            "status": source_doc.status,
+            "taken_by": source_doc.taken_by or "",
+            "pax": int(source_doc.pax or 0),
+            "customer": source_doc.customer or "",
+            "type_customer": source_doc.type_customer or "",
+            "checked": int(source_doc.checked or 0),
+        }
+
         for tbl in target_table:
             if tbl == source_table:
                 continue
@@ -303,6 +320,12 @@ class TableService:
                 invoice_service.move_items_from_invoice(order.invoice_name, pos_invoice)
                 order.invoice_name = pos_invoice
             if target_orders:
+                target_table_doc.status = src_state["status"]
+                target_table_doc.taken_by = src_state["taken_by"]
+                target_table_doc.pax = src_state["pax"]
+                target_table_doc.customer = src_state["customer"]
+                target_table_doc.type_customer = src_state["type_customer"]
+                target_table_doc.checked = src_state["checked"]
                 self.repo.save_table(target_table_doc)
 
         invoice_service.delete_merge_invoice(pos_invoice)
