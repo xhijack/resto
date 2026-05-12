@@ -363,6 +363,84 @@ class TestPrintVoidItem(RestoPOSTestBase):
         self.assertEqual(per_printer["PRT-BAR"], [item_a, item_b])
         self.assertEqual(per_printer["PRT-GRILL"], [item_b])
 
+    # v1.2.18 Issue #4: void cetak 2x ketika void_printer sama dengan kitchen
+    # station printer. Top-level print_void_item sudah cetak ke void_printer
+    # dengan full items. Kalau station routing juga ngarah ke printer yang sama,
+    # printer itu dapet 2 ticket. Fix: skip station printer kalau == void_printer.
+    def test_void_printer_equals_station_printer_skips_duplicate(self):
+        """void_printer=BAR + item routed ke BAR: station routing skip BAR (top-level
+        sudah cover). Trigger jelas pasca merge meja dengan default void = kitchen."""
+        item = {"name": "ITEM-A", "item_code": "DRINK-A", "item_name": "Jus",
+                "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-BAR"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations(
+                    "INV-001", [item], "BR-001", void_printer="PRT-BAR"
+                )
+
+        # Tidak ada print station — top-level (PRT-BAR via print_void_item)
+        # sudah cover. station call_count = 0.
+        self.assertEqual(mock_print.call_count, 0)
+        self.assertEqual(mock_build.call_count, 0)
+
+    def test_void_printer_differs_from_station_printer_still_prints(self):
+        """void_printer=KASIR, station=BAR: BAR tetap dicetak (printer beda)."""
+        item = {"name": "ITEM-A", "item_code": "DRINK-A", "item_name": "Jus",
+                "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-BAR"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations(
+                    "INV-001", [item], "BR-001", void_printer="PRT-KASIR"
+                )
+
+        # Station BAR dicetak karena beda dengan void_printer KASIR.
+        self.assertEqual(mock_print.call_count, 1)
+        mock_build.assert_called_once_with("INV-001", [item], "PRT-BAR")
+
+    def test_void_printer_skips_only_matching_printer(self):
+        """item route ke BAR + GRILL, void_printer=BAR. GRILL tetap dicetak,
+        BAR di-skip (top-level sudah cover)."""
+        item = {"name": "ITEM-A", "item_code": "COMBO-A", "item_name": "Combo",
+                "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-BAR", "PRT-GRILL"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations(
+                    "INV-001", [item], "BR-001", void_printer="PRT-BAR"
+                )
+
+        self.assertEqual(mock_print.call_count, 1)
+        mock_build.assert_called_once_with("INV-001", [item], "PRT-GRILL")
+
+    def test_print_void_item_passes_void_printer_to_other_stations(self):
+        """End-to-end via print_void_item: void_printer harus diteruskan ke
+        _print_void_to_other_stations supaya dedup logic punya context."""
+        void_item = {"name": "ITEM-A", "item_code": "DRINK-A", "item_name": "Jus",
+                     "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_void_items_to_print.return_value = [void_item]
+        self.mock_repo.get_void_printer.return_value = "PRT-BAR"
+        self.mock_repo.get_invoice_branch.return_value = "BR-001"
+
+        with patch("resto.services.printing_service.build_void_item_receipt", return_value=b"RAW"):
+            with patch("resto.services.printing_service.cups_print_raw", return_value="J"):
+                with patch.object(self.service, "_print_void_to_other_stations") as mock_other:
+                    self.service.print_void_item("INV-001")
+
+        mock_other.assert_called_once()
+        kwargs = mock_other.call_args.kwargs
+        self.assertEqual(kwargs.get("void_printer"), "PRT-BAR")
+
 
 class TestListPrintersWithStatus(RestoPOSTestBase):
     """Test PrintingService.list_printers_with_status"""

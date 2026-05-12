@@ -159,6 +159,32 @@ def after_migrate():
                 "allow_on_submit": 1,
                 "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
             }).insert(ignore_permissions=True)
+
+        # v1.2.18 Issue #3: kasir wajib pilih alasan void (dropdown) + boleh
+        # tambah catatan freetext. Reason muncul di void item receipt.
+        if not frappe.db.exists("Custom Field", {'fieldname': 'void_reason', 'dt': 'POS Invoice Item'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "void_reason",
+                "label": "Void Reason",
+                "fieldtype": "Data",
+                "insert_after": "void_amount",
+                "allow_on_submit": 1,
+                "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+            }).insert(ignore_permissions=True)
+
+        if not frappe.db.exists("Custom Field", {'fieldname': 'void_reason_note', 'dt': 'POS Invoice Item'}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "void_reason_note",
+                "label": "Void Reason Note",
+                "fieldtype": "Small Text",
+                "insert_after": "void_reason",
+                "allow_on_submit": 1,
+                "depends_on": "eval:doc.status_kitchen == 'Void Menu'"
+            }).insert(ignore_permissions=True)
         
         if not frappe.db.exists("Custom Field", {'fieldname': 'kitchen_stock_consumed', 'dt': 'POS Invoice Item'}):
             frappe.get_doc({

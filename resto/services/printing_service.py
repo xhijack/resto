@@ -133,7 +133,9 @@ class PrintingService:
         raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
         job_id = cups_print_raw(raw, printer_name)
 
-        self._print_void_to_other_stations(pos_invoice, items_to_print, branch)
+        self._print_void_to_other_stations(
+            pos_invoice, items_to_print, branch, void_printer=printer_name
+        )
 
         for it in items_to_print:
             self.repo.mark_void_printed(it["name"])
@@ -229,17 +231,25 @@ class PrintingService:
             frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
             return None
 
-    def _print_void_to_other_stations(self, pos_invoice, items_to_print, branch):
+    def _print_void_to_other_stations(self, pos_invoice, items_to_print, branch, void_printer=None):
         # Bug v1.2.14: dulu loop `for item: for printer: print(items_to_print, printer)`
         # → kalau 2 item routed ke printer yang sama (mis: 2 minuman ke BAR),
         # BAR dapat receipt 2x dengan full items. Kasus jelas pasca merge table.
         # Fix: group items by printer dulu, lalu print 1x per printer dengan
         # hanya items yang relevan ke printer itu.
+        #
+        # Bug v1.2.17 (Issue #4): kalau void_printer == kitchen station printer
+        # (mis. default void = BAR, dan item route ke BAR), BAR dicetak 2x:
+        # 1x dari top-level print_void_item (full items), 1x dari sini (items
+        # yang route ke BAR). Fix: skip printer kalau == void_printer; top-level
+        # sudah cover printer itu dengan full items_to_print.
         printer_to_items = {}
         for item in items_to_print:
             for printer_name in self.repo.get_branch_menu_printers_for_item(
                 item["item_code"], branch
             ):
+                if printer_name == void_printer:
+                    continue
                 printer_to_items.setdefault(printer_name, []).append(item)
 
         for printer_name, items_for_printer in printer_to_items.items():

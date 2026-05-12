@@ -38,6 +38,8 @@ class PrintingRepository:
                     "qty": item.qty,
                     "add_ons": getattr(item, "add_ons", ""),
                     "quick_notes": getattr(item, "quick_notes", ""),
+                    "void_reason": getattr(item, "void_reason", "") or "",
+                    "void_reason_note": getattr(item, "void_reason_note", "") or "",
                 })
         return result
 
