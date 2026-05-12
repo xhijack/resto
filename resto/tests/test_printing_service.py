@@ -264,6 +264,105 @@ class TestPrintVoidItem(RestoPOSTestBase):
 
         mock_build.assert_called_with("INV-001", [void_item], "PRT-KITCHEN-A")
 
+    def test_void_two_items_same_printer_prints_once_with_both_items(self):
+        """Regresi v1.2.15: 2 item void ke printer yang sama harus print 1x, bukan 2x.
+        Sebelumnya: loop per-item × per-printer → BAR dapat receipt 2x dengan full items.
+        Trigger jelas pasca merge table (3 meja jadi 1, banyak minuman → BAR sama)."""
+        item_a = {"name": "ITEM-A", "item_code": "DRINK-JUS-JERUK", "item_name": "Jus Jeruk",
+                  "qty": 1, "add_ons": "", "quick_notes": ""}
+        item_b = {"name": "ITEM-B", "item_code": "DRINK-JUS-MELON", "item_name": "Jus Melon",
+                  "qty": 1, "add_ons": "", "quick_notes": ""}
+        # kedua item routed ke printer yang sama (BAR)
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-BAR"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations(
+                    "INV-001", [item_a, item_b], "BR-001"
+                )
+
+        # BAR hanya menerima 1 job print dengan 2 items
+        mock_build.assert_called_once_with("INV-001", [item_a, item_b], "PRT-BAR")
+        self.assertEqual(mock_print.call_count, 1)
+
+    def test_void_one_item_multi_printer_prints_to_each_printer(self):
+        """1 item routed ke BAR + GRILL → kedua printer dapat receipt dengan item itu."""
+        item = {"name": "ITEM-A", "item_code": "FOOD-001", "item_name": "Steak Combo",
+                "qty": 1, "add_ons": "", "quick_notes": ""}
+        self.mock_repo.get_branch_menu_printers_for_item.return_value = ["PRT-BAR", "PRT-GRILL"]
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations("INV-001", [item], "BR-001")
+
+        self.assertEqual(mock_build.call_count, 2)
+        self.assertEqual(mock_print.call_count, 2)
+        called_printers = {call.args[2] for call in mock_build.call_args_list}
+        self.assertEqual(called_printers, {"PRT-BAR", "PRT-GRILL"})
+        # tiap printer dapat item itu
+        for call in mock_build.call_args_list:
+            self.assertEqual(call.args[1], [item])
+
+    def test_void_different_items_different_printers_split_correctly(self):
+        """Items ke printer berbeda harus terpecah benar (BAR dapat drink, GRILL dapat food)."""
+        drink = {"name": "ITEM-D", "item_code": "DRINK-JERUK", "item_name": "Jus Jeruk",
+                 "qty": 1, "add_ons": "", "quick_notes": ""}
+        food = {"name": "ITEM-F", "item_code": "FOOD-STEAK", "item_name": "Steak",
+                "qty": 1, "add_ons": "", "quick_notes": ""}
+
+        def fake_printers(item_code, branch):
+            if item_code == "DRINK-JERUK":
+                return ["PRT-BAR"]
+            if item_code == "FOOD-STEAK":
+                return ["PRT-GRILL"]
+            return []
+        self.mock_repo.get_branch_menu_printers_for_item.side_effect = fake_printers
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw", return_value="J"):
+                self.service._print_void_to_other_stations(
+                    "INV-001", [drink, food], "BR-001"
+                )
+
+        self.assertEqual(mock_build.call_count, 2)
+        per_printer = {call.args[2]: call.args[1] for call in mock_build.call_args_list}
+        self.assertEqual(per_printer["PRT-BAR"], [drink])
+        self.assertEqual(per_printer["PRT-GRILL"], [food])
+
+    def test_void_two_items_mixed_routing_dedupes_shared_printer(self):
+        """Item A → BAR; Item B → BAR + GRILL. BAR dapat 1 print dengan [A, B], GRILL dapat [B]."""
+        item_a = {"name": "ITEM-A", "item_code": "DRINK-A", "item_name": "Jus A",
+                  "qty": 1, "add_ons": "", "quick_notes": ""}
+        item_b = {"name": "ITEM-B", "item_code": "COMBO-B", "item_name": "Combo B",
+                  "qty": 1, "add_ons": "", "quick_notes": ""}
+
+        def fake_printers(item_code, branch):
+            if item_code == "DRINK-A":
+                return ["PRT-BAR"]
+            if item_code == "COMBO-B":
+                return ["PRT-BAR", "PRT-GRILL"]
+            return []
+        self.mock_repo.get_branch_menu_printers_for_item.side_effect = fake_printers
+
+        with patch("resto.services.printing_service.build_void_item_receipt",
+                   return_value=b"RAW") as mock_build:
+            with patch("resto.services.printing_service.cups_print_raw",
+                       return_value="J") as mock_print:
+                self.service._print_void_to_other_stations(
+                    "INV-001", [item_a, item_b], "BR-001"
+                )
+
+        # 2 printers terlibat → 2 print job (BAR sekali, GRILL sekali)
+        self.assertEqual(mock_print.call_count, 2)
+        per_printer = {call.args[2]: call.args[1] for call in mock_build.call_args_list}
+        self.assertEqual(per_printer["PRT-BAR"], [item_a, item_b])
+        self.assertEqual(per_printer["PRT-GRILL"], [item_b])
+
 
 class TestListPrintersWithStatus(RestoPOSTestBase):
     """Test PrintingService.list_printers_with_status"""

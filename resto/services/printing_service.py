@@ -230,9 +230,18 @@ class PrintingService:
             return None
 
     def _print_void_to_other_stations(self, pos_invoice, items_to_print, branch):
+        # Bug v1.2.14: dulu loop `for item: for printer: print(items_to_print, printer)`
+        # → kalau 2 item routed ke printer yang sama (mis: 2 minuman ke BAR),
+        # BAR dapat receipt 2x dengan full items. Kasus jelas pasca merge table.
+        # Fix: group items by printer dulu, lalu print 1x per printer dengan
+        # hanya items yang relevan ke printer itu.
+        printer_to_items = {}
         for item in items_to_print:
             for printer_name in self.repo.get_branch_menu_printers_for_item(
                 item["item_code"], branch
             ):
-                raw = build_void_item_receipt(pos_invoice, items_to_print, printer_name)
-                cups_print_raw(raw, printer_name)
+                printer_to_items.setdefault(printer_name, []).append(item)
+
+        for printer_name, items_for_printer in printer_to_items.items():
+            raw = build_void_item_receipt(pos_invoice, items_for_printer, printer_name)
+            cups_print_raw(raw, printer_name)
