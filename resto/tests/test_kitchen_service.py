@@ -1,7 +1,12 @@
+import sys
 import frappe
 from unittest.mock import MagicMock, patch, call
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
 from resto.services.kitchen_service import KitchenService
+
+# resto.printing does `import cups` at module top — pycups isn't installed in
+# the test environment. Inject a fake before any test imports the module.
+sys.modules.setdefault("cups", MagicMock())
 
 
 class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
@@ -401,3 +406,49 @@ class TestSendToKitchen(RestoPOSTestBase):
 
         self.assertEqual(result["status"], "success")
         self.assertIn("Printing gagal", result["message"])
+
+
+class TestBuildKitchenReceiptFromPayload(RestoPOSTestBase):
+    """Test build_kitchen_receipt_from_payload — queue rendering untuk Take Away."""
+
+    ENTRY = {
+        "kitchen_station": "Hot Kitchen",
+        "printer_name": "kitchen-1",
+        "pos_invoice": "INV-001",
+        "transaction_date": "2026-05-12 10:00:00",
+        "items": [{"resto_menu": "RM-001", "item_name": "Nasi Goreng",
+                   "short_name": "NG", "qty": 1}],
+    }
+
+    def _build(self, order_type, queue):
+        from resto import printing
+        with patch.object(printing.frappe.db, "get_value") as mock_get_value, \
+             patch.object(printing, "get_table_names_from_pos_invoice", return_value=""), \
+             patch.object(printing, "get_total_pax_from_pos_invoice", return_value=0), \
+             patch.object(printing.frappe, "get_all", return_value=[]):
+
+            def side_effect(doctype, name, fields, *args, **kwargs):
+                if doctype == "POS Invoice":
+                    return {"order_type": order_type, "queue": queue}
+                if doctype == "User":
+                    return "Test User"
+                return None
+
+            mock_get_value.side_effect = side_effect
+            return printing.build_kitchen_receipt_from_payload(self.ENTRY)
+
+    def test_take_away_with_queue_renders_block(self):
+        """Take Away + queue terisi → block 'Your Queue Number' muncul."""
+        out = self._build(order_type="Take Away", queue="A123")
+        self.assertIn(b"Your Queue Number:", out)
+        self.assertIn(b"A123", out)
+
+    def test_dine_in_does_not_render_queue_block(self):
+        """Dine In meski queue ada → block queue TIDAK muncul."""
+        out = self._build(order_type="Dine In", queue="A123")
+        self.assertNotIn(b"Your Queue Number:", out)
+
+    def test_take_away_without_queue_does_not_render_block(self):
+        """Take Away tapi queue kosong → block queue TIDAK muncul."""
+        out = self._build(order_type="Take Away", queue=None)
+        self.assertNotIn(b"Your Queue Number:", out)

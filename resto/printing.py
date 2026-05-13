@@ -616,6 +616,20 @@ def build_kitchen_receipt(data: Dict[str, Any], station_name: str, items: List[D
 
     out += _line("-").encode() + b"\n"
 
+    order_type_value = (data.get("order_type") or "").lower()
+    queue_no = data.get("queue") or ""
+    if order_type_value in ("take away", "takeaway") and queue_no:
+        out += _esc_feed(2)
+        out += _esc_align_center()
+        out += _esc_bold(True)
+        out += b"Your Queue Number:\n"
+        out += _esc_bold(False)
+        out += _esc_align_center()
+        out += _esc_char_size(2, 2)
+        out += f"{queue_no}\n".encode("ascii", "ignore")
+        out += _esc_char_size(0, 0)
+        out += _esc_feed(2)
+
     out += _esc_char_size(0, 0)
     out += _esc_feed(3)
     out += _esc_cut_full()
@@ -720,6 +734,12 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
     inv     = _safe_str(entry.get("pos_invoice")) or "-"
     tdate   = _safe_str(entry.get("transaction_date")) or frappe.utils.now_datetime().strftime("%Y-%m-%d %H:%M:%S")
     items = entry.get("items") or []
+
+    inv_meta = frappe.db.get_value(
+        "POS Invoice", inv, ["order_type", "queue"], as_dict=True
+    ) or {}
+    order_type = inv_meta.get("order_type")
+    queue_no = inv_meta.get("queue")
     
     resto_menus = list(set([i.get("resto_menu") for i in items if i.get("resto_menu")]))
     mandarin_map = {}
@@ -810,6 +830,19 @@ def build_kitchen_receipt_from_payload(entry: Dict[str, Any], title_prefix: str 
         out += _esc_char_size_dotmatrix(1, 1)
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
+
+    if (order_type or "").lower() in ("take away", "takeaway") and queue_no:
+        out += _esc_feed(2)
+        out += _esc_align_center()
+        out += _esc_bold(True)
+        out += b"Your Queue Number:\n"
+        out += _esc_bold(False)
+        out += _esc_align_center()
+        out += _esc_char_size(2, 2)
+        out += f"{queue_no}\n".encode("ascii", "ignore")
+        out += _esc_char_size(0, 0)
+        out += _esc_feed(2)
+
     out += _esc_feed(5)
     out += _esc_cut_full()
     return out
