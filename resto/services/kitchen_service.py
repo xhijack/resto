@@ -230,9 +230,16 @@ class KitchenService:
             from resto.services.table_service import TableService
             table_service = TableService()
 
+        # Cek dulu apakah `table_name` benar-benar record Table. Untuk Take Away,
+        # mobile kirim `table_name = "No. Antrian {queue}"` sebagai virtual queue
+        # ID (BUKAN nama Table). Kalau ini di-set ke payload["table"], POS Invoice
+        # insert kena LinkValidationError (field `table` = Link ke Table doctype).
+        table_is_real = bool(table_name) and self.repo.table_exists(table_name)
+
         # Sertakan field `table` ke payload supaya invoice baru ter-link langsung
         # ke meja via custom field — single source of truth (lihat invoice_service).
-        if table_name:
+        # Skip untuk Take Away (table_name virtual / tidak terdaftar).
+        if table_is_real:
             payload["table"] = table_name
 
         result = invoice_service.create_pos_invoice(payload)
@@ -245,22 +252,21 @@ class KitchenService:
         # diabaikan.
 
         table_update_result = None
-        if table_name:
-            if self.repo.table_exists(table_name):
-                table_service.add_table_order(table_name, {"invoice_name": pos_name})
-                table_update_result = table_service.update_table_meta(
-                    name=table_name,
-                    status=status or "Terisi",
-                    taken_by=taken_by,
-                    pax=pax,
-                    customer=customer,
-                    type_customer=type_customer,
-                    checked=checked,
-                )
-            else:
-                frappe.log_error(
-                    f"Take Away POS Invoice {pos_name} tidak terkait table", "send_to_kitchen"
-                )
+        if table_is_real:
+            table_service.add_table_order(table_name, {"invoice_name": pos_name})
+            table_update_result = table_service.update_table_meta(
+                name=table_name,
+                status=status or "Terisi",
+                taken_by=taken_by,
+                pax=pax,
+                customer=customer,
+                type_customer=type_customer,
+                checked=checked,
+            )
+        elif table_name:
+            frappe.log_error(
+                f"Take Away POS Invoice {pos_name} tidak terkait table", "send_to_kitchen"
+            )
 
         printing_status = "Printing queued"
         try:

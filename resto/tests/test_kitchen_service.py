@@ -361,6 +361,30 @@ class TestSendToKitchen(RestoPOSTestBase):
         mock_table_svc.add_table_order.assert_not_called()
         mock_table_svc.update_table_meta.assert_not_called()
 
+    def test_take_away_does_not_set_table_field_on_payload(self):
+        """Bug Take Away (2026-05-13): mobile kirim table_name='No. Antrian {queue}'
+        sebagai virtual ID. Field `table` di payload TIDAK boleh di-set karena
+        POS Invoice `table` adalah Link ke Table doctype → LinkValidationError saat
+        insert. Bukti regression: 'Could not find Table: No. Antrian 1305001'."""
+        mock_invoice_svc = MagicMock()
+        mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
+        mock_table_svc = MagicMock()
+        self.mock_repo.table_exists.return_value = False
+
+        payload = {"customer": "Aul", "items": [], "pos_profile": "Riau",
+                   "order_type": "Take Away"}
+        with patch.object(self.service, "print_to_ks_now"):
+            self.service.send_to_kitchen(
+                payload=payload,
+                invoice_service=mock_invoice_svc,
+                table_service=mock_table_svc,
+                table_name="No. Antrian 1305001",
+            )
+
+        sent_payload = mock_invoice_svc.create_pos_invoice.call_args[0][0]
+        self.assertNotIn("table", sent_payload,
+                         "payload['table'] tidak boleh di-set untuk Take Away (table_name virtual)")
+
     def test_print_error_does_not_crash(self):
         """Error saat printing tidak boleh crash send_to_kitchen"""
         mock_invoice_svc = MagicMock()
