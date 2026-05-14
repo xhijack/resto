@@ -197,3 +197,140 @@ class TestPaymentService(RestoPOSTestBase):
             self.service.create_payment("INV-001", 50000, "Cash")
 
         self.assertEqual(len(mock_doc.taxes), len(original_taxes))
+
+    # ------------------------------------------------------------------
+    # pay_invoice — atomic full-pay dengan split payment methods
+    # ------------------------------------------------------------------
+
+    def test_pay_invoice_single_method_full_amount(self):
+        """1 method covers full grand_total → submit OK"""
+        mock_doc = _full_paid_mock(100000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                [{"mode_of_payment": "Cash", "amount": 100000}],
+            )
+
+        self.assertTrue(result["ok"])
+        mock_doc.set.assert_called_once_with("payments", [])
+        mock_doc.append.assert_called_once_with("payments", {
+            "mode_of_payment": "Cash", "amount": 100000.0,
+        })
+        mock_doc.submit.assert_called_once()
+
+    def test_pay_invoice_split_methods_sum_equals_grand(self):
+        """Split (Cash 800rb + Mandiri 200rb = 1jt) → submit OK, 2 append"""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                [
+                    {"mode_of_payment": "Cash", "amount": 800_000},
+                    {"mode_of_payment": "Debit Mandiri", "amount": 200_000},
+                ],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["total_paid"], 1_000_000)
+        mock_doc.set.assert_called_once_with("payments", [])
+        self.assertEqual(mock_doc.append.call_count, 2)
+        mock_doc.submit.assert_called_once()
+
+    def test_pay_invoice_rejects_sum_less_than_grand(self):
+        """Sum < grand → throws, tidak submit, tidak append"""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.pay_invoice(
+                    "INV-001",
+                    [{"mode_of_payment": "Cash", "amount": 800_000}],
+                )
+
+        mock_doc.submit.assert_not_called()
+        mock_doc.set.assert_not_called()
+        mock_doc.append.assert_not_called()
+
+    def test_pay_invoice_rejects_sum_greater_than_grand(self):
+        """Sum > grand (over-payment) → throws (kebijakan ketat sum==grand)"""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.pay_invoice(
+                    "INV-001",
+                    [{"mode_of_payment": "Cash", "amount": 1_100_000}],
+                )
+
+        mock_doc.submit.assert_not_called()
+
+    def test_pay_invoice_clears_existing_partial_payments(self):
+        """Residu partial payment di DRAFT harus di-clear sebelum append set baru.
+        Skenario: user pernah simpan 300rb di create_pos_invoice payload (bug
+        lama 'pay sebagian → tutup → masuk lagi'). pay_invoice harus replace,
+        bukan menambah di atas residu."""
+        residual = MagicMock(amount=300_000)
+        mock_doc = _full_paid_mock(1_000_000, existing_payments=[residual])
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                [{"mode_of_payment": "Cash", "amount": 1_000_000}],
+            )
+
+        self.assertTrue(result["ok"])
+        # set("payments", []) HARUS dipanggil → membersihkan residu 300rb
+        mock_doc.set.assert_called_once_with("payments", [])
+        mock_doc.append.assert_called_once()
+        mock_doc.submit.assert_called_once()
+
+    def test_pay_invoice_rejects_empty_list(self):
+        """payments=[] → throws"""
+        with patch("resto.services.payment_service.frappe.get_doc"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.pay_invoice("INV-001", [])
+
+    def test_pay_invoice_rejects_row_without_mode(self):
+        """row tanpa mode_of_payment → throws sebelum touching doc"""
+        with patch("resto.services.payment_service.frappe.get_doc"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.pay_invoice(
+                    "INV-001",
+                    [{"mode_of_payment": "", "amount": 100000}],
+                )
+
+    def test_pay_invoice_rejects_zero_or_negative_amount(self):
+        """row dengan amount <= 0 → throws"""
+        with patch("resto.services.payment_service.frappe.get_doc"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.pay_invoice(
+                    "INV-001",
+                    [{"mode_of_payment": "Cash", "amount": 0}],
+                )
+
+    def test_pay_invoice_accepts_json_string(self):
+        """payments di-pass sebagai JSON string (caller mobile via whitelist) → parsed"""
+        mock_doc = _full_paid_mock(100000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                '[{"mode_of_payment": "Cash", "amount": 100000}]',
+            )
+
+        self.assertTrue(result["ok"])
+        mock_doc.submit.assert_called_once()

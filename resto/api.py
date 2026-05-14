@@ -434,6 +434,11 @@ def create_payment(pos_invoice, amount, mode_of_payment):
     from resto.services.payment_service import PaymentService
     return PaymentService().create_payment(pos_invoice, amount, mode_of_payment)
 
+@frappe.whitelist()
+def pay_invoice(pos_invoice, payments):
+    from resto.services.payment_service import PaymentService
+    return PaymentService().pay_invoice(pos_invoice, payments)
+
 def clear_table_merged(pos_invoice):
     from resto.services.table_service import TableService
     TableService().clear_table_merged(pos_invoice)
