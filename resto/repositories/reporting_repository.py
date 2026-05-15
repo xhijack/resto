@@ -298,3 +298,66 @@ class ReportingRepository:
 
     def get_invoice_doc(self, name):
         return frappe.get_doc("POS Invoice", name)
+
+    # ------------------------------------------------------------------
+    # Daily Sales Report (admin desk Script Report)
+    # ------------------------------------------------------------------
+
+    def get_daily_sales_rows(self, from_date, to_date, branch=None):
+        branch_filter, params = "", {"from_date": from_date, "to_date": to_date}
+        if branch:
+            branch_filter = "AND pi.branch = %(branch)s"
+            params["branch"] = branch
+        return frappe.db.sql(f"""
+            SELECT pi.posting_date, pi.branch,
+                   COALESCE(SUM(pi.pax), 0) total_pax,
+                   COUNT(pi.name) total_bill,
+                   COALESCE(SUM(pi.net_total), 0) sub_total,
+                   COALESCE(SUM(pi.discount_amount), 0) discount,
+                   COALESCE(SUM(pi.total_taxes_and_charges), 0) tax,
+                   COALESCE(SUM(pi.grand_total), 0) grand_total
+            FROM `tabPOS Invoice` pi
+            WHERE pi.docstatus = 1
+              AND pi.status IN ('Paid', 'Consolidated')
+              AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
+              {branch_filter}
+            GROUP BY pi.posting_date, pi.branch
+            ORDER BY pi.posting_date DESC, pi.branch
+        """, params, as_dict=True)
+
+    def get_daily_void_bill_map(self, from_date, to_date, branch=None):
+        branch_filter, params = "", {"from_date": from_date, "to_date": to_date}
+        if branch:
+            branch_filter = "AND pi.branch = %(branch)s"
+            params["branch"] = branch
+        rows = frappe.db.sql(f"""
+            SELECT pi.posting_date, pi.branch,
+                   COUNT(pi.name) cnt,
+                   COALESCE(SUM(pi.grand_total), 0) amount
+            FROM `tabPOS Invoice` pi
+            WHERE pi.docstatus = 2
+              AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
+              {branch_filter}
+            GROUP BY pi.posting_date, pi.branch
+        """, params, as_dict=True)
+        return {(r.posting_date, r.branch or ""): {"count": int(r.cnt or 0),
+                                                    "amount": flt(r.amount)} for r in rows}
+
+    def get_daily_draft_map(self, from_date, to_date, branch=None):
+        branch_filter, params = "", {"from_date": from_date, "to_date": to_date}
+        if branch:
+            branch_filter = "AND pi.branch = %(branch)s"
+            params["branch"] = branch
+        rows = frappe.db.sql(f"""
+            SELECT pi.posting_date, pi.branch,
+                   COUNT(pi.name) cnt,
+                   COALESCE(SUM(pi.grand_total), 0) amount
+            FROM `tabPOS Invoice` pi
+            WHERE pi.docstatus = 0
+              AND pi.status = 'Draft'
+              AND pi.posting_date BETWEEN %(from_date)s AND %(to_date)s
+              {branch_filter}
+            GROUP BY pi.posting_date, pi.branch
+        """, params, as_dict=True)
+        return {(r.posting_date, r.branch or ""): {"count": int(r.cnt or 0),
+                                                    "amount": flt(r.amount)} for r in rows}

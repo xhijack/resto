@@ -277,6 +277,15 @@ def end_shift(user=None, is_submit=True):
     from resto.services.reporting_service import ReportingService
     return ReportingService().end_shift(user=user, is_submit=is_submit)
 
+
+@frappe.whitelist()
+def print_daily_sales_full_pdf(from_date, to_date, branch=None):
+    from resto.services.reporting_service import ReportingService
+    pdf_bytes = ReportingService().build_daily_sales_full_pdf(from_date, to_date, branch)
+    frappe.local.response.filename = f"daily-sales-{from_date}-to-{to_date}.pdf"
+    frappe.local.response.filecontent = pdf_bytes
+    frappe.local.response.type = "pdf"
+
 @frappe.whitelist()
 def get_discounts_with_options():
     from resto.repositories.discount_repository import DiscountRepository

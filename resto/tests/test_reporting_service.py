@@ -250,3 +250,97 @@ class TestEndShift(RestoPOSTestBase):
             payment_map[p.mode_of_payment] += flt(p.amount) * scale
 
         self.assertAlmostEqual(payment_map["Cash"], 90000.0, places=1)
+
+
+class TestGetDailySalesSummary(RestoPOSTestBase):
+    """Test ReportingService.get_daily_sales_summary — sumber data Script Report admin desk"""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_repo = MagicMock()
+        self.service = ReportingService(repo=self.mock_repo)
+
+    def test_throws_when_dates_missing(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.get_daily_sales_summary(from_date=None, to_date=None)
+
+    def test_happy_path_single_date(self):
+        self.mock_repo.get_daily_sales_rows.return_value = [
+            MagicMock(posting_date="2026-05-15", branch="BR-001",
+                      total_pax=4, total_bill=2,
+                      sub_total=100000, discount=5000, tax=11000, grand_total=106000)
+        ]
+        self.mock_repo.get_daily_void_bill_map.return_value = {}
+        self.mock_repo.get_daily_draft_map.return_value = {}
+
+        result = self.service.get_daily_sales_summary(
+            from_date="2026-05-15", to_date="2026-05-15"
+        )
+
+        self.assertEqual(len(result), 1)
+        row = result[0]
+        self.assertEqual(row["total_bill"], 2)
+        self.assertEqual(row["total_pax"], 4)
+        self.assertEqual(row["grand_total"], 106000)
+        self.assertEqual(row["void_bill"], 0)
+        self.assertEqual(row["draft_bill"], 0)
+
+    def test_multiple_dates_descending(self):
+        self.mock_repo.get_daily_sales_rows.return_value = [
+            MagicMock(posting_date="2026-05-15", branch="BR-001",
+                      total_pax=2, total_bill=1, sub_total=50000,
+                      discount=0, tax=5500, grand_total=55500),
+            MagicMock(posting_date="2026-05-14", branch="BR-001",
+                      total_pax=3, total_bill=2, sub_total=80000,
+                      discount=2000, tax=8800, grand_total=86800),
+        ]
+        self.mock_repo.get_daily_void_bill_map.return_value = {}
+        self.mock_repo.get_daily_draft_map.return_value = {}
+
+        result = self.service.get_daily_sales_summary(
+            from_date="2026-05-14", to_date="2026-05-15"
+        )
+        self.assertEqual(len(result), 2)
+        self.assertEqual(str(result[0]["posting_date"]), "2026-05-15")
+        self.assertEqual(str(result[1]["posting_date"]), "2026-05-14")
+
+    def test_branch_filter_passed_to_repo(self):
+        self.mock_repo.get_daily_sales_rows.return_value = []
+        self.mock_repo.get_daily_void_bill_map.return_value = {}
+        self.mock_repo.get_daily_draft_map.return_value = {}
+
+        self.service.get_daily_sales_summary(
+            from_date="2026-05-01", to_date="2026-05-15", branch="BR-002"
+        )
+
+        self.mock_repo.get_daily_sales_rows.assert_called_once_with(
+            "2026-05-01", "2026-05-15", "BR-002"
+        )
+        self.mock_repo.get_daily_void_bill_map.assert_called_once_with(
+            "2026-05-01", "2026-05-15", "BR-002"
+        )
+        self.mock_repo.get_daily_draft_map.assert_called_once_with(
+            "2026-05-01", "2026-05-15", "BR-002"
+        )
+
+    def test_includes_void_and_draft_amounts(self):
+        self.mock_repo.get_daily_sales_rows.return_value = [
+            MagicMock(posting_date="2026-05-15", branch="BR-001",
+                      total_pax=2, total_bill=1, sub_total=50000,
+                      discount=0, tax=5500, grand_total=55500)
+        ]
+        self.mock_repo.get_daily_void_bill_map.return_value = {
+            ("2026-05-15", "BR-001"): {"count": 2, "amount": 30000}
+        }
+        self.mock_repo.get_daily_draft_map.return_value = {
+            ("2026-05-15", "BR-001"): {"count": 1, "amount": 15000}
+        }
+
+        result = self.service.get_daily_sales_summary(
+            from_date="2026-05-15", to_date="2026-05-15"
+        )
+        row = result[0]
+        self.assertEqual(row["void_bill"], 2)
+        self.assertEqual(row["void_amount"], 30000)
+        self.assertEqual(row["draft_bill"], 1)
+        self.assertEqual(row["draft_amount"], 15000)

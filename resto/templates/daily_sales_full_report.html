@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10.5pt; color: #222; }
+  h1 { font-size: 14pt; margin: 0 0 4px; }
+  h2 { font-size: 11.5pt; margin: 12px 0 4px; padding-bottom: 2px; border-bottom: 1px solid #999; }
+  .meta { font-size: 9.5pt; color: #555; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  th, td { padding: 4px 6px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
+  th { background: #f2f2f2; font-weight: 600; }
+  .num { text-align: right; }
+  .total-row td { font-weight: 600; border-top: 1px solid #555; }
+  .empty { color: #888; font-style: italic; }
+</style>
+</head>
+<body>
+
+{% macro fmt(n) -%}
+{{ "{:,.0f}".format(n or 0) }}
+{%- endmacro %}
+
+<h1>Daily Sales Report</h1>
+<div class="meta">
+  <strong>Branch:</strong> {{ data.outlet or "-" }} &nbsp;|&nbsp;
+  <strong>Tanggal:</strong> {{ data.posting_date }} &nbsp;|&nbsp;
+  <strong>Generated:</strong> {{ generated_at }}
+</div>
+
+<h2>Sales Summary</h2>
+<table>
+  <tr><td>Sub Total</td><td class="num">{{ fmt(data.summary.sub_total) }}</td></tr>
+  <tr><td>Discount</td><td class="num">{{ fmt(data.summary.discount) }}</td></tr>
+  <tr><td>Tax</td><td class="num">{{ fmt(data.summary.tax) }}</td></tr>
+  <tr class="total-row"><td>Grand Total</td><td class="num">{{ fmt(data.summary.grand_total) }}</td></tr>
+  <tr><td>Total Pax</td><td class="num">{{ data.summary.total_pax }}</td></tr>
+</table>
+
+<h2>Dine In</h2>
+{% if data.dine_in %}
+<table>
+  <thead><tr><th>Item Group</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for grp, v in data.dine_in.items() %}
+    <tr><td>{{ grp }}</td><td class="num">{{ v.qty }}</td><td class="num">{{ fmt(v.amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="empty">Tidak ada transaksi dine in.</div>{% endif %}
+
+<h2>Take Away</h2>
+{% if data.take_away %}
+<table>
+  <thead><tr><th>Item Group</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for grp, v in data.take_away.items() %}
+    <tr><td>{{ grp }}</td><td class="num">{{ v.qty }}</td><td class="num">{{ fmt(v.amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="empty">Tidak ada transaksi take away.</div>{% endif %}
+
+<h2>Payments</h2>
+{% if data.payments %}
+<table>
+  <thead><tr><th>Mode of Payment</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for mop, amt in data.payments.items() %}
+    <tr><td>{{ mop }}</td><td class="num">{{ fmt(amt) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="empty">Tidak ada pembayaran.</div>{% endif %}
+
+<h2>Taxes</h2>
+{% if data.taxes %}
+<table>
+  <thead><tr><th>Description</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for desc, amt in data.taxes.items() %}
+    <tr><td>{{ desc }}</td><td class="num">{{ fmt(amt) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="empty">Tidak ada pajak.</div>{% endif %}
+
+<h2>Discount by Order Type</h2>
+{% if data.discount_by_order_type %}
+<table>
+  <thead><tr><th>Keterangan</th><th class="num">Bill</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for key, v in data.discount_by_order_type.items() %}
+    <tr><td>{{ key }}</td><td class="num">{{ v.total_bill }}</td><td class="num">{{ fmt(v.total_amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<div class="empty">Tidak ada discount.</div>{% endif %}
+
+<h2>Draft</h2>
+<table>
+  <tr><td>Total Bill</td><td class="num">{{ data.draft.total_bill }}</td></tr>
+  <tr><td>Total Amount</td><td class="num">{{ fmt(data.draft.total_amount) }}</td></tr>
+</table>
+{% if data.draft.details %}
+<table>
+  <thead><tr><th>Invoice</th><th>Order Type</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for d in data.draft.details %}
+    <tr><td>{{ d.invoice }}</td><td>{{ d.order_type or "-" }}</td><td class="num">{{ fmt(d.amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Void Bill</h2>
+<table>
+  <tr><td>Total Bill</td><td class="num">{{ data.void_bill.total_bill }}</td></tr>
+  <tr><td>Total Amount</td><td class="num">{{ fmt(data.void_bill.total_amount) }}</td></tr>
+</table>
+{% if data.void_bill.details %}
+<table>
+  <thead><tr><th>Invoice</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for v in data.void_bill.details %}
+    <tr><td>{{ v.invoice }}</td><td class="num">{{ fmt(v.amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Void Menu</h2>
+<table>
+  <tr><td>Total Qty</td><td class="num">{{ data.void_menu.total_qty }}</td></tr>
+  <tr><td>Total Amount</td><td class="num">{{ fmt(data.void_menu.total_amount) }}</td></tr>
+</table>
+{% if data.void_menu.items %}
+<table>
+  <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
+  <tbody>
+  {% for item, v in data.void_menu.items.items() %}
+    <tr><td>{{ item }}</td><td class="num">{{ v.qty }}</td><td class="num">{{ fmt(v.amount) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<h2>Session Time</h2>
+<table>
+  <thead><tr><th>Session</th><th class="num">Pax</th><th class="num">Bill</th><th class="num">Amount</th><th class="num">Avg Pax</th><th class="num">Avg Bill</th></tr></thead>
+  <tbody>
+  {% for label, v in data.session_time.items() %}
+    <tr>
+      <td>{{ label }}</td>
+      <td class="num">{{ v.pax }}</td>
+      <td class="num">{{ v.bill }}</td>
+      <td class="num">{{ fmt(v.amount) }}</td>
+      <td class="num">{{ v.avg_pax }}</td>
+      <td class="num">{{ fmt(v.avg_bill) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+</body>
+</html>

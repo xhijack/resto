@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils import flt, now_datetime, get_datetime
+from frappe.utils import flt, now_datetime, get_datetime, getdate, add_days
 from resto.repositories.reporting_repository import ReportingRepository
 
 
@@ -244,6 +244,77 @@ class ReportingService:
                 frappe.log_error(str(e), "End Day Report Print Error")
 
         return result
+
+    # ------------------------------------------------------------------
+    # get_daily_sales_summary — sumber data Script Report admin desk
+    # ------------------------------------------------------------------
+
+    def get_daily_sales_summary(self, from_date=None, to_date=None, branch=None):
+        """Return 1 baris per tanggal di range [from_date, to_date].
+
+        Dipakai oleh Script Report `Daily Sales Report` di admin desk. Headline
+        metrics saja — full composite (per item-group, payment mode, session
+        time, void detail) di-render terpisah via print_daily_sales_full_pdf.
+        """
+        from_date = from_date or frappe.form_dict.get("from_date")
+        to_date = to_date or frappe.form_dict.get("to_date")
+
+        if not from_date or not to_date:
+            frappe.throw("from_date dan to_date wajib diisi")
+
+        rows = self.repo.get_daily_sales_rows(from_date, to_date, branch)
+        void_map = self.repo.get_daily_void_bill_map(from_date, to_date, branch)
+        draft_map = self.repo.get_daily_draft_map(from_date, to_date, branch)
+
+        result = []
+        for r in rows:
+            key = (r.posting_date, r.branch or "")
+            void = void_map.get(key, {"count": 0, "amount": 0})
+            draft = draft_map.get(key, {"count": 0, "amount": 0})
+            result.append({
+                "posting_date": r.posting_date,
+                "branch": r.branch,
+                "total_pax": int(r.total_pax or 0),
+                "total_bill": int(r.total_bill or 0),
+                "sub_total": flt(r.sub_total),
+                "discount": flt(r.discount),
+                "tax": flt(r.tax),
+                "grand_total": flt(r.grand_total),
+                "void_bill": int(void["count"]),
+                "void_amount": flt(void["amount"]),
+                "draft_bill": int(draft["count"]),
+                "draft_amount": flt(draft["amount"]),
+            })
+        return result
+
+    def build_daily_sales_full_pdf(self, from_date, to_date, branch=None):
+        if not from_date or not to_date:
+            frappe.throw("from_date dan to_date wajib diisi")
+        if not branch:
+            frappe.throw("branch wajib diisi untuk PDF lengkap")
+
+        start, end = getdate(from_date), getdate(to_date)
+        if start > end:
+            frappe.throw("from_date tidak boleh lebih besar dari to_date")
+
+        sections = []
+        d = start
+        while d <= end:
+            day_data = self.get_end_day_report_v2(posting_date=d, outlet=branch, do_print=False)
+            if day_data and "summary" in day_data:
+                html = frappe.render_template(
+                    "resto/templates/daily_sales_full_report.html",
+                    {"data": day_data, "generated_at": now_datetime()}
+                )
+                sections.append(html)
+            d = add_days(d, 1)
+
+        if not sections:
+            frappe.throw("Tidak ada data POS Invoice untuk rentang yang dipilih")
+
+        combined = '<div style="page-break-after: always"></div>'.join(sections)
+        from frappe.utils.pdf import get_pdf
+        return get_pdf(combined)
 
     # ------------------------------------------------------------------
     # end_shift
