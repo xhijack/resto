@@ -1,6 +1,13 @@
 import sys
 import frappe
 from unittest.mock import MagicMock, patch
+
+# pycups (modul `cups`) bisa tidak tersedia di environment test. Stub
+# sebagai MagicMock supaya `resto.printing` (yang ada top-level `import cups`)
+# bisa di-load. Test individual yang butuh CUPS behavior tertentu tetap
+# pakai `patch.dict(sys.modules, {"cups": ...})` override.
+sys.modules.setdefault("cups", MagicMock())
+
 from resto.tests.resto_pos_test_base import RestoPOSTestBase
 from resto.services.printing_service import PrintingService
 
@@ -859,12 +866,12 @@ class TestGetPrinterState(RestoPOSTestBase):
     """Test resto.printing.get_printer_state — fokus pada deteksi offline via
     state_reasons (CUPS tidak otomatis ubah state code saat printer fisik mati)."""
 
-    def _patched_get_state(self, state_code, reasons):
+    def _patched_get_state(self, state_code, reasons, device_uri=""):
         """Return get_printer_state hasil dengan CUPS yang di-mock penuh.
 
         Mock memerlukan: cups.Connection().getPrinters() returns dict berisi
         printer_name, dan getPrinterAttributes() returns dict dengan
-        printer-state + printer-state-reasons.
+        printer-state + printer-state-reasons + device-uri.
         """
         fake_cups = MagicMock()
         fake_conn = MagicMock()
@@ -872,6 +879,7 @@ class TestGetPrinterState(RestoPOSTestBase):
         fake_conn.getPrinterAttributes.return_value = {
             "printer-state": state_code,
             "printer-state-reasons": reasons,
+            "device-uri": device_uri,
         }
         fake_cups.Connection.return_value = fake_conn
 
@@ -960,3 +968,112 @@ class TestGetPrinterState(RestoPOSTestBase):
             from resto.printing import get_printer_state
             with self.assertRaises(frappe.ValidationError):
                 get_printer_state("P1")
+
+    # ---------------------------------------------------------------
+    # Active TCP probe via device-uri — CUPS lazy state machine: kalau
+    # printer fisik dicabut, state tetap idle/none sampai ada job gagal.
+    # Probe TCP wajib untuk deteksi real-time.
+    # ---------------------------------------------------------------
+
+    def test_probe_overrides_when_device_unreachable(self):
+        """state=idle, reasons=['none'], TAPI device-uri probe → False
+        ⇒ is_online=False + reason 'offline-via-probe' di-append."""
+        with patch("resto.printing._probe_device_uri", return_value=False):
+            result = self._patched_get_state(3, ["none"], device_uri="socket://1.2.3.4:9100")
+        self.assertFalse(result["is_online"])
+        self.assertIn("offline-via-probe", result["state_reasons"])
+        self.assertEqual(result["device_uri"], "socket://1.2.3.4:9100")
+
+    def test_probe_skipped_for_usb_uri(self):
+        """device-uri = usb://... → probe return None (skip).
+        is_online jatuh ke layer 1 (state+reasons)."""
+        # Tidak perlu patch — _probe_device_uri sendiri yang return None
+        # untuk scheme non-network. Verifikasi via integrasi.
+        result = self._patched_get_state(3, ["none"], device_uri="usb://EPSON/TM-T82")
+        self.assertTrue(result["is_online"])  # layer 1 lolos, layer 2 skipped
+        self.assertNotIn("offline-via-probe", result["state_reasons"])
+
+    def test_probe_success_keeps_online(self):
+        """device-uri network + probe sukses → tetap online dari layer 1."""
+        with patch("resto.printing._probe_device_uri", return_value=True):
+            result = self._patched_get_state(3, ["none"], device_uri="socket://1.2.3.4:9100")
+        self.assertTrue(result["is_online"])
+        self.assertNotIn("offline-via-probe", result["state_reasons"])
+
+    def test_probe_empty_device_uri_skipped(self):
+        """device-uri kosong → probe return None, jangan override."""
+        result = self._patched_get_state(3, [], device_uri="")
+        self.assertTrue(result["is_online"])
+
+    def test_probe_does_not_override_offline_already(self):
+        """Kalau layer 1 sudah offline (state=stopped), probe tidak perlu
+        flip ke online walau secara teknis reachable."""
+        with patch("resto.printing._probe_device_uri", return_value=True):
+            result = self._patched_get_state(5, [], device_uri="socket://1.2.3.4:9100")
+        self.assertFalse(result["is_online"])  # state=5 stopped tetap menang
+
+
+class TestProbeDeviceUri(RestoPOSTestBase):
+    """Unit test untuk _probe_device_uri — TCP probe helper."""
+
+    def test_socket_scheme_uses_uri_port(self):
+        """socket://host:9100 → connect ke (host, 9100)"""
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection") as mock_conn:
+            mock_conn.return_value = MagicMock()  # context manager auto-handled
+            result = _probe_device_uri("socket://192.168.1.50:9100")
+        self.assertTrue(result)
+        args, kwargs = mock_conn.call_args
+        self.assertEqual(args[0], ("192.168.1.50", 9100))
+
+    def test_lpd_scheme_default_port_515(self):
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection") as mock_conn:
+            mock_conn.return_value = MagicMock()
+            _probe_device_uri("lpd://printer.local")
+        args, _ = mock_conn.call_args
+        self.assertEqual(args[0], ("printer.local", 515))
+
+    def test_ipp_scheme_default_port_631(self):
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection") as mock_conn:
+            mock_conn.return_value = MagicMock()
+            _probe_device_uri("ipp://192.168.1.99/ipp/print")
+        args, _ = mock_conn.call_args
+        self.assertEqual(args[0], ("192.168.1.99", 631))
+
+    def test_socket_timeout_returns_false(self):
+        """socket.timeout saat connect → False (printer mati/firewall)."""
+        import socket as _sock
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection", side_effect=_sock.timeout()):
+            result = _probe_device_uri("socket://10.0.0.99:9100", timeout=0.1)
+        self.assertFalse(result)
+
+    def test_connection_refused_returns_false(self):
+        """OSError (mis. connection refused) → False."""
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection", side_effect=OSError("Connection refused")):
+            result = _probe_device_uri("socket://10.0.0.99:9100", timeout=0.1)
+        self.assertFalse(result)
+
+    def test_usb_scheme_returns_none(self):
+        """USB / non-network scheme → None (skip), tidak call socket."""
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection") as mock_conn:
+            result = _probe_device_uri("usb://EPSON/TM-T82")
+        self.assertIsNone(result)
+        mock_conn.assert_not_called()
+
+    def test_empty_uri_returns_none(self):
+        from resto.printing import _probe_device_uri
+        self.assertIsNone(_probe_device_uri(""))
+        self.assertIsNone(_probe_device_uri(None))
+
+    def test_uri_without_host_returns_none(self):
+        """Malformed URI tanpa host → None."""
+        from resto.printing import _probe_device_uri
+        with patch("socket.create_connection") as mock_conn:
+            result = _probe_device_uri("socket://")
+        self.assertIsNone(result)
+        mock_conn.assert_not_called()

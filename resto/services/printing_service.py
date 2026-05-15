@@ -158,7 +158,14 @@ class PrintingService:
 
         Bila CUPS tidak tersedia (daemon down / pycups missing), tetap return
         list Kitchen Station dengan state="cups_unavailable" supaya UI tidak crash.
+
+        Probe TCP di get_printer_state bersifat blocking per printer (~1.5s
+        timeout untuk yang offline). Tanpa parallelisasi, N printer offline =
+        N × 1.5s. Pakai ThreadPoolExecutor dengan max 8 worker — cukup untuk
+        deployment khas (1–6 station per branch).
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         stations = frappe.get_all(
             "Kitchen Station",
             fields=["name", "printer_name", "description"],
@@ -166,7 +173,7 @@ class PrintingService:
 
         try:
             import cups
-            conn = cups.Connection()
+            cups.Connection()  # validasi daemon hidup; worker buat conn sendiri
         except Exception:
             return [
                 {
@@ -179,8 +186,7 @@ class PrintingService:
                 for s in stations
             ]
 
-        result = []
-        for s in stations:
+        def _resolve(s):
             entry = {
                 "name": s["name"],
                 "printer_name": s.get("printer_name") or "",
@@ -189,16 +195,26 @@ class PrintingService:
                 "state": "not_found",
             }
             if not entry["printer_name"]:
-                result.append(entry)
-                continue
+                return entry
             try:
-                info = get_printer_state(entry["printer_name"], conn=conn)
+                info = get_printer_state(entry["printer_name"])
                 entry["is_online"] = info["is_online"]
                 entry["state"] = info["state"]
             except frappe.ValidationError:
                 pass  # state stays "not_found"
-            result.append(entry)
-        return result
+            return entry
+
+        if not stations:
+            return []
+
+        max_workers = min(8, len(stations))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_resolve, s) for s in stations]
+            results = [f.result() for f in as_completed(futures)]
+
+        name_order = {s["name"]: i for i, s in enumerate(stations)}
+        results.sort(key=lambda e: name_order.get(e["name"], 10**9))
+        return results
 
     # ------------------------------------------------------------------
     # test_print

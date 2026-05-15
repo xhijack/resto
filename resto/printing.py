@@ -503,15 +503,56 @@ def _has_offline_reason(reasons) -> bool:
     return False
 
 
+# CUPS lazy state machine: kalau printer fisik dicabut/dimatikan tanpa job
+# aktif, state_code tetap 3 (idle) + reasons tetap ["none"] sampai ada job
+# yang gagal. Untuk deteksi real-time, kita probe device-uri secara aktif:
+# TCP connect ke host:port-nya, kalau gagal → printer benar-benar tidak
+# reachable. Skip USB / local URI (CUPS biasanya handle disconnect-nya
+# dengan benar via reasons).
+_NETWORK_URI_SCHEMES = {
+    "socket": 9100,
+    "lpd": 515,
+    "ipp": 631,
+    "ipps": 631,
+    "http": 80,
+    "https": 443,
+}
+
+
+def _probe_device_uri(device_uri: str, timeout: float = 1.5):
+    """Return True/False jika network URI, atau None untuk non-network (skip)."""
+    if not device_uri:
+        return None
+    import socket
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(device_uri)
+    except Exception:
+        return None
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in _NETWORK_URI_SCHEMES:
+        return None
+    host = parsed.hostname
+    if not host:
+        return None
+    port = parsed.port or _NETWORK_URI_SCHEMES[scheme]
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, socket.timeout):
+        return False
+
+
 def get_printer_state(printer_name: str, conn=None) -> Dict[str, Any]:
     """Return CUPS state for a printer.
 
     Raises ValidationError jika printer tidak terdaftar di CUPS server.
     Pass `conn` untuk reuse satu Connection saat batch query.
 
-    is_online=True hanya jika state code idle/processing AND tidak ada
-    state_reasons yang menandakan offline. Cek state code saja tidak cukup —
-    CUPS tidak otomatis tahu printer fisik mati sampai ada job gagal.
+    is_online=True memerlukan DUA layer pengecekan:
+      1. CUPS-reported: state code idle/processing AND tidak ada offline reason.
+      2. Active TCP probe ke device-uri (kalau network printer) — karena CUPS
+         tidak otomatis tahu printer fisik mati sampai ada job gagal.
     """
     import cups
     conn = conn or cups.Connection()
@@ -521,12 +562,22 @@ def get_printer_state(printer_name: str, conn=None) -> Dict[str, Any]:
     attrs = conn.getPrinterAttributes(printer_name)
     state_code = attrs.get("printer-state")
     state_reasons = attrs.get("printer-state-reasons") or []
+    device_uri = attrs.get("device-uri") or ""
     state_map = {3: "idle", 4: "processing", 5: "stopped"}
+
     is_online = state_code in (3, 4) and not _has_offline_reason(state_reasons)
+
+    reachable = _probe_device_uri(device_uri)
+    if reachable is False:
+        is_online = False
+        if "offline-via-probe" not in state_reasons:
+            state_reasons = list(state_reasons) + ["offline-via-probe"]
+
     return {
         "state": state_map.get(state_code, "unknown"),
         "is_online": is_online,
         "state_reasons": state_reasons,
+        "device_uri": device_uri,
     }
 
 
