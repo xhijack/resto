@@ -197,10 +197,11 @@ class ReportingService:
                 void_summary["items"][item_name]["amount"] += amount
 
         time_ranges = [
-            {"label": "09.00-12.00 - Happy Hour", "start": 9, "end": 12},
-            {"label": "12.00-15.00 - Lunch", "start": 12, "end": 15},
-            {"label": "15.00-17.00 - High Tea", "start": 15, "end": 17},
-            {"label": "17.00-21.00 - Dinner", "start": 17, "end": 21},
+            {"label": "Happy Hour 1 (09:00-11:59)", "start": 9, "end": 12},
+            {"label": "Lunch (12:00-14:59)", "start": 12, "end": 15},
+            {"label": "High Tea (15:00-17:00)", "start": 15, "end": 17},
+            {"label": "Happy Hour 2 (17:00-19:00)", "start": 17, "end": 19},
+            {"label": "Dinner (19:00-Tutup)", "start": 19, "end": 24},
         ]
         time_data = self.repo.get_session_time_data(paid_invoice_names) if paid_invoice_names else []
         session_summary = {}
