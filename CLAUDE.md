@@ -62,6 +62,32 @@ resto/
 - **Run all tests**: `bench run-tests --app resto`
 - **Run single**: `bench run-tests --app resto --module resto.tests.test_xxx`
 
+## Dynamic Print Format Migration (Phase 1)
+
+Migrasi `printing.py` hardcoded ESC/POS → Frappe Print Format yang admin bisa edit di UI tanpa deploy. Phase 1 = **kitchen receipt only**. Builder lain (bill, receipt, checker, void) masih legacy.
+
+**Komponen:**
+- `print_helpers.py` — Jinja helpers (`esc_init`, `esc_align_center`, `esc_char_size`, `fmt_idr`, `two_col`, dll). Returns Latin-1 string; dispatcher `.encode("latin-1")` ke bytes.
+- `print_engine/` package: `resolver.py` (pick rule), `renderer.py` (PF → bytes), `dispatcher.py` (orchestrator + `test_print_rule` whitelist).
+- DocType `Resto Print Rule` — mapping `action_key` → Print Format + printer resolver.
+- Pilot PF `Kitchen Receipt (Default)` + Rule `Kitchen Receipt - Default` (created by `install.after_migrate`, default `enabled=0`).
+
+**Default behavior = legacy.** Dynamic path aktif hanya jika ada `Resto Print Rule` enabled untuk `action_key=kitchen_receipt`. Dispatcher return None pada miss/error → fallback ke `build_kitchen_receipt_from_payload`.
+
+**Cara enable dinamis:**
+1. Buka **Resto Print Rule** → `Kitchen Receipt - Default`
+2. Set `printer_resolver=Static` + `printer_name=<CUPS printer>` (atau pakai Kitchen Station resolver)
+3. Klik **Test Print** untuk verifikasi template render OK
+4. Centang `enabled` → save → semua send-to-kitchen pakai PF ini
+
+**Authoring template baru:**
+- Print Format harus `print_format_type=Jinja` + `raw_printing=1`
+- Context tersedia: `payload` (entry dict), `unprinted_items` (pre-filtered), `invoice` (POS Invoice meta), `header` ({date, station_name, table_name, operator_name, pax}), `title_prefix`
+- Helper list: lihat `resto/hooks.py` field `jinja.methods`
+
+**Phase 2 (belum):** bill, receipt, checker, void_item Print Format + ASCII preview admin panel.
+**Phase 3 (belum):** `Printer Endpoint` DocType buat DB-driven host/port (saat ini host CUPS dari sistem).
+
 ## Token-Saving Rules
 - Baca file besar (printing.py 2418 baris) hanya dengan `offset+limit` sesuai fungsi target
 - Gunakan `Grep` untuk cari method/class sebelum baca file
