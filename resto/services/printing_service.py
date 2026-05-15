@@ -207,6 +207,26 @@ class PrintingService:
     def test_print(self, printer_name: str):
         if not printer_name:
             frappe.throw("printer_name wajib diisi")
+
+        # Pre-check status: CUPS akan accept job (assign job_id) meskipun
+        # printer fisik mati — job duduk di queue sampai printer hidup. Tanpa
+        # pre-check, test print "sukses" padahal printer mati → user bingung.
+        try:
+            status = get_printer_state(printer_name)
+        except frappe.ValidationError:
+            raise  # propagate (printer tidak terdaftar di CUPS)
+        except Exception:
+            # CUPS daemon down / pycups tidak ada — jangan submit
+            frappe.throw(f"Tidak bisa cek status printer '{printer_name}' di CUPS")
+
+        if not status.get("is_online"):
+            reasons = status.get("state_reasons") or []
+            reason_hint = f" (alasan: {', '.join(reasons)})" if reasons else ""
+            frappe.throw(
+                f"Printer '{printer_name}' sedang offline / tidak siap{reason_hint}. "
+                f"Cek apakah printer menyala dan terhubung."
+            )
+
         raw = build_test_print_payload(printer_name)
         job_id = cups_print_raw(raw, printer_name)
         frappe.logger("pos_print").info({

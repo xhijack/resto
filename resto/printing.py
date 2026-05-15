@@ -474,11 +474,44 @@ def cups_print_raw(raw_bytes: bytes, printer_name: str) -> int:
         frappe.log_error(frappe.get_traceback(), f"CUPS Print Error: {printer_name}")
         raise
 
+# CUPS printer-state-reasons substrings yang menandakan printer tidak siap.
+# CUPS sering tidak ubah `printer-state` (3=idle) saat printer fisik mati —
+# state code baru jadi 5 (stopped) setelah ada job yang gagal. Reasons
+# di-update lebih awal (mis. saat queue di-pause manual) atau setelah polling.
+# Reference: RFC 8011 (IPP Model and Semantics), printer-state-reasons.
+_OFFLINE_REASON_NEEDLES = (
+    "offline",                # offline-report
+    "connecting-to-device",   # CUPS gagal connect ke device URI
+    "timed-out",              # device connection timeout
+    "paused",                 # queue di-pause (cups-paused / paused)
+    "shutdown",               # printer melapor power-off via channel
+    "unplugged",              # USB unplugged
+)
+
+
+def _has_offline_reason(reasons) -> bool:
+    if not reasons:
+        return False
+    for r in reasons:
+        if not r:
+            continue
+        rl = r.lower()
+        if rl == "none":
+            continue
+        if any(n in rl for n in _OFFLINE_REASON_NEEDLES):
+            return True
+    return False
+
+
 def get_printer_state(printer_name: str, conn=None) -> Dict[str, Any]:
     """Return CUPS state for a printer.
 
     Raises ValidationError jika printer tidak terdaftar di CUPS server.
     Pass `conn` untuk reuse satu Connection saat batch query.
+
+    is_online=True hanya jika state code idle/processing AND tidak ada
+    state_reasons yang menandakan offline. Cek state code saja tidak cukup —
+    CUPS tidak otomatis tahu printer fisik mati sampai ada job gagal.
     """
     import cups
     conn = conn or cups.Connection()
@@ -487,11 +520,13 @@ def get_printer_state(printer_name: str, conn=None) -> Dict[str, Any]:
         raise frappe.ValidationError(f"Printer '{printer_name}' tidak ditemukan di CUPS")
     attrs = conn.getPrinterAttributes(printer_name)
     state_code = attrs.get("printer-state")
+    state_reasons = attrs.get("printer-state-reasons") or []
     state_map = {3: "idle", 4: "processing", 5: "stopped"}
+    is_online = state_code in (3, 4) and not _has_offline_reason(state_reasons)
     return {
         "state": state_map.get(state_code, "unknown"),
-        "is_online": state_code in (3, 4),
-        "state_reasons": attrs.get("printer-state-reasons") or [],
+        "is_online": is_online,
+        "state_reasons": state_reasons,
     }
 
 

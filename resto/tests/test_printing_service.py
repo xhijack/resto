@@ -625,17 +625,60 @@ class TestTestPrintEndpoint(RestoPOSTestBase):
             self.service.test_print("")
 
     def test_calls_cups_print_raw_with_payload(self):
-        with patch("resto.services.printing_service.build_test_print_payload",
-                   return_value=b"PAYLOAD") as mock_build:
-            with patch("resto.services.printing_service.cups_print_raw",
-                       return_value=42) as mock_print:
-                result = self.service.test_print("BAR-PRINTER")
+        online = {"state": "idle", "is_online": True, "state_reasons": []}
+        with patch("resto.services.printing_service.get_printer_state",
+                   return_value=online):
+            with patch("resto.services.printing_service.build_test_print_payload",
+                       return_value=b"PAYLOAD") as mock_build:
+                with patch("resto.services.printing_service.cups_print_raw",
+                           return_value=42) as mock_print:
+                    result = self.service.test_print("BAR-PRINTER")
 
         mock_build.assert_called_once_with("BAR-PRINTER")
         mock_print.assert_called_once_with(b"PAYLOAD", "BAR-PRINTER")
         self.assertTrue(result["ok"])
         self.assertEqual(result["job_id"], 42)
         self.assertEqual(result["printer"], "BAR-PRINTER")
+
+    def test_throws_when_printer_offline(self):
+        """Printer offline → throw error sebelum submit job ke CUPS."""
+        offline = {
+            "state": "idle",  # state code idle tapi reasons bilang offline
+            "is_online": False,
+            "state_reasons": ["offline-report"],
+        }
+        with patch("resto.services.printing_service.get_printer_state",
+                   return_value=offline):
+            with patch("resto.services.printing_service.cups_print_raw") as mock_print:
+                with self.assertRaises(frappe.ValidationError) as ctx:
+                    self.service.test_print("BAR-PRINTER")
+
+        # cups_print_raw TIDAK boleh dipanggil — kita refuse sebelum submit
+        mock_print.assert_not_called()
+        self.assertIn("offline", str(ctx.exception).lower())
+        # alasan dari CUPS ditampilkan ke user supaya bisa diagnose
+        self.assertIn("offline-report", str(ctx.exception))
+
+    def test_throws_when_printer_not_in_cups(self):
+        """Printer tidak terdaftar di CUPS → ValidationError dari get_printer_state propagated."""
+        with patch("resto.services.printing_service.get_printer_state",
+                   side_effect=frappe.ValidationError("Printer 'X' tidak ditemukan di CUPS")):
+            with patch("resto.services.printing_service.cups_print_raw") as mock_print:
+                with self.assertRaises(frappe.ValidationError):
+                    self.service.test_print("X")
+
+        mock_print.assert_not_called()
+
+    def test_throws_when_cups_daemon_down(self):
+        """CUPS daemon down (Exception generic) → fail safe, jangan submit."""
+        with patch("resto.services.printing_service.get_printer_state",
+                   side_effect=Exception("CUPS daemon connection refused")):
+            with patch("resto.services.printing_service.cups_print_raw") as mock_print:
+                with self.assertRaises(frappe.ValidationError) as ctx:
+                    self.service.test_print("BAR-PRINTER")
+
+        mock_print.assert_not_called()
+        self.assertIn("BAR-PRINTER", str(ctx.exception))
 
 
 class TestPrintTemplates(RestoPOSTestBase):
@@ -810,3 +853,110 @@ class TestUserFullNameLookup(RestoPOSTestBase):
             )
         self.assertEqual(result["alice@x.com"], "Alice")
         self.assertEqual(result["ghost@x.com"], "ghost@x.com")
+
+
+class TestGetPrinterState(RestoPOSTestBase):
+    """Test resto.printing.get_printer_state — fokus pada deteksi offline via
+    state_reasons (CUPS tidak otomatis ubah state code saat printer fisik mati)."""
+
+    def _patched_get_state(self, state_code, reasons):
+        """Return get_printer_state hasil dengan CUPS yang di-mock penuh.
+
+        Mock memerlukan: cups.Connection().getPrinters() returns dict berisi
+        printer_name, dan getPrinterAttributes() returns dict dengan
+        printer-state + printer-state-reasons.
+        """
+        fake_cups = MagicMock()
+        fake_conn = MagicMock()
+        fake_conn.getPrinters.return_value = {"P1": {}}
+        fake_conn.getPrinterAttributes.return_value = {
+            "printer-state": state_code,
+            "printer-state-reasons": reasons,
+        }
+        fake_cups.Connection.return_value = fake_conn
+
+        with patch.dict(sys.modules, {"cups": fake_cups}):
+            from resto.printing import get_printer_state
+            return get_printer_state("P1")
+
+    def test_idle_no_reasons_is_online(self):
+        """state=idle (3), reasons=[] → is_online=True"""
+        result = self._patched_get_state(3, [])
+        self.assertEqual(result["state"], "idle")
+        self.assertTrue(result["is_online"])
+
+    def test_idle_with_none_reason_is_online(self):
+        """state=idle, reasons=['none'] → is_online=True (CUPS standard noop)"""
+        result = self._patched_get_state(3, ["none"])
+        self.assertTrue(result["is_online"])
+
+    def test_idle_but_offline_report_is_offline(self):
+        """state=idle (3) tapi reasons=['offline-report'] → is_online=False.
+
+        Ini kasus utama: CUPS belum update state code tapi sudah tahu printer
+        offline via reason.
+        """
+        result = self._patched_get_state(3, ["offline-report"])
+        self.assertEqual(result["state"], "idle")
+        self.assertFalse(result["is_online"])
+        self.assertIn("offline-report", result["state_reasons"])
+
+    def test_idle_but_connecting_to_device_is_offline(self):
+        """state=idle tapi reasons=['connecting-to-device-warning'] → offline"""
+        result = self._patched_get_state(3, ["connecting-to-device-warning"])
+        self.assertFalse(result["is_online"])
+
+    def test_idle_but_paused_is_offline(self):
+        """state=idle tapi reasons=['paused'] → offline (queue paused manual)"""
+        result = self._patched_get_state(3, ["paused"])
+        self.assertFalse(result["is_online"])
+
+    def test_idle_but_cups_paused_is_offline(self):
+        """reasons=['cups-paused'] → offline (alias paused)"""
+        result = self._patched_get_state(3, ["cups-paused"])
+        self.assertFalse(result["is_online"])
+
+    def test_idle_but_timed_out_is_offline(self):
+        """reasons=['timed-out'] → offline (device connection timeout)"""
+        result = self._patched_get_state(3, ["timed-out"])
+        self.assertFalse(result["is_online"])
+
+    def test_stopped_is_offline(self):
+        """state=stopped (5) → is_online=False regardless of reasons"""
+        result = self._patched_get_state(5, [])
+        self.assertEqual(result["state"], "stopped")
+        self.assertFalse(result["is_online"])
+
+    def test_unknown_state_code_is_offline(self):
+        """state code unknown → state='unknown', is_online=False"""
+        result = self._patched_get_state(99, [])
+        self.assertEqual(result["state"], "unknown")
+        self.assertFalse(result["is_online"])
+
+    def test_processing_is_online(self):
+        """state=processing (4) → is_online=True (printer sedang cetak)"""
+        result = self._patched_get_state(4, [])
+        self.assertEqual(result["state"], "processing")
+        self.assertTrue(result["is_online"])
+
+    def test_case_insensitive_offline_detection(self):
+        """Reason uppercase tetap ke-detect offline"""
+        result = self._patched_get_state(3, ["OFFLINE-REPORT"])
+        self.assertFalse(result["is_online"])
+
+    def test_multiple_reasons_one_offline_marks_offline(self):
+        """Salah satu reason offline → is_online=False meski yang lain benign"""
+        result = self._patched_get_state(3, ["none", "offline-report", "media-low"])
+        self.assertFalse(result["is_online"])
+
+    def test_printer_not_registered_raises(self):
+        """Printer tidak ada di CUPS → ValidationError"""
+        fake_cups = MagicMock()
+        fake_conn = MagicMock()
+        fake_conn.getPrinters.return_value = {"OTHER": {}}
+        fake_cups.Connection.return_value = fake_conn
+
+        with patch.dict(sys.modules, {"cups": fake_cups}):
+            from resto.printing import get_printer_state
+            with self.assertRaises(frappe.ValidationError):
+                get_printer_state("P1")
