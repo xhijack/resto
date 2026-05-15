@@ -134,11 +134,11 @@
   <tr><td>Total Qty</td><td class="num">{{ data.void_menu.total_qty }}</td></tr>
   <tr><td>Total Amount</td><td class="num">{{ fmt(data.void_menu.total_amount) }}</td></tr>
 </table>
-{% if data.void_menu.items %}
+{% if data.void_menu['items'] %}
 <table>
   <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Amount</th></tr></thead>
   <tbody>
-  {% for item, v in data.void_menu.items.items() %}
+  {% for item, v in data.void_menu['items'].items() %}
     <tr><td>{{ item }}</td><td class="num">{{ v.qty }}</td><td class="num">{{ fmt(v.amount) }}</td></tr>
   {% endfor %}
   </tbody>
