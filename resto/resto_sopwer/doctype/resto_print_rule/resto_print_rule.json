@@ -1,0 +1,165 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:rule_name",
+ "creation": "2026-05-15 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "rule_name",
+  "enabled",
+  "section_target",
+  "action_key",
+  "branch",
+  "priority",
+  "section_format",
+  "print_format",
+  "section_printer",
+  "printer_resolver",
+  "printer_name",
+  "kitchen_station",
+  "section_advanced",
+  "filter_condition_jinja",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "rule_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Rule Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "section_target",
+   "fieldtype": "Section Break",
+   "label": "Target"
+  },
+  {
+   "fieldname": "action_key",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Action",
+   "options": "kitchen_receipt\nbill\nreceipt\nchecker\nvoid_item\ntest_print",
+   "reqd": 1
+  },
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Branch",
+   "options": "Branch",
+   "description": "Leave empty for default (main) rule. Filled = branch-specific override."
+  },
+  {
+   "default": "0",
+   "fieldname": "priority",
+   "fieldtype": "Int",
+   "label": "Priority",
+   "description": "Higher wins when multiple rules match."
+  },
+  {
+   "fieldname": "section_format",
+   "fieldtype": "Section Break",
+   "label": "Print Format"
+  },
+  {
+   "fieldname": "print_format",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Print Format",
+   "options": "Print Format",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_printer",
+   "fieldtype": "Section Break",
+   "label": "Printer"
+  },
+  {
+   "fieldname": "printer_resolver",
+   "fieldtype": "Select",
+   "label": "Printer Resolver",
+   "options": "From Payload\nStatic\nBranch Settings\nKitchen Station",
+   "reqd": 1,
+   "default": "From Payload",
+   "description": "How to resolve which printer to use at runtime."
+  },
+  {
+   "fieldname": "printer_name",
+   "fieldtype": "Data",
+   "label": "Printer Name (CUPS)",
+   "depends_on": "eval:doc.printer_resolver=='Static'",
+   "mandatory_depends_on": "eval:doc.printer_resolver=='Static'"
+  },
+  {
+   "fieldname": "kitchen_station",
+   "fieldtype": "Link",
+   "label": "Kitchen Station",
+   "options": "Kitchen Station",
+   "depends_on": "eval:doc.printer_resolver=='Kitchen Station'",
+   "mandatory_depends_on": "eval:doc.printer_resolver=='Kitchen Station'"
+  },
+  {
+   "fieldname": "section_advanced",
+   "fieldtype": "Section Break",
+   "label": "Advanced",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "filter_condition_jinja",
+   "fieldtype": "Small Text",
+   "label": "Filter Condition (Jinja)",
+   "description": "Optional Jinja expression evaluated against print context. Rule applies only if expression resolves truthy. Example: {{ doc.order_type == 'dine_in' }}"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-05-15 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Resto Sopwer",
+ "name": "Resto Print Rule",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "report": 1,
+   "role": "Sales Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
