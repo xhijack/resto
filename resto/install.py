@@ -514,3 +514,71 @@ def after_migrate():
                     pass
 
     add_custom_field()
+    seed_pilot_print_format()
+
+
+PILOT_KITCHEN_TEMPLATE = """{{ esc_init() }}{{ esc_font_a() }}
+{{ esc_align_center() }}{{ esc_char_size_dotmatrix(2, 2) }}{{ esc_bold(1) }}{{ payload.kitchen_station }}
+{{ esc_char_size_dotmatrix(1, 1) }}{{ esc_bold(0) }}{{ esc_align_left() }}
+Tanggal : {{ header.date }}
+Meja    : {{ header.table_name }}
+{% if header.pax %}Pax     : {{ header.pax }}
+{% endif %}Petugas : {{ header.operator_name }}
+{{ line_separator() }}
+{% for it in unprinted_items %}{{ esc_char_size_dotmatrix(2, 2) }}{{ esc_bold(1) }}{{ it.qty }}x {{ it.short_name or it.item_name }}
+{{ esc_char_size_dotmatrix(1, 1) }}{{ esc_bold(0) }}{% if it.add_ons %}  + {{ it.add_ons }}
+{% endif %}{% if it.quick_notes %}  ! {{ it.quick_notes }}
+{% endif %}
+{% endfor %}{{ line_separator() }}
+{% if invoice.order_type == 'take away' and invoice.queue %}{{ esc_align_center() }}{{ esc_bold(1) }}QUEUE: {{ invoice.queue }}{{ esc_bold(0) }}{{ esc_align_left() }}
+{% endif %}{{ esc_feed(5) }}{{ esc_cut_full() }}"""
+
+
+def seed_pilot_print_format():
+    """Idempotent seed: pilot kitchen receipt PF + matching Resto Print Rule.
+
+    Rule is created disabled — admin must enable explicitly to switch from
+    legacy hardcoded builder. Skips insert if either already exists.
+    """
+    pf_name = "Kitchen Receipt (Default)"
+    rule_name = "Kitchen Receipt - Default"
+
+    if not frappe.db.exists("DocType", "Print Format"):
+        return
+
+    if not frappe.db.exists("Print Format", pf_name):
+        try:
+            frappe.get_doc({
+                "doctype": "Print Format",
+                "name": pf_name,
+                "doc_type": "POS Invoice",
+                "print_format_type": "Jinja",
+                "raw_printing": 1,
+                "html": PILOT_KITCHEN_TEMPLATE,
+                "module": "Resto Sopwer",
+                "standard": "No",
+            }).insert(ignore_permissions=True)
+        except Exception as e:
+            frappe.logger().warning(f"seed_pilot_print_format: PF insert failed: {e}")
+            return
+
+    if not frappe.db.exists("DocType", "Resto Print Rule"):
+        return
+
+    if not frappe.db.exists("Resto Print Rule", rule_name):
+        try:
+            frappe.get_doc({
+                "doctype": "Resto Print Rule",
+                "rule_name": rule_name,
+                "action_key": "kitchen_receipt",
+                "print_format": pf_name,
+                "printer_resolver": "From Payload",
+                "enabled": 0,
+                "priority": 0,
+                "description": (
+                    "Default kitchen receipt template. Enable to switch from "
+                    "legacy hardcoded builder to this Print Format."
+                ),
+            }).insert(ignore_permissions=True)
+        except Exception as e:
+            frappe.logger().warning(f"seed_pilot_print_format: Rule insert failed: {e}")
