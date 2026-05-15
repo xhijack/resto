@@ -6,7 +6,7 @@ frappe.ui.form.on("Resto Print Rule", {
 		if (!frm.is_new()) {
 			frm.add_custom_button(__("Test Print"), () => {
 				frappe.call({
-					method: "resto.printing.dispatcher.test_print_rule",
+					method: "resto.print_engine.dispatcher.test_print_rule",
 					args: { rule_name: frm.doc.name },
 					freeze: true,
 					freeze_message: __("Sending test print…"),
