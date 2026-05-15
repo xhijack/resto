@@ -5,7 +5,8 @@ from resto.repositories.printing_repository import PrintingRepository
 try:
     from resto.printing import (
         _enqueue_bill_worker, _enqueue_check_worker, _enqueue_receipt_worker,
-        _enqueue_checker_worker, build_void_item_receipt, cups_print_raw,
+        _enqueue_checker_worker, _enqueue_move_table_worker,
+        build_void_item_receipt, cups_print_raw,
         get_printer_state, build_test_print_payload,
     )
 except Exception:
@@ -13,6 +14,7 @@ except Exception:
     _enqueue_check_worker = None
     _enqueue_receipt_worker = None
     _enqueue_checker_worker = None
+    _enqueue_move_table_worker = None
     build_void_item_receipt = None
     cups_print_raw = None
     get_printer_state = None
@@ -265,6 +267,66 @@ class PrintingService:
             return job_id
         except Exception:
             frappe.log_error(frappe.get_traceback(), f"Enqueue Checker Error for {pos_name}")
+            return None
+
+    def enqueue_move_table_slip(self, source_table, target_table, branch,
+                                invoices=None, customer="", pax=0, user=None):
+        # Move sudah committed di TableService — print failure JANGAN
+        # rollback move. Skip diam-diam (log warning) kalau:
+        #   - branch tidak ke-resolve
+        #   - printer checker tidak di-set di Printer Settings cabang itu
+        #   - _enqueue_move_table_worker tidak available (import gagal)
+        # Caller (TableService.move_table / move_merged_group) tidak perlu
+        # try/except — method ini swallow semua error sendiri.
+        try:
+            if not branch:
+                frappe.logger("pos_print").warning({
+                    "source": source_table,
+                    "target": target_table,
+                    "message": "Skip move slip: branch tidak ke-resolve",
+                })
+                return None
+
+            printer = self.repo.get_checker_printer(branch)
+            if not printer:
+                frappe.logger("pos_print").warning({
+                    "source": source_table,
+                    "target": target_table,
+                    "branch": branch,
+                    "message": "Skip move slip: default_printer_checker belum diset",
+                })
+                return None
+
+            if _enqueue_move_table_worker is None:
+                return None
+
+            branch_label = frappe.db.get_value("Branch", branch, "branch") or branch or ""
+            resolved_user = user or frappe.session.user
+
+            job_id = _enqueue_move_table_worker(
+                source_table=source_table,
+                target_table=target_table,
+                invoices=list(invoices or []),
+                customer=customer or "",
+                pax=int(pax or 0),
+                user=resolved_user,
+                branch_label=branch_label,
+                printer_name=printer,
+            )
+            frappe.logger("pos_print").info({
+                "source": source_table,
+                "target": target_table,
+                "branch": branch,
+                "printer": printer,
+                "job_id": job_id,
+                "type": "move_table",
+            })
+            return job_id
+        except Exception:
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"Enqueue Move Table Slip Error: {source_table} -> {target_table}",
+            )
             return None
 
     def _print_void_to_other_stations(self, pos_invoice, items_to_print, branch, void_printer=None):

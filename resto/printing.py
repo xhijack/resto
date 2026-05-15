@@ -2643,3 +2643,120 @@ def build_test_print_payload(printer_name: str) -> bytes:
     out += b"berarti printer siap dipakai.\n"
     out += _esc_feed(5) + _esc_cut_full()
     return out
+
+
+def build_move_table_slip(source_table: str, target_table: str,
+                          invoices: list[str] | None = None,
+                          customer: str = "", pax: int = 0,
+                          user: str | None = None,
+                          branch_label: str = "") -> bytes:
+    """ESC/POS payload untuk slip catatan pindah meja.
+
+    Dipanggil dari TableService.move_table / move_merged_group per pair
+    (source → target). invoices = list nama POS Invoice yang ikut pindah —
+    items dari masing-masing invoice di-render berurutan.
+
+    user dipisahkan dari frappe.session.user supaya bisa di-pass dari
+    background worker yang kehilangan session context. Caller wajib
+    resolve sebelum enqueue.
+    """
+    WIDTH = 32
+
+    def format_lr(left, right):
+        left = str(left)
+        right = str(right)
+        space = WIDTH - len(left) - len(right)
+        if space < 1:
+            space = 1
+        return left + (" " * space) + right
+
+    user_id = user or frappe.session.user
+    full_name = frappe.db.get_value("User", user_id, "full_name") or user_id
+
+    ts = now_datetime()
+    tanggal = ts.strftime("%d-%m-%Y")
+    jam = ts.strftime("%H:%M:%S")
+
+    invoices = invoices or []
+
+    out = b""
+    out += _esc_init()
+    out += _esc_font_a()
+    out += _esc_align_center() + _esc_bold(True)
+    out += b"PINDAH MEJA\n"
+    if branch_label:
+        out += (str(branch_label).upper() + "\n").encode("ascii", "ignore")
+    out += _esc_bold(False)
+    out += _esc_align_left()
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += (format_lr(f"Dari    : {str(source_table)[:12]}", tanggal)).encode("ascii", "ignore") + b"\n"
+    out += (format_lr(f"Ke      : {str(target_table)[:12]}", jam)).encode("ascii", "ignore") + b"\n"
+    out += (f"Petugas : {full_name}\n").encode("ascii", "ignore")
+    if customer:
+        out += (f"Customer: {customer}\n").encode("ascii", "ignore")
+    pax_str = f"Pax     : {int(flt(pax))}"
+    order_str = f"Order : {len(invoices)}"
+    out += (format_lr(pax_str, order_str)).encode("ascii", "ignore") + b"\n"
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+
+    has_any_item = False
+    for inv_name in invoices:
+        try:
+            data = _collect_pos_invoice(inv_name)
+        except Exception:
+            continue
+        for it in (data.get("items") or []):
+            has_any_item = True
+            qty_s = str(it.get("qty") or 0)
+            item_name = it.get("item_name") or it.get("resto_menu") or "-"
+
+            out += _esc_char_size_dotmatrix(3, 3) + _esc_bold(True)
+            display_line = f"{int(flt(qty_s))} x {item_name}"
+            out += (display_line + "\n").encode("ascii", "ignore")
+            out += _esc_char_size_dotmatrix(0, 0) + _esc_bold(False)
+
+            add_ons = it.get("add_ons") or ""
+            if add_ons:
+                for a in [a.strip() for a in add_ons.split(",") if a.strip()]:
+                    out += (f"  + {a}\n").encode("ascii", "ignore")
+
+            notes = it.get("quick_notes") or ""
+            if notes:
+                out += (f"  # {notes}\n").encode("ascii", "ignore")
+
+    if not has_any_item:
+        out += b"(Tidak ada item)\n"
+
+    out += (_line("-") + "\n").encode("ascii", "ignore")
+    out += _esc_feed(5)
+    out += _esc_cut_full()
+
+    return out
+
+
+def _enqueue_move_table_worker(source_table: str, target_table: str,
+                               invoices: list[str], customer: str, pax: int,
+                               user: str, branch_label: str, printer_name: str):
+    """Worker enqueue print slip move table ke CUPS. Dipanggil via
+    frappe.enqueue dari PrintingService.enqueue_move_table_slip — JANGAN
+    panggil langsung kecuali memang sync flow (mis. test)."""
+    raw = build_move_table_slip(
+        source_table=source_table,
+        target_table=target_table,
+        invoices=invoices,
+        customer=customer,
+        pax=pax,
+        user=user,
+        branch_label=branch_label,
+    )
+    job_id = cups_print_raw(raw, printer_name)
+
+    frappe.logger("pos_print").info({
+        "source": source_table,
+        "target": target_table,
+        "printer": printer_name,
+        "job_id": job_id,
+        "type": "move_table",
+    })
+
+    return job_id

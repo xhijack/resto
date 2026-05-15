@@ -392,9 +392,22 @@ class TableService:
             if (tgt_doc.status or "Kosong") != "Kosong":
                 frappe.throw(f"Table target '{t}' tidak kosong (status: {tgt_doc.status}).")
 
+        # Capture print payload sebelum source di-clear — orders/customer/pax
+        # source-side bakal di-reset ke kosong setelah loop, jadi snapshot
+        # value-nya dulu untuk slip.
+        pair_payloads = []
         for src, tgt in zip(members, list(target_tables)):
             src_doc = self.repo.get_table(src)
             tgt_doc = self.repo.get_table(tgt)
+
+            invoice_list = [o.invoice_name for o in (src_doc.orders or []) if o.invoice_name]
+            pair_payloads.append({
+                "source": src,
+                "target": tgt,
+                "invoices": invoice_list,
+                "customer": src_doc.customer or "",
+                "pax": int(src_doc.pax or 0),
+            })
 
             tgt_doc.status = src_doc.status
             tgt_doc.taken_by = src_doc.taken_by
@@ -418,11 +431,127 @@ class TableService:
             self.repo.save_table(tgt_doc)
             self.repo.save_table(src_doc)
 
+        self._print_move_slips(pair_payloads)
+
         return {
             "ok": True,
             "moved_count": len(members),
             "message": f"Berhasil memindahkan {len(members)} meja",
         }
+
+    def move_table(self, source_table, target_table):
+        """Single-table atomic move. Sebelum v1.2.28 mobile pakai 2 call
+        updateTableStatus (clear source + fill target) yang fragile kalau
+        call kedua gagal. Endpoint ini bundle keduanya supaya atomic + jadi
+        trigger point cetak slip move ke printer checker."""
+        if not source_table or not target_table:
+            frappe.throw("source_table dan target_table wajib diisi.")
+        if source_table == target_table:
+            frappe.throw("Target tidak boleh sama dengan source.")
+
+        if not self.repo.table_exists(source_table):
+            frappe.throw(f"Table '{source_table}' tidak ditemukan")
+        if not self.repo.table_exists(target_table):
+            frappe.throw(f"Table '{target_table}' tidak ditemukan")
+
+        src_doc = self.repo.get_table(source_table)
+        tgt_doc = self.repo.get_table(target_table)
+
+        if (tgt_doc.status or "Kosong") != "Kosong":
+            frappe.throw(
+                f"Table target '{target_table}' tidak kosong (status: {tgt_doc.status}).",
+                exc=TableAlreadyClaimedError,
+            )
+
+        invoice_list = [o.invoice_name for o in (src_doc.orders or []) if o.invoice_name]
+        pair_payload = {
+            "source": source_table,
+            "target": target_table,
+            "invoices": invoice_list,
+            "customer": src_doc.customer or "",
+            "pax": int(src_doc.pax or 0),
+        }
+
+        tgt_doc.status = src_doc.status
+        tgt_doc.taken_by = src_doc.taken_by
+        tgt_doc.pax = src_doc.pax
+        tgt_doc.customer = src_doc.customer
+        tgt_doc.type_customer = src_doc.type_customer
+        tgt_doc.checked = src_doc.checked
+        tgt_doc.set(
+            "orders",
+            [{"invoice_name": o.invoice_name} for o in (src_doc.orders or []) if o.invoice_name],
+        )
+
+        src_doc.status = "Kosong"
+        src_doc.taken_by = ""
+        src_doc.pax = 0
+        src_doc.customer = ""
+        src_doc.type_customer = ""
+        src_doc.checked = 0
+        src_doc.set("orders", [])
+
+        self.repo.save_table(tgt_doc)
+        self.repo.save_table(src_doc)
+
+        # Realtime push: 2 meja state-nya berubah. Reuse event `table_meta_updated`
+        # supaya mobile useTableRealtime langsung refresh tanpa polling.
+        for tname, doc in ((source_table, src_doc), (target_table, tgt_doc)):
+            frappe.publish_realtime(
+                "table_meta_updated",
+                {
+                    "table_name": tname,
+                    "status": doc.status,
+                    "pax": doc.pax,
+                    "customer": doc.customer,
+                    "type_customer": doc.type_customer,
+                    "taken_by": doc.taken_by,
+                },
+                room="website",
+                after_commit=True,
+            )
+
+        self._print_move_slips([pair_payload])
+
+        return {
+            "ok": True,
+            "moved_count": 1,
+            "message": f"Berhasil memindahkan {source_table} ke {target_table}",
+        }
+
+    def _print_move_slips(self, pair_payloads):
+        """Enqueue 1 slip per (source, target) pair. Branch di-resolve dari
+        POS Invoice pertama di source.orders. Kalau source punya orders
+        kosong atau invoice tidak ada branch-nya, slip di-skip. Print failure
+        tidak rollback move (sudah committed)."""
+        if not pair_payloads:
+            return
+
+        try:
+            from resto.services.printing_service import PrintingService
+        except Exception:
+            return
+
+        ps = PrintingService()
+        user = frappe.session.user
+
+        for pair in pair_payloads:
+            invoices = pair.get("invoices") or []
+            branch = ""
+            for inv in invoices:
+                branch = frappe.db.get_value("POS Invoice", inv, "branch") or ""
+                if branch:
+                    break
+
+            ps.enqueue_move_table_slip(
+                source_table=pair["source"],
+                target_table=pair["target"],
+                branch=branch,
+                invoices=invoices,
+                customer=pair.get("customer") or "",
+                pax=pair.get("pax") or 0,
+                user=user,
+            )
 
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()

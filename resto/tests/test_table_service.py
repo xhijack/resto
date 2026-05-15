@@ -1008,3 +1008,131 @@ class TestTableService(RestoPOSTestBase):
             self.service.merge_table("INV-SRC", source_table="TBL-SRC", target_table=["TBL-A", "TBL-B"])
 
         self.assertEqual(mock_invoice_service.move_items_from_invoice.call_count, 2)
+
+    # ------------------------------------------------------------------
+    # Unit tests — move_table (single move, atomic)
+    # ------------------------------------------------------------------
+
+    def _stub_print_service(self):
+        """Patch PrintingService di table_service supaya enqueue print
+        tidak ke-trigger di test (move_table & move_merged_group sekarang
+        panggil _print_move_slips di akhir)."""
+        return patch(
+            "resto.services.printing_service.PrintingService",
+            return_value=MagicMock(),
+        )
+
+    def test_move_table_throws_when_missing_args(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.move_table("", "TBL-NEW")
+        with self.assertRaises(frappe.ValidationError):
+            self.service.move_table("TBL-001", "")
+
+    def test_move_table_throws_when_source_equals_target(self):
+        with self.assertRaises(frappe.ValidationError):
+            self.service.move_table("TBL-001", "TBL-001")
+
+    def test_move_table_throws_when_source_not_exists(self):
+        self.mock_repo.table_exists.side_effect = lambda n: n != "TBL-001"
+        with self.assertRaises(frappe.ValidationError):
+            self.service.move_table("TBL-001", "TBL-NEW")
+
+    def test_move_table_throws_when_target_not_kosong(self):
+        from resto.services.table_service import TableAlreadyClaimedError
+        order = MagicMock(); order.invoice_name = "INV-X"
+        src = self._make_table_doc(status="Terisi", orders=[order])
+        tgt = self._make_table_doc(status="Terisi", orders=[])
+        tgt.name = "TBL-NEW"
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = lambda n: src if n == "TBL-001" else tgt
+
+        with self._stub_print_service(), self.assertRaises(TableAlreadyClaimedError):
+            self.service.move_table("TBL-001", "TBL-NEW")
+
+    def test_move_table_happy_path_swaps_state(self):
+        order = MagicMock(); order.invoice_name = "INV-X"
+        src = self._make_table_doc(status="Terisi", orders=[order])
+        src.taken_by = "kasir@x.com"
+        src.pax = 4
+        src.customer = "Pak Budi"
+        src.type_customer = "Walk In"
+        src.checked = 1
+
+        tgt = self._make_table_doc(status="Kosong", orders=[])
+        tgt.name = "TBL-NEW"
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = lambda n: src if n == "TBL-001" else tgt
+
+        with self._stub_print_service(), \
+             patch("resto.services.table_service.frappe.publish_realtime"):
+            result = self.service.move_table("TBL-001", "TBL-NEW")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["moved_count"], 1)
+        # state ter-copy ke target
+        self.assertEqual(tgt.status, "Terisi")
+        self.assertEqual(tgt.taken_by, "kasir@x.com")
+        self.assertEqual(tgt.pax, 4)
+        self.assertEqual(tgt.customer, "Pak Budi")
+        # source ter-clear
+        self.assertEqual(src.status, "Kosong")
+        self.assertEqual(src.taken_by, "")
+        self.assertEqual(src.pax, 0)
+        self.assertEqual(src.customer, "")
+        # save sekali untuk masing-masing
+        self.assertEqual(self.mock_repo.save_table.call_count, 2)
+
+    def test_move_table_calls_print_enqueue_with_pair_payload(self):
+        """move_table harus panggil enqueue_move_table_slip 1x dengan
+        payload (source, target, branch dari POS Invoice, invoices, customer, pax)."""
+        order = MagicMock(); order.invoice_name = "INV-X"
+        src = self._make_table_doc(status="Terisi", orders=[order])
+        src.customer = "Pak Budi"
+        src.pax = 3
+        tgt = self._make_table_doc(status="Kosong", orders=[])
+        tgt.name = "TBL-NEW"
+
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = lambda n: src if n == "TBL-001" else tgt
+
+        mock_ps = MagicMock()
+        with patch("resto.services.printing_service.PrintingService", return_value=mock_ps), \
+             patch("resto.services.table_service.frappe.db.get_value", return_value="BR-001"), \
+             patch("resto.services.table_service.frappe.publish_realtime"):
+            self.service.move_table("TBL-001", "TBL-NEW")
+
+        mock_ps.enqueue_move_table_slip.assert_called_once()
+        kwargs = mock_ps.enqueue_move_table_slip.call_args.kwargs
+        self.assertEqual(kwargs["source_table"], "TBL-001")
+        self.assertEqual(kwargs["target_table"], "TBL-NEW")
+        self.assertEqual(kwargs["branch"], "BR-001")
+        self.assertEqual(kwargs["invoices"], ["INV-X"])
+        self.assertEqual(kwargs["customer"], "Pak Budi")
+        self.assertEqual(kwargs["pax"], 3)
+
+    def test_move_merged_group_calls_print_enqueue_per_pair(self):
+        order = MagicMock(); order.invoice_name = "INV-X"
+        src1 = self._make_table_doc(status="Terisi", orders=[order])
+        src2 = self._make_table_doc(status="Terisi", orders=[order])
+        src2.name = "TBL-002"
+        tgt1 = self._make_table_doc(status="Kosong"); tgt1.name = "TBL-NEW1"
+        tgt2 = self._make_table_doc(status="Kosong"); tgt2.name = "TBL-NEW2"
+        table_map = {
+            "TBL-001": src1, "TBL-002": src2,
+            "TBL-NEW1": tgt1, "TBL-NEW2": tgt2,
+        }
+        self.mock_repo.table_exists.return_value = True
+        self.mock_repo.get_table.side_effect = lambda n: table_map[n]
+
+        mock_ps = MagicMock()
+        with patch("resto.services.printing_service.PrintingService", return_value=mock_ps), \
+             patch("resto.services.table_service.frappe.db.get_value", return_value="BR-001"), \
+             patch(
+                "resto.services.table_service.frappe.get_all",
+                return_value=["TBL-001", "TBL-002"],
+             ):
+            self.service.move_merged_group("TBL-001", ["TBL-NEW1", "TBL-NEW2"])
+
+        self.assertEqual(mock_ps.enqueue_move_table_slip.call_count, 2)

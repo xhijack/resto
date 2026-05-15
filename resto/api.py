@@ -407,6 +407,12 @@ def move_merged_group(source_table, target_tables):
     from resto.services.table_service import TableService
     return TableService().move_merged_group(source_table, target_tables)
 
+
+@frappe.whitelist()
+def move_table(source_table, target_table):
+    from resto.services.table_service import TableService
+    return TableService().move_table(source_table, target_table)
+
 def move_items_from_invoice(source_invoice_name, target_invoice_name):
     from resto.services.invoice_service import InvoiceService
     InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)

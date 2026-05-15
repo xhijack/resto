@@ -1077,3 +1077,124 @@ class TestProbeDeviceUri(RestoPOSTestBase):
             result = _probe_device_uri("socket://")
         self.assertIsNone(result)
         mock_conn.assert_not_called()
+
+
+class TestBuildMoveTableSlip(RestoPOSTestBase):
+    """Test resto.printing.build_move_table_slip"""
+
+    def _fake_collect(self, *items):
+        return {"items": list(items)}
+
+    def test_header_contains_pindah_meja_and_branch(self):
+        from resto.printing import build_move_table_slip
+        with patch("resto.printing.frappe.db.get_value", return_value="John Doe"), \
+             patch("resto.printing._collect_pos_invoice", return_value=self._fake_collect()):
+            raw = build_move_table_slip("T01", "T05", invoices=[],
+                                        branch_label="cabang utama", user="user@x.com")
+        self.assertIn(b"PINDAH MEJA", raw)
+        self.assertIn(b"CABANG UTAMA", raw)
+
+    def test_renders_from_to_user_customer_pax_order_count(self):
+        from resto.printing import build_move_table_slip
+        with patch("resto.printing.frappe.db.get_value", return_value="John Doe"), \
+             patch("resto.printing._collect_pos_invoice", return_value=self._fake_collect()):
+            raw = build_move_table_slip(
+                "T01", "T05", invoices=["INV-1", "INV-2"],
+                customer="Pak Budi", pax=4, user="user@x.com",
+            )
+        self.assertIn(b"Dari    : T01", raw)
+        self.assertIn(b"Ke      : T05", raw)
+        self.assertIn(b"Petugas : John Doe", raw)
+        self.assertIn(b"Customer: Pak Budi", raw)
+        self.assertIn(b"Pax     : 4", raw)
+        self.assertIn(b"Order : 2", raw)
+
+    def test_renders_items_from_invoices(self):
+        from resto.printing import build_move_table_slip
+        items = self._fake_collect(
+            {"item_name": "Nasi Goreng", "qty": 2, "add_ons": "Extra telur",
+             "quick_notes": "Tidak pedas"},
+            {"item_name": "Es Teh", "qty": 1, "add_ons": "", "quick_notes": ""},
+        )
+        with patch("resto.printing.frappe.db.get_value", return_value="John"), \
+             patch("resto.printing._collect_pos_invoice", return_value=items):
+            raw = build_move_table_slip("T01", "T05", invoices=["INV-1"],
+                                        user="user@x.com")
+        self.assertIn(b"2 x Nasi Goreng", raw)
+        self.assertIn(b"  + Extra telur", raw)
+        self.assertIn(b"  # Tidak pedas", raw)
+        self.assertIn(b"1 x Es Teh", raw)
+
+    def test_no_invoices_renders_tidak_ada_item(self):
+        from resto.printing import build_move_table_slip
+        with patch("resto.printing.frappe.db.get_value", return_value="John"):
+            raw = build_move_table_slip("T01", "T05", invoices=[], user="user@x.com")
+        self.assertIn(b"(Tidak ada item)", raw)
+
+    def test_collect_invoice_failure_does_not_raise(self):
+        """Kalau salah satu invoice gagal di-collect, slip tetap ke-render
+        (skip invoice tsb)."""
+        from resto.printing import build_move_table_slip
+        with patch("resto.printing.frappe.db.get_value", return_value="John"), \
+             patch("resto.printing._collect_pos_invoice",
+                   side_effect=Exception("missing")):
+            raw = build_move_table_slip("T01", "T05", invoices=["INV-BAD"],
+                                        user="user@x.com")
+        self.assertIn(b"(Tidak ada item)", raw)
+
+
+class TestEnqueueMoveTableSlip(RestoPOSTestBase):
+    """Test PrintingService.enqueue_move_table_slip"""
+
+    def setUp(self):
+        super().setUp()
+        self.mock_repo = MagicMock()
+        self.service = PrintingService(repo=self.mock_repo)
+
+    def test_skips_when_branch_empty(self):
+        self.mock_repo.get_checker_printer.return_value = "PRT-CHK"
+        result = self.service.enqueue_move_table_slip("T01", "T05", branch="")
+        self.assertIsNone(result)
+        self.mock_repo.get_checker_printer.assert_not_called()
+
+    def test_skips_when_no_checker_printer_configured(self):
+        self.mock_repo.get_checker_printer.return_value = None
+        result = self.service.enqueue_move_table_slip(
+            "T01", "T05", branch="BR-001",
+        )
+        self.assertIsNone(result)
+
+    def test_uses_checker_printer_from_repo(self):
+        self.mock_repo.get_checker_printer.return_value = "PRT-CHK"
+        with patch("resto.services.printing_service._enqueue_move_table_worker",
+                   return_value="JOB-77") as mock_w, \
+             patch("resto.services.printing_service.frappe.db.get_value",
+                   return_value="cabang utama"):
+            result = self.service.enqueue_move_table_slip(
+                "T01", "T05", branch="BR-001",
+                invoices=["INV-1"], customer="Pak Budi", pax=4, user="user@x.com",
+            )
+        self.assertEqual(result, "JOB-77")
+        mock_w.assert_called_once()
+        kwargs = mock_w.call_args.kwargs
+        self.assertEqual(kwargs["source_table"], "T01")
+        self.assertEqual(kwargs["target_table"], "T05")
+        self.assertEqual(kwargs["printer_name"], "PRT-CHK")
+        self.assertEqual(kwargs["invoices"], ["INV-1"])
+        self.assertEqual(kwargs["customer"], "Pak Budi")
+        self.assertEqual(kwargs["pax"], 4)
+        self.assertEqual(kwargs["user"], "user@x.com")
+        self.assertEqual(kwargs["branch_label"], "cabang utama")
+
+    def test_worker_exception_swallowed_returns_none(self):
+        """Worker exception JANGAN propagate ke caller (move sudah commit)."""
+        self.mock_repo.get_checker_printer.return_value = "PRT-CHK"
+        with patch("resto.services.printing_service._enqueue_move_table_worker",
+                   side_effect=RuntimeError("CUPS down")), \
+             patch("resto.services.printing_service.frappe.db.get_value",
+                   return_value="cabang utama"), \
+             patch("resto.services.printing_service.frappe.log_error"):
+            result = self.service.enqueue_move_table_slip(
+                "T01", "T05", branch="BR-001",
+            )
+        self.assertIsNone(result)
