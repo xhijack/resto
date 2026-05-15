@@ -36,7 +36,7 @@ class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
         self.assertEqual(result, [])
 
     def test_includes_image_url_when_available(self):
-        """Image URL harus disertakan jika ada di File"""
+        """Image URL + rate + resto_menu harus disertakan langsung di response dict"""
         bm = MagicMock()
         bm.menu_item = "MENU-001"
         bm.name = "BM-001"
@@ -45,16 +45,16 @@ class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
         rm = MagicMock()
         rm.name = "MENU-001"
 
-        branch_doc = MagicMock()
-        branch_doc.as_dict.return_value = {"name": "BM-001", "rate": 25000}
-
         self.mock_repo.get_branch_menus.return_value = [bm]
         self.mock_repo.get_resto_menus_by_names.return_value = {"MENU-001": rm}
         self.mock_repo.get_images_for_menus.return_value = {"MENU-001": "/files/img.png"}
-        self.mock_repo.get_branch_menu_doc.return_value = branch_doc
 
         result = self.service.get_all_branch_menu_with_children()
         self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["name"], "BM-001")
+        self.assertEqual(result[0]["menu_item"], "MENU-001")
+        self.assertEqual(result[0]["rate"], 25000)
+        self.assertEqual(result[0]["resto_menu"], rm)
         self.assertEqual(result[0]["image"], "/files/img.png")
 
     def test_filters_by_branch_when_provided(self):
@@ -62,6 +62,27 @@ class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
         self.mock_repo.get_branch_menus.return_value = []
         self.service.get_all_branch_menu_with_children(branch="BR-001")
         self.mock_repo.get_branch_menus.assert_called_once_with(branch="BR-001")
+
+    def test_does_not_call_get_branch_menu_doc_per_item(self):
+        """Regression guard: jangan kembali ke N+1 frappe.get_doc per branch menu.
+        Endpoint ini dipanggil saat first-load mobile (400+ menu di produksi);
+        balikin loop get_doc bakal kembaliin lambat awal."""
+        bm1 = MagicMock(menu_item="MENU-001", name="BM-001", rate=10000)
+        bm2 = MagicMock(menu_item="MENU-002", name="BM-002", rate=20000)
+        bm3 = MagicMock(menu_item="MENU-003", name="BM-003", rate=30000)
+
+        self.mock_repo.get_branch_menus.return_value = [bm1, bm2, bm3]
+        self.mock_repo.get_resto_menus_by_names.return_value = {
+            "MENU-001": MagicMock(),
+            "MENU-002": MagicMock(),
+            "MENU-003": MagicMock(),
+        }
+        self.mock_repo.get_images_for_menus.return_value = {}
+
+        result = self.service.get_all_branch_menu_with_children()
+
+        self.assertEqual(len(result), 3)
+        self.mock_repo.get_branch_menu_doc.assert_not_called()
 
 
 class TestGetBranchMenuForKitchenPrinting(RestoPOSTestBase):

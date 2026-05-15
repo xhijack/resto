@@ -56,6 +56,10 @@ class KitchenService:
     # ------------------------------------------------------------------
 
     def get_all_branch_menu_with_children(self, branch=None):
+        # Bulk fetch only — sebelumnya loop ini panggil frappe.get_doc("Branch Menu", name)
+        # per item, jadi 400 menu = ~1200+ query (parent + 3 child table per doc).
+        # Mobile cuma baca {resto_menu, rate, image}; add_ons/quick_notes/printers
+        # Branch Menu tidak pernah dipakai (mobile fetch on-demand dari Resto Menu).
         branch_menus = self.repo.get_branch_menus(branch=branch)
         if not branch_menus:
             return []
@@ -68,15 +72,13 @@ class KitchenService:
         for bm in branch_menus:
             if bm.menu_item not in resto_menus:
                 continue
-
-            branch_doc = self.repo.get_branch_menu_doc(bm.name)
-            branch_dict = branch_doc.as_dict()
-            branch_dict.update({
+            result.append({
+                "name": bm.name,
+                "menu_item": bm.menu_item,
                 "rate": bm.rate,
                 "resto_menu": resto_menus.get(bm.menu_item),
-                "image": image_map.get(bm.menu_item)
+                "image": image_map.get(bm.menu_item),
             })
-            result.append(branch_dict)
 
         return result
 
