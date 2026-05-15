@@ -910,7 +910,21 @@ def kitchen_print_from_payload(payload, title_prefix: str = "") -> dict:
                 "items": items_to_print   # semua item yang belum dicetak
             }
 
-            raw = build_kitchen_receipt_from_payload(single_entry)
+            # Try dynamic Print Format dispatcher first; fall back to legacy
+            # builder when no enabled rule matches (default = legacy path).
+            raw = None
+            try:
+                from resto.print_engine.dispatcher import dispatch_kitchen_payload
+                raw = dispatch_kitchen_payload(single_entry, title_prefix=title_prefix)
+            except Exception as e:
+                frappe.log_error(
+                    f"Dynamic print dispatcher crashed, falling back: {e}\n{frappe.get_traceback()}",
+                    "RestoPrintDispatcher",
+                )
+                raw = None
+
+            if raw is None:
+                raw = build_kitchen_receipt_from_payload(single_entry)
 
             if not raw:
                 frappe.logger("pos_print").warning({
