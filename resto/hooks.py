@@ -77,10 +77,32 @@ doctype_list_js = {
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "resto.utils.jinja_methods",
-# 	"filters": "resto.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"resto.print_helpers.esc_init",
+		"resto.print_helpers.esc_align_left",
+		"resto.print_helpers.esc_align_center",
+		"resto.print_helpers.esc_align_right",
+		"resto.print_helpers.esc_bold",
+		"resto.print_helpers.esc_font_a",
+		"resto.print_helpers.esc_font_b",
+		"resto.print_helpers.esc_cut_full",
+		"resto.print_helpers.esc_cut_full_with_feed",
+		"resto.print_helpers.esc_feed",
+		"resto.print_helpers.esc_drawer",
+		"resto.print_helpers.esc_char_size",
+		"resto.print_helpers.esc_char_size_dotmatrix",
+		"resto.print_helpers.esc_qr",
+		"resto.print_helpers.line_separator",
+		"resto.print_helpers.pad_right",
+		"resto.print_helpers.pad_left",
+		"resto.print_helpers.two_col",
+		"resto.print_helpers.wrap_text",
+		"resto.print_helpers.fit",
+		"resto.print_helpers.fmt_idr",
+		"resto.print_helpers.join_bytes",
+	]
+}
 
 # Installation
 # ------------
