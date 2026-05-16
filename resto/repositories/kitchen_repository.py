@@ -9,9 +9,45 @@ class KitchenRepository:
         return frappe.get_all(
             "Branch Menu",
             filters=filters,
-            fields=["name", "menu_item", "rate"],
+            fields=[
+                "name", "menu_item", "rate", "menu_code", "sell_item",
+                "menu_category", "enabled", "short_name", "description"
+            ],
             limit_page_length=0
         )
+
+    def get_branch_menu_addons_map(self, names):
+        if not names:
+            return {}
+        rows = frappe.get_all(
+            "Menu Add Ons",
+            filters={"parent": ["in", names], "parenttype": "Branch Menu"},
+            fields=["parent", "name", "item_name", "price"]
+        )
+        out = {}
+        for r in rows:
+            out.setdefault(r.parent, []).append({
+                "name": r.name,
+                "item_name": r.item_name,
+                "price": r.price,
+            })
+        return out
+
+    def get_branch_menu_quick_notes_map(self, names):
+        if not names:
+            return {}
+        rows = frappe.get_all(
+            "Quick Notes",
+            filters={"parent": ["in", names], "parenttype": "Branch Menu"},
+            fields=["parent", "name", "item_name"]
+        )
+        out = {}
+        for r in rows:
+            out.setdefault(r.parent, []).append({
+                "name": r.name,
+                "item_name": r.item_name,
+            })
+        return out
 
     def get_resto_menus_by_names(self, names):
         if not names:

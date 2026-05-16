@@ -48,6 +48,8 @@ class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
         self.mock_repo.get_branch_menus.return_value = [bm]
         self.mock_repo.get_resto_menus_by_names.return_value = {"MENU-001": rm}
         self.mock_repo.get_images_for_menus.return_value = {"MENU-001": "/files/img.png"}
+        self.mock_repo.get_branch_menu_addons_map.return_value = {}
+        self.mock_repo.get_branch_menu_quick_notes_map.return_value = {}
 
         result = self.service.get_all_branch_menu_with_children()
         self.assertEqual(len(result), 1)
@@ -56,6 +58,55 @@ class TestGetAllBranchMenuWithChildren(RestoPOSTestBase):
         self.assertEqual(result[0]["rate"], 25000)
         self.assertEqual(result[0]["resto_menu"], rm)
         self.assertEqual(result[0]["image"], "/files/img.png")
+
+    def test_includes_addons_and_quick_notes(self):
+        """Web waiter butuh add_ons & quick_notes per branch menu di response."""
+        bm = MagicMock(menu_item="MENU-001", rate=25000,
+                       menu_code="A1", sell_item="ITEM-1", menu_category="Food",
+                       enabled=1, short_name="Nasi", description="desc")
+        bm.name = "BM-001"
+        self.mock_repo.get_branch_menus.return_value = [bm]
+        self.mock_repo.get_resto_menus_by_names.return_value = {"MENU-001": MagicMock()}
+        self.mock_repo.get_images_for_menus.return_value = {}
+        self.mock_repo.get_branch_menu_addons_map.return_value = {
+            "BM-001": [{"name": "AO-1", "item_name": "Telur", "price": 5000}]
+        }
+        self.mock_repo.get_branch_menu_quick_notes_map.return_value = {
+            "BM-001": [{"name": "QN-1", "item_name": "Pedas"}]
+        }
+
+        result = self.service.get_all_branch_menu_with_children()
+        self.assertEqual(len(result), 1)
+        row = result[0]
+        self.assertEqual(row["menu_code"], "A1")
+        self.assertEqual(row["sell_item"], "ITEM-1")
+        self.assertEqual(row["menu_category"], "Food")
+        self.assertEqual(row["enabled"], 1)
+        self.assertEqual(row["short_name"], "Nasi")
+        self.assertEqual(row["description"], "desc")
+        self.assertEqual(row["add_ons"], [{"name": "AO-1", "item_name": "Telur", "price": 5000}])
+        self.assertEqual(row["quick_notes"], [{"name": "QN-1", "item_name": "Pedas"}])
+
+    def test_bulk_fetches_addons_and_notes_once(self):
+        """Regression guard: add_ons & quick_notes harus bulk fetch (1 query per child table),
+        bukan per branch menu — supaya tidak balik ke N+1."""
+        bms = []
+        for i in range(5):
+            m = MagicMock(menu_item=f"MENU-{i}", rate=1000)
+            m.name = f"BM-{i}"
+            bms.append(m)
+        self.mock_repo.get_branch_menus.return_value = bms
+        self.mock_repo.get_resto_menus_by_names.return_value = {
+            f"MENU-{i}": MagicMock() for i in range(5)
+        }
+        self.mock_repo.get_images_for_menus.return_value = {}
+        self.mock_repo.get_branch_menu_addons_map.return_value = {}
+        self.mock_repo.get_branch_menu_quick_notes_map.return_value = {}
+
+        self.service.get_all_branch_menu_with_children()
+        self.assertEqual(self.mock_repo.get_branch_menu_addons_map.call_count, 1)
+        self.assertEqual(self.mock_repo.get_branch_menu_quick_notes_map.call_count, 1)
+        self.mock_repo.get_branch_menu_doc.assert_not_called()
 
     def test_filters_by_branch_when_provided(self):
         """get_branch_menus harus dipanggil dengan branch filter"""

@@ -56,10 +56,11 @@ class KitchenService:
     # ------------------------------------------------------------------
 
     def get_all_branch_menu_with_children(self, branch=None):
-        # Bulk fetch only — sebelumnya loop ini panggil frappe.get_doc("Branch Menu", name)
-        # per item, jadi 400 menu = ~1200+ query (parent + 3 child table per doc).
-        # Mobile cuma baca {resto_menu, rate, image}; add_ons/quick_notes/printers
-        # Branch Menu tidak pernah dipakai (mobile fetch on-demand dari Resto Menu).
+        # Bulk fetch — 5 query total (branch menus + resto menus + images + add_ons + quick_notes).
+        # Sebelumnya loop panggil frappe.get_doc per item = ~1200+ query untuk 400 menu.
+        # Mobile cuma akses {resto_menu, rate, image} — extra field di-ignore.
+        # Web waiter (magic-table) butuh menu_code/sell_item/menu_category/enabled/
+        # short_name/description/add_ons/quick_notes — di-include semua di response.
         branch_menus = self.repo.get_branch_menus(branch=branch)
         if not branch_menus:
             return []
@@ -67,6 +68,10 @@ class KitchenService:
         menu_items = [bm.menu_item for bm in branch_menus if bm.menu_item]
         resto_menus = self.repo.get_resto_menus_by_names(menu_items)
         image_map = self.repo.get_images_for_menus(menu_items)
+
+        bm_names = [bm.name for bm in branch_menus]
+        addons_map = self.repo.get_branch_menu_addons_map(bm_names)
+        notes_map = self.repo.get_branch_menu_quick_notes_map(bm_names)
 
         result = []
         for bm in branch_menus:
@@ -76,6 +81,14 @@ class KitchenService:
                 "name": bm.name,
                 "menu_item": bm.menu_item,
                 "rate": bm.rate,
+                "menu_code": bm.menu_code,
+                "sell_item": bm.sell_item,
+                "menu_category": bm.menu_category,
+                "enabled": bm.enabled,
+                "short_name": bm.short_name,
+                "description": bm.description,
+                "add_ons": addons_map.get(bm.name, []),
+                "quick_notes": notes_map.get(bm.name, []),
                 "resto_menu": resto_menus.get(bm.menu_item),
                 "image": image_map.get(bm.menu_item),
             })
