@@ -267,10 +267,24 @@ class TableService:
         self.repo.save_table(doc)
 
     def clear_table_merged(self, pos_invoice):
+        """Bersihkan referensi pos_invoice dari semua Table yang link ke sana.
+        Pakai remove_table_order (atomic, hanya hapus invoice spesifik) supaya
+        split bill (1 table banyak invoice) tidak ke-wipe saat 1 bill dibayar.
+        Meta (status/customer/taken_by) cuma di-clear kalau orders sisa kosong
+        — match perilaku lama untuk single-invoice & merge flow."""
         tables = self.repo.get_tables_for_invoice(pos_invoice)
-        for table in tables:
-            if table:
-                self.clear_table(table)
+        for table_name in tables:
+            if not table_name:
+                continue
+            self.remove_table_order(table_name, pos_invoice)
+            doc = self.repo.get_table(table_name)
+            if not doc.orders:
+                doc.customer = None
+                doc.taken_by = None
+                doc.status = "Kosong"
+                doc.type_customer = None
+                doc.flags.ignore_version = True
+                self.repo.save_table(doc)
 
     def merge_table(self, pos_invoice, source_table=None, target_table=None):
         if not source_table:

@@ -49,23 +49,69 @@ class TestClearTableMerged(RestoPOSTestBase):
         self.mock_repo = MagicMock()
         self.service = TableService(repo=self.mock_repo)
 
-    def test_clears_all_tables_for_invoice(self):
-        """Harus clear semua table yang terkait invoice"""
+    def test_removes_invoice_from_each_table_and_clears_meta_when_empty(self):
+        """Single-invoice / merge flow: remove invoice dari setiap table,
+        kalau orders sisa kosong -> clear meta (status=Kosong dst)."""
         self.mock_repo.get_tables_for_invoice.return_value = ["TBL-001", "TBL-002"]
 
-        mock_table = MagicMock()
-        self.mock_repo.get_table.return_value = mock_table
+        # Setelah remove_table_order, get_table return doc dengan orders=[]
+        empty_doc = MagicMock()
+        empty_doc.orders = []
+        self.mock_repo.get_table.return_value = empty_doc
 
-        self.service.clear_table_merged("INV-001")
+        with patch.object(self.service, "remove_table_order") as mock_remove:
+            self.service.clear_table_merged("INV-001")
 
-        self.assertEqual(self.mock_repo.get_table.call_count, 2)
+        # remove_table_order dipanggil per table
+        mock_remove.assert_has_calls([
+            call("TBL-001", "INV-001"),
+            call("TBL-002", "INV-001"),
+        ])
+        self.assertEqual(mock_remove.call_count, 2)
+        # Meta cleared & save_table dipanggil (2x, satu per table)
+        self.assertEqual(empty_doc.status, "Kosong")
+        self.assertEqual(empty_doc.customer, None)
+        self.assertEqual(empty_doc.taken_by, None)
+        self.assertEqual(empty_doc.type_customer, None)
         self.assertEqual(self.mock_repo.save_table.call_count, 2)
+
+    def test_keeps_table_meta_when_orders_remain_after_removal(self):
+        """KEY TEST untuk split bill: kalau setelah remove invoice masih ada
+        order lain di table, JANGAN wipe meta — bill sisa tidak boleh hilang."""
+        self.mock_repo.get_tables_for_invoice.return_value = ["TBL-001"]
+
+        # Setelah remove INV-A, table masih punya INV-B & INV-C (split bill)
+        leftover_doc = MagicMock()
+        leftover_doc.orders = [
+            MagicMock(invoice_name="INV-B"),
+            MagicMock(invoice_name="INV-C"),
+        ]
+        # Capture initial meta supaya bisa assert tidak ke-overwrite
+        leftover_doc.status = "Terisi"
+        leftover_doc.customer = "Customer-A"
+        leftover_doc.taken_by = "kasir@x.com"
+        leftover_doc.type_customer = "Dine In"
+        self.mock_repo.get_table.return_value = leftover_doc
+
+        with patch.object(self.service, "remove_table_order") as mock_remove:
+            self.service.clear_table_merged("INV-A")
+
+        mock_remove.assert_called_once_with("TBL-001", "INV-A")
+        # Meta TIDAK ke-overwrite
+        self.assertEqual(leftover_doc.status, "Terisi")
+        self.assertEqual(leftover_doc.customer, "Customer-A")
+        self.assertEqual(leftover_doc.taken_by, "kasir@x.com")
+        self.assertEqual(leftover_doc.type_customer, "Dine In")
+        # save_table tidak dipanggil dari clear_table_merged (remove sudah save sendiri)
+        self.mock_repo.save_table.assert_not_called()
 
     def test_skips_empty_table_names(self):
         """Harus skip jika list table kosong"""
         self.mock_repo.get_tables_for_invoice.return_value = []
-        self.service.clear_table_merged("INV-001")
+        with patch.object(self.service, "remove_table_order") as mock_remove:
+            self.service.clear_table_merged("INV-001")
         self.mock_repo.get_table.assert_not_called()
+        mock_remove.assert_not_called()
 
 
 # -----------------------------------------------------------------------
