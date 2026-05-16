@@ -259,19 +259,81 @@ class TestPaymentService(RestoPOSTestBase):
         mock_doc.set.assert_not_called()
         mock_doc.append.assert_not_called()
 
-    def test_pay_invoice_rejects_sum_greater_than_grand(self):
-        """Sum > grand (over-payment) → throws (kebijakan ketat sum==grand)"""
+    def test_pay_invoice_accepts_overpayment_with_cash_change(self):
+        """Over-pay 1.1jt untuk 1jt (semua cash) → submit OK, change=100rb"""
         mock_doc = _full_paid_mock(1_000_000)
 
         with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
              patch("resto.services.payment_service.frappe.db"), \
-             patch("resto.services.payment_service.clear_table_merged"):
-            with self.assertRaises(frappe.ValidationError):
+             patch("resto.services.payment_service.clear_table_merged"), \
+             patch.object(PaymentService, "_is_cash_mode", side_effect=lambda m: m == "Cash"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                [{"mode_of_payment": "Cash", "amount": 1_100_000}],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["change_amount"], 100_000.0)
+        self.assertEqual(mock_doc.change_amount, 100_000.0)
+        mock_doc.submit.assert_called_once()
+
+    def test_pay_invoice_rejects_overpayment_without_cash_mode(self):
+        """Over-pay tapi semua kartu (no Cash) → throws Kembalian Tidak Bisa Diberikan"""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"), \
+             patch.object(PaymentService, "_is_cash_mode", return_value=False):
+            with self.assertRaises(frappe.ValidationError) as ctx:
                 self.service.pay_invoice(
                     "INV-001",
-                    [{"mode_of_payment": "Cash", "amount": 1_100_000}],
+                    [{"mode_of_payment": "Debit Mandiri", "amount": 1_100_000}],
                 )
 
+        self.assertIn("Kembalian", str(ctx.exception))
+        mock_doc.submit.assert_not_called()
+
+    def test_pay_invoice_accepts_split_overpayment_when_cash_covers_change(self):
+        """Skenario user: Cash 100rb + Debit Mandiri 950rb untuk 1jt → change
+        50rb tertutup Cash 100rb. Submit OK, change_amount=50rb."""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"), \
+             patch.object(PaymentService, "_is_cash_mode", side_effect=lambda m: m == "Cash"):
+            result = self.service.pay_invoice(
+                "INV-001",
+                [
+                    {"mode_of_payment": "Cash", "amount": 100_000},
+                    {"mode_of_payment": "Debit Mandiri", "amount": 950_000},
+                ],
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["change_amount"], 50_000.0)
+        self.assertEqual(mock_doc.change_amount, 50_000.0)
+        mock_doc.submit.assert_called_once()
+
+    def test_pay_invoice_rejects_split_overpayment_when_cash_insufficient(self):
+        """Cash 30rb + CC 1.02jt untuk 1jt → change 50rb > Cash 30rb → throws"""
+        mock_doc = _full_paid_mock(1_000_000)
+
+        with patch("resto.services.payment_service.frappe.get_doc", return_value=mock_doc), \
+             patch("resto.services.payment_service.frappe.db"), \
+             patch("resto.services.payment_service.clear_table_merged"), \
+             patch.object(PaymentService, "_is_cash_mode", side_effect=lambda m: m == "Cash"):
+            with self.assertRaises(frappe.ValidationError) as ctx:
+                self.service.pay_invoice(
+                    "INV-001",
+                    [
+                        {"mode_of_payment": "Cash", "amount": 30_000},
+                        {"mode_of_payment": "CC", "amount": 1_020_000},
+                    ],
+                )
+
+        self.assertIn("Kembalian", str(ctx.exception))
         mock_doc.submit.assert_not_called()
 
     def test_pay_invoice_clears_existing_partial_payments(self):
