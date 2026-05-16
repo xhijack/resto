@@ -336,7 +336,24 @@ class ReportingService:
         invoices = self.repo.get_paid_invoices_for_closing(opening_doc.pos_profile)
 
         if not invoices:
-            frappe.throw("Tidak ada POS Invoice")
+            # Shift kosong: tidak ada transaksi sama sekali. Cancel Opening Entry
+            # (docstatus 1→2) supaya kasir bisa mulai shift baru. Tidak buat
+            # POS Closing Entry — semua angka nol & ERPNext biasanya reject
+            # closing entry tanpa pos_transactions.
+            opening_doc.flags.ignore_permissions = True
+            opening_doc.cancel()
+            frappe.db.commit()
+            return {
+                "closing_entry": None,
+                "no_transactions": True,
+                "message": "Shift ditutup tanpa transaksi.",
+                "total_invoice": 0,
+                "grand_total": 0,
+                "total_quantity": 0,
+                "tax_total": 0,
+                "payments": {},
+                "discount_detail": {},
+            }
 
         for invoice in invoices:
             self.repo.set_invoice_owner(invoice.name, opening_doc.user)
@@ -417,7 +434,23 @@ class ReportingService:
                 payment_map[p.mode_of_payment] += flt(p.amount) * scale
 
         if not closing.pos_transactions:
-            frappe.throw("Tidak ada transaksi POS valid setelah opening")
+            # Semua invoice kandidat ada di rentang sebelum opening time —
+            # secara efektif shift ini kosong. Treat sama dengan branch
+            # "no invoices": cancel Opening Entry + return graceful.
+            opening_doc.flags.ignore_permissions = True
+            opening_doc.cancel()
+            frappe.db.commit()
+            return {
+                "closing_entry": None,
+                "no_transactions": True,
+                "message": "Shift ditutup tanpa transaksi.",
+                "total_invoice": 0,
+                "grand_total": 0,
+                "total_quantity": 0,
+                "tax_total": 0,
+                "payments": {},
+                "discount_detail": {},
+            }
 
         closing.total_quantity = total_qty
         closing.net_total = net_total

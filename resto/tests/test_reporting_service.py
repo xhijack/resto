@@ -191,36 +191,57 @@ class TestEndShift(RestoPOSTestBase):
         self.mock_repo = MagicMock()
         self.service = ReportingService(repo=self.mock_repo)
 
-    def test_throws_when_no_invoices(self):
-        """Harus throw jika tidak ada POS Invoice"""
+    def test_cancels_opening_when_no_invoices(self):
+        """Shift kosong (tanpa invoice): cancel Opening Entry + return graceful"""
         mock_opening = MagicMock()
         mock_opening.name = "OPEN-001"
         mock_opening.pos_profile = "PROF-001"
         mock_opening.user = "admin@test.com"
         mock_opening.company = "_Test Company"
         mock_opening.branch = "BR-001"
+        mock_opening_doc = MagicMock()
+        mock_opening_doc.pos_profile = "PROF-001"
+        mock_opening_doc.user = "admin@test.com"
+        mock_opening_doc.company = "_Test Company"
+        mock_opening_doc.branch = "BR-001"
+        mock_opening_doc.period_start_date = "2025-01-01 10:00:00"
 
         self.mock_repo.get_active_opening_for_user.return_value = mock_opening
         self.mock_repo.get_paid_invoices_for_closing.return_value = []
 
-        with self.assertRaises(frappe.ValidationError):
-            self.service.end_shift(user="admin@test.com")
+        real_get_doc = frappe.get_doc
+        def fake_get_doc(doctype, *args, **kwargs):
+            if doctype == "POS Opening Entry":
+                return mock_opening_doc
+            return real_get_doc(doctype, *args, **kwargs)
+        with patch("resto.services.reporting_service.frappe.get_doc", side_effect=fake_get_doc):
+            result = self.service.end_shift(user="admin@test.com")
 
-    def test_throws_when_no_valid_transactions_after_opening(self):
-        """Harus throw jika semua invoice sebelum opening time"""
+        mock_opening_doc.cancel.assert_called_once()
+        self.assertTrue(result["no_transactions"])
+        self.assertIsNone(result["closing_entry"])
+        self.assertEqual(result["total_invoice"], 0)
+        self.assertEqual(result["grand_total"], 0)
+
+    def test_cancels_opening_when_no_valid_transactions_after_opening(self):
+        """Semua invoice sebelum opening time → treat sama dengan shift kosong"""
         mock_opening = MagicMock()
         mock_opening.name = "OPEN-001"
         mock_opening.pos_profile = "PROF-001"
         mock_opening.user = "admin@test.com"
         mock_opening.company = "_Test Company"
         mock_opening.branch = "BR-001"
-        mock_opening.period_start_date = "2025-01-01 10:00:00"
+        mock_opening_doc = MagicMock()
+        mock_opening_doc.pos_profile = "PROF-001"
+        mock_opening_doc.user = "admin@test.com"
+        mock_opening_doc.company = "_Test Company"
+        mock_opening_doc.branch = "BR-001"
+        mock_opening_doc.period_start_date = "2025-01-01 10:00:00"
 
-        # Invoice dengan waktu sebelum opening
         inv = MagicMock()
         inv.name = "INV-001"
         inv.posting_date = "2025-01-01"
-        inv.posting_time = "09:00:00"  # sebelum opening 10:00
+        inv.posting_time = "09:00:00"
 
         self.mock_repo.get_active_opening_for_user.return_value = mock_opening
         self.mock_repo.get_paid_invoices_for_closing.return_value = [inv]
@@ -230,8 +251,17 @@ class TestEndShift(RestoPOSTestBase):
             return_against=None, customer="C", posting_date="2025-01-01"
         )
 
-        with self.assertRaises(frappe.ValidationError):
-            self.service.end_shift(user="admin@test.com")
+        real_get_doc = frappe.get_doc
+        def fake_get_doc(doctype, *args, **kwargs):
+            if doctype == "POS Opening Entry":
+                return mock_opening_doc
+            return real_get_doc(doctype, *args, **kwargs)
+        with patch("resto.services.reporting_service.frappe.get_doc", side_effect=fake_get_doc):
+            result = self.service.end_shift(user="admin@test.com")
+
+        mock_opening_doc.cancel.assert_called_once()
+        self.assertTrue(result["no_transactions"])
+        self.assertIsNone(result["closing_entry"])
 
     def test_payment_scaling(self):
         """Payment harus di-scale berdasarkan grand_total / payment_total"""
