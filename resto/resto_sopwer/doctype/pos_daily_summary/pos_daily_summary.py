@@ -61,6 +61,17 @@ def end_day_from_shift(posting_date, user=None):
         summary.posting_date = posting_date
         summary.created_by = user
 
+    # Set branch dari shift pertama supaya open_pos bisa lookup
+    # "sudah end-day per cabang hari ini" — block kasir lain buka shift baru
+    # di cabang yang sama setelah end-day.
+    first_branch = frappe.db.get_value(
+        "POS Opening Entry",
+        frappe.db.get_value("POS Closing Entry", shift_names[0], "pos_opening_entry"),
+        "branch"
+    )
+    if first_branch:
+        summary.branch = first_branch
+
     for shift_name in shift_names:
         summary.append("pos_transactions", {
             "pos_closing_entry": shift_name

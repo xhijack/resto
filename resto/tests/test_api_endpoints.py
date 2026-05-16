@@ -199,8 +199,10 @@ class TestOpenPosEndpoint(RestoPOSTestBase):
 
         with session_user("u@x.com"), \
              patch("resto.api.now_datetime", return_value="FIXED-DT"), \
+             patch("resto.api.nowdate", return_value="2026-05-16"), \
              patch("frappe.get_doc", side_effect=fake_get_doc), \
-             patch("frappe.db.get_value", return_value=None):
+             patch("frappe.db.get_value", return_value=None), \
+             patch("frappe.db.exists", return_value=None):
             result = api.open_pos(pos_profile="PP-1", opening_balance=100, branch="BR-1")
 
         self.assertEqual(result["name"], "POE-1")
@@ -213,8 +215,10 @@ class TestOpenPosEndpoint(RestoPOSTestBase):
     def test_falls_back_to_branch_from_pos_profile(self):
         with session_user("u@x.com"), \
              patch("resto.api.now_datetime", return_value="FIXED-DT"), \
+             patch("resto.api.nowdate", return_value="2026-05-16"), \
              patch("frappe.get_doc") as mock_get_doc, \
-             patch("frappe.db.get_value", return_value="BR-AUTO") as mock_dbget:
+             patch("frappe.db.get_value", return_value="BR-AUTO") as mock_dbget, \
+             patch("frappe.db.exists", return_value=None):
             mock_doc = MagicMock(); mock_doc.name = "POE-1"
             mock_get_doc.return_value = mock_doc
             result = api.open_pos(pos_profile="PP-1", opening_balance=0)
@@ -224,9 +228,11 @@ class TestOpenPosEndpoint(RestoPOSTestBase):
     def test_falls_back_to_pos_profile_lookup_by_user(self):
         with session_user("u@x.com"), \
              patch("resto.api.now_datetime", return_value="FIXED-DT"), \
+             patch("resto.api.nowdate", return_value="2026-05-16"), \
              patch("frappe.get_all", return_value=["PP-AUTO"]) as mock_getall, \
              patch("frappe.get_doc") as mock_get_doc, \
-             patch("frappe.db.get_value", return_value="BR-1"):
+             patch("frappe.db.get_value", return_value="BR-1"), \
+             patch("frappe.db.exists", return_value=None):
             mock_doc = MagicMock(); mock_doc.name = "POE-1"
             mock_get_doc.return_value = mock_doc
             result = api.open_pos(opening_balance=0)
@@ -234,3 +240,13 @@ class TestOpenPosEndpoint(RestoPOSTestBase):
             mock_getall.assert_called_once_with(
                 "POS Profile User", filters={"user": "u@x.com"}, pluck="parent", limit=1
             )
+
+    def test_rejects_when_branch_already_end_day_today(self):
+        """Block buka shift baru kalau cabang sudah end-day hari ini."""
+        with session_user("u@x.com"), \
+             patch("resto.api.now_datetime", return_value="FIXED-DT"), \
+             patch("resto.api.nowdate", return_value="2026-05-16"), \
+             patch("frappe.db.get_value", return_value="BR-1"), \
+             patch("frappe.db.exists", return_value="POS-DS-001"):
+            with self.assertRaises(frappe.ValidationError):
+                api.open_pos(pos_profile="PP-1", opening_balance=0)

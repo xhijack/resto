@@ -3,7 +3,7 @@ from frappe import _
 import json
 from frappe.auth import LoginManager
 from frappe.core.doctype.user.user import generate_keys
-from frappe.utils import flt, get_datetime, now_datetime
+from frappe.utils import flt, get_datetime, now_datetime, nowdate
 
 @frappe.whitelist()
 def print_now():
@@ -377,6 +377,19 @@ def open_pos(user=None, pos_profile=None, opening_balance=0, branch=None):
 
     if not branch:
         frappe.throw("Branch tidak ditemukan untuk POS Profile ini")
+
+    # Block opening kalau cabang sudah end-day hari ini. POS Daily Summary
+    # docstatus=1 menandakan tutup hari sudah final-ed; kasir baru harus
+    # nunggu besok untuk buka shift di cabang yang sama.
+    end_day_done = frappe.db.exists("POS Daily Summary", {
+        "posting_date": nowdate(),
+        "branch": branch,
+        "docstatus": 1,
+    })
+    if end_day_done:
+        frappe.throw(
+            f"Cabang {branch} sudah end-day hari ini. Buka shift baru besok."
+        )
 
     opening = frappe.get_doc({
         "doctype": "POS Opening Entry",
