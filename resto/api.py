@@ -422,6 +422,24 @@ def move_table(source_table, target_table):
     from resto.services.table_service import TableService
     return TableService().move_table(source_table, target_table)
 
+
+@frappe.whitelist()
+def split_table(source_table, source_invoice, items, target_table):
+    """Pisah subset item dari source invoice ke invoice baru di target table.
+    items: JSON string atau list of {"item_row_name": str, "qty": number}."""
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except Exception:
+            frappe.throw("items harus JSON list valid.")
+    from resto.services.table_service import TableService
+    return TableService().split_table(
+        source_table=source_table,
+        source_invoice=source_invoice,
+        items=items,
+        target_table=target_table,
+    )
+
 def move_items_from_invoice(source_invoice_name, target_invoice_name):
     from resto.services.invoice_service import InvoiceService
     InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)

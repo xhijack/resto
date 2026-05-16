@@ -255,6 +255,122 @@ class InvoiceService:
 
     SKIP_FIELDS = {"name", "parent", "parenttype", "parentfield", "idx"}
 
+    def split_invoice(self, source_name, items):
+        """Pisah subset item dari source invoice ke invoice baru.
+
+        items: list of {"item_row_name": str, "qty": number}.
+        - source row qty di-reduce (atau di-hapus kalau habis)
+        - new invoice copy header source (customer, pos_profile, branch, taxes_and_charges)
+          + item rows yang diminta (rate, status_kitchen, dst tetap)
+        - Throws kalau source jadi kosong (mustahil split semua) atau qty invalid.
+
+        Return: new invoice name.
+        """
+        if isinstance(items, str):
+            items = json.loads(items)
+        if not items:
+            frappe.throw("items wajib diisi.")
+
+        source = self.repo.get_invoice(source_name)
+        if source.docstatus == 1:
+            frappe.throw(f"POS Invoice '{source_name}' sudah disubmit, tidak bisa di-split.")
+
+        # Map: row_name → (source_item, requested_qty)
+        requested = {}
+        for entry in items:
+            row_name = entry.get("item_row_name")
+            qty = entry.get("qty")
+            if not row_name or qty is None:
+                frappe.throw("Setiap item butuh 'item_row_name' dan 'qty'.")
+            try:
+                qty = float(qty)
+            except (TypeError, ValueError):
+                frappe.throw(f"qty '{qty}' tidak valid (harus angka).")
+            if qty <= 0:
+                frappe.throw(f"qty harus > 0 untuk row {row_name}.")
+            requested[row_name] = qty
+
+        source_rows_by_name = {it.name: it for it in source.get("items", [])}
+        for row_name, qty in requested.items():
+            if row_name not in source_rows_by_name:
+                frappe.throw(f"Item row '{row_name}' tidak ada di invoice {source_name}.")
+            src_qty = float(source_rows_by_name[row_name].qty or 0)
+            if qty > src_qty:
+                frappe.throw(
+                    f"Split qty {qty} > qty source ({src_qty}) untuk row {row_name}."
+                )
+
+        # Cegah split habis — minimal 1 row tersisa di source.
+        remaining_total = sum(
+            float(it.qty or 0) - requested.get(it.name, 0)
+            for it in source.get("items", [])
+        )
+        if remaining_total <= 0:
+            frappe.throw(
+                "Split akan mengosongkan invoice sumber. Pakai 'Pindah Meja' kalau "
+                "memang mau pindahkan semua item."
+            )
+
+        # Build new invoice — copy header source.
+        new_invoice = frappe.get_doc({
+            "doctype": "POS Invoice",
+            "customer": source.customer,
+            "pos_profile": source.pos_profile,
+            "order_type": source.order_type,
+            "branch": getattr(source, "branch", None),
+            "company": source.company,
+            "taxes_and_charges": getattr(source, "taxes_and_charges", None),
+            "apply_discount_on": "Net Total",
+            "ordered_by": frappe.session.user,
+            "items": [],
+        })
+
+        # Copy tax template rows (charge_type, account_head, rate).
+        for tax in source.get("taxes", []):
+            new_invoice.append("taxes", {
+                "charge_type": tax.charge_type,
+                "account_head": tax.account_head,
+                "rate": tax.rate,
+                "tax_amount": 0,
+                "description": tax.description,
+            })
+
+        # Move qty: build new rows + reduce/remove source rows.
+        kept_source_items = []
+        for it in source.get("items", []):
+            split_qty = requested.get(it.name)
+            src_qty = float(it.qty or 0)
+
+            if split_qty:
+                fields = it.meta.get_fieldnames_with_value()
+                row = {f: it.get(f) for f in fields if f not in self.SKIP_FIELDS}
+                row["qty"] = split_qty
+                new_invoice.append("items", row)
+
+                remaining = src_qty - split_qty
+                if remaining > 0:
+                    it.qty = remaining
+                    kept_source_items.append(it)
+                # else: drop row dari source (tidak append ke kept)
+            else:
+                kept_source_items.append(it)
+
+        source.set("items", kept_source_items)
+
+        # Clear row_id pada tax rows yang bukan referencing (sama trick di
+        # move_items_from_invoice untuk hindari ValidationError dari template).
+        for tax in new_invoice.get("taxes", []):
+            if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
+                tax.row_id = None
+        for tax in source.get("taxes", []):
+            if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
+                tax.row_id = None
+
+        new_invoice.insert(ignore_permissions=True)
+        source.save()
+        frappe.db.commit()
+        return new_invoice.name
+
     def move_items_from_invoice(self, source_name, target_name):
         source = self.repo.get_invoice(source_name)
         target = self.repo.get_invoice(target_name)

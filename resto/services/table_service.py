@@ -439,6 +439,103 @@ class TableService:
             "message": f"Berhasil memindahkan {len(members)} meja",
         }
 
+    def split_table(self, source_table, source_invoice, items, target_table):
+        """Pisah subset item dari invoice di source_table ke invoice baru di
+        target_table. Inverse dari merge_table.
+
+        - target_table harus Kosong.
+        - source_invoice tidak boleh submitted.
+        - items: list of {"item_row_name": str, "qty": number} — minimal 1 row
+          tersisa di source (kalau ingin pindah semua, pakai move_table).
+
+        Realtime publish:
+        - table_meta_updated pada source (untuk refresh grid jika status berubah)
+        - table_order_added pada target (entry baru di Table.orders)
+        """
+        if not source_table:
+            frappe.throw("source_table wajib diisi.")
+        if not target_table:
+            frappe.throw("target_table wajib diisi.")
+        if source_table == target_table:
+            frappe.throw("source_table dan target_table tidak boleh sama.")
+        if not source_invoice:
+            frappe.throw("source_invoice wajib diisi.")
+
+        if isinstance(items, str):
+            items = json.loads(items)
+        if not isinstance(items, list) or not items:
+            frappe.throw("items wajib diisi (minimal 1 row).")
+
+        if not self.repo.table_exists(source_table):
+            frappe.throw(f"Table '{source_table}' tidak ditemukan.")
+        if not self.repo.table_exists(target_table):
+            frappe.throw(f"Table '{target_table}' tidak ditemukan.")
+
+        src_table_doc = self.repo.get_table(source_table)
+        invoice_names = {o.invoice_name for o in (src_table_doc.orders or [])}
+        if source_invoice not in invoice_names:
+            frappe.throw(
+                f"Invoice '{source_invoice}' bukan milik table '{source_table}'."
+            )
+
+        tgt_table_doc = self.repo.get_table_for_update(target_table)
+        current_target_status = tgt_table_doc.status or "Kosong"
+        if current_target_status != "Kosong":
+            frappe.throw(
+                f"Target table '{target_table}' tidak kosong (status: {current_target_status}).",
+                exc=TableAlreadyClaimedError,
+            )
+
+        invoice_service = InvoiceService()
+        new_invoice = invoice_service.split_invoice(source_invoice, items)
+
+        # Update target table — inherit status/customer/type dari source (waiter
+        # mungkin beda, biarkan target taken_by = session user supaya jelas siapa
+        # yang trigger split).
+        tgt_table_doc.status = src_table_doc.status or "Terisi"
+        tgt_table_doc.taken_by = frappe.session.user
+        tgt_table_doc.customer = src_table_doc.customer or ""
+        tgt_table_doc.type_customer = src_table_doc.type_customer or ""
+        tgt_table_doc.pax = 0
+        tgt_table_doc.checked = 0
+        tgt_table_doc.append("orders", {"invoice_name": new_invoice})
+
+        tgt_table_doc.flags.ignore_version = True
+        self.repo.save_table(tgt_table_doc)
+
+        frappe.publish_realtime(
+            "table_order_added",
+            {
+                "table_name": target_table,
+                "invoice_name": new_invoice,
+                "status": tgt_table_doc.status,
+            },
+            room="website",
+            after_commit=True,
+        )
+        frappe.publish_realtime(
+            "table_meta_updated",
+            {
+                "table_name": source_table,
+                "status": src_table_doc.status,
+                "pax": src_table_doc.pax,
+                "customer": src_table_doc.customer,
+                "type_customer": src_table_doc.type_customer,
+                "taken_by": src_table_doc.taken_by,
+            },
+            room="website",
+            after_commit=True,
+        )
+
+        return {
+            "ok": True,
+            "source_table": source_table,
+            "target_table": target_table,
+            "source_invoice": source_invoice,
+            "target_invoice": new_invoice,
+            "message": f"Berhasil memisahkan {len(items)} item ke meja {target_table}",
+        }
+
     def move_table(self, source_table, target_table):
         """Single-table atomic move. Sebelum v1.2.28 mobile pakai 2 call
         updateTableStatus (clear source + fill target) yang fragile kalau
