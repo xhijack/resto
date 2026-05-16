@@ -2189,9 +2189,9 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append("")
     lines.append("")
     text = "\n".join(lines)
-    # esc_commads = _esc_feed(8) + _esc_cut_full()
-    # out = text.encode("ascii", "ignore") + esc_commads
-    
+    esc_commads = _esc_feed(8) + _esc_cut_full()
+    out = text.encode("ascii", "ignore") + esc_commads
+
     # --- Cetak dengan CUPS ---
     try:
         # Jika printer_name tidak diberikan, gunakan default
@@ -2203,9 +2203,9 @@ def print_shift_report(closing_name, printer_name=None):
                 printer_name = list(printers.keys())[0] if printers else None
             if not printer_name:
                 frappe.throw(_("Tidak ada printer terdeteksi."))
-        
+
         # Kirim job cetak (langsung bytes)
-        job_id = cups_print_raw(text.encode('utf-8'), printer_name)
+        job_id = cups_print_raw(out, printer_name)
         frappe.logger().info(f"Print job sent: {job_id}")
         return job_id
     except Exception as e:
