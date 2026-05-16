@@ -371,6 +371,97 @@ class InvoiceService:
         frappe.db.commit()
         return new_invoice.name
 
+    def move_invoice_items(self, source_name, target_name, items):
+        """Pindah subset item dari source invoice ke target invoice yang sudah ada.
+
+        items: list of {"item_row_name": str, "qty": number}.
+        Beda dari split_invoice (target = invoice baru) dan move_items_from_invoice
+        (target sudah ada tapi pindah SEMUA item). Ini partial-to-existing.
+
+        - source row qty di-reduce (atau di-hapus kalau habis)
+        - target append row baru dengan field-field copy dari source
+        - Throws kalau source kosong setelah move (pakai move_table sekalian).
+        """
+        if isinstance(items, str):
+            items = json.loads(items)
+        if not items:
+            frappe.throw("items wajib diisi.")
+        if source_name == target_name:
+            frappe.throw("Source dan target invoice tidak boleh sama.")
+
+        source = self.repo.get_invoice(source_name)
+        target = self.repo.get_invoice(target_name)
+        if source.docstatus == 1:
+            frappe.throw(f"POS Invoice '{source_name}' sudah disubmit, tidak bisa di-pindah.")
+        if target.docstatus == 1:
+            frappe.throw(f"POS Invoice '{target_name}' sudah disubmit, tidak bisa di-pindah.")
+
+        requested = {}
+        for entry in items:
+            row_name = entry.get("item_row_name")
+            qty = entry.get("qty")
+            if not row_name or qty is None:
+                frappe.throw("Setiap item butuh 'item_row_name' dan 'qty'.")
+            try:
+                qty = float(qty)
+            except (TypeError, ValueError):
+                frappe.throw(f"qty '{qty}' tidak valid (harus angka).")
+            if qty <= 0:
+                frappe.throw(f"qty harus > 0 untuk row {row_name}.")
+            requested[row_name] = qty
+
+        source_rows_by_name = {it.name: it for it in source.get("items", [])}
+        for row_name, qty in requested.items():
+            if row_name not in source_rows_by_name:
+                frappe.throw(f"Item row '{row_name}' tidak ada di invoice {source_name}.")
+            src_qty = float(source_rows_by_name[row_name].qty or 0)
+            if qty > src_qty:
+                frappe.throw(
+                    f"Move qty {qty} > qty source ({src_qty}) untuk row {row_name}."
+                )
+
+        remaining_total = sum(
+            float(it.qty or 0) - requested.get(it.name, 0)
+            for it in source.get("items", [])
+        )
+        if remaining_total <= 0:
+            frappe.throw(
+                "Move akan mengosongkan invoice sumber. Pakai 'Gabung Meja' kalau "
+                "memang mau pindahkan semua item."
+            )
+
+        kept_source_items = []
+        for it in source.get("items", []):
+            move_qty = requested.get(it.name)
+            src_qty = float(it.qty or 0)
+
+            if move_qty:
+                fields = it.meta.get_fieldnames_with_value()
+                row = {f: it.get(f) for f in fields if f not in self.SKIP_FIELDS}
+                row["qty"] = move_qty
+                target.append("items", row)
+
+                remaining = src_qty - move_qty
+                if remaining > 0:
+                    it.qty = remaining
+                    kept_source_items.append(it)
+            else:
+                kept_source_items.append(it)
+
+        source.set("items", kept_source_items)
+
+        for tax in target.get("taxes", []):
+            if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
+                tax.row_id = None
+        for tax in source.get("taxes", []):
+            if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
+                tax.row_id = None
+
+        target.save()
+        source.save()
+        frappe.db.commit()
+        return {"ok": True, "source": source_name, "target": target_name}
+
     def move_items_from_invoice(self, source_name, target_name):
         source = self.repo.get_invoice(source_name)
         target = self.repo.get_invoice(target_name)

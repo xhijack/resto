@@ -175,9 +175,33 @@ def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
 # TODO: send_to_ks_printing — pindahkan ke PrintingService jika KS Printing doctype diaktifkan
 # def send_to_ks_printing(kitchen_station, pos_invoice, items): ...
 
+@frappe.whitelist()
 def print_to_ks_now(pos_invoice):
     from resto.services.kitchen_service import KitchenService
     KitchenService().print_to_ks_now(pos_invoice)
+
+
+@frappe.whitelist()
+def reprint_kitchen_tickets(pos_invoice, item_row_names=None):
+    """
+    Reprint kitchen ticket(s). Pakai untuk scenario printer offline / kertas habis:
+    1. Tanpa item_row_names → reprint semua item yang is_print_kitchen=0 (failed/pending)
+    2. Dengan item_row_names → reset flag + reprint item-item tersebut (force reprint)
+    """
+    from resto.services.kitchen_service import KitchenService
+
+    if item_row_names:
+        if isinstance(item_row_names, str):
+            try:
+                item_row_names = json.loads(item_row_names)
+            except Exception:
+                frappe.throw("item_row_names harus JSON list valid.")
+        for name in item_row_names:
+            frappe.db.set_value("POS Invoice Item", name, "is_print_kitchen", 0)
+        frappe.db.commit()
+
+    KitchenService().print_to_ks_now(pos_invoice)
+    return {"ok": True}
 
 @frappe.whitelist()
 def get_branch_menu_for_kitchen_printing(pos_name: str):
@@ -443,6 +467,24 @@ def split_table(source_table, source_invoice, items, target_table):
 def move_items_from_invoice(source_invoice_name, target_invoice_name):
     from resto.services.invoice_service import InvoiceService
     InvoiceService().move_items_from_invoice(source_invoice_name, target_invoice_name)
+
+
+@frappe.whitelist()
+def move_invoice_items(source_invoice, target_invoice, items):
+    """Pindah subset item dari source invoice ke target invoice yang sudah ada
+    (mis. customer A join meja yang ada invoice B → merge items partial).
+    items: JSON string atau list of {"item_row_name": str, "qty": number}."""
+    if isinstance(items, str):
+        try:
+            items = json.loads(items)
+        except Exception:
+            frappe.throw("items harus JSON list valid.")
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().move_invoice_items(
+        source_name=source_invoice,
+        target_name=target_invoice,
+        items=items,
+    )
 
 
 @frappe.whitelist()
