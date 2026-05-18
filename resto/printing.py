@@ -2185,7 +2185,8 @@ def print_shift_report(closing_name, printer_name=None):
     lines.append(format_lr("Total Amount", fmt_amt(void_amount or 0)))
 
     text = "\n".join(lines)
-    esc_commads = _esc_feed(3) + _esc_cut_full()
+    # feed(8) before cut: shorter feeds leave last lines above the blade (cutter sits ~12-15mm above print head).
+    esc_commads = _esc_feed(8) + _esc_cut_full()
     out = text.encode("ascii", "ignore") + esc_commads
 
     # --- Cetak dengan CUPS ---
@@ -2494,7 +2495,8 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
         print("\n".join(lines))
         return text
 
-    esc_commads = _esc_feed(3) + _esc_cut_full()
+    # feed(8) before cut: shorter feeds leave "END OF REPORT" above the blade.
+    esc_commads = _esc_feed(8) + _esc_cut_full()
     out = text.encode("ascii", "ignore") + esc_commads
 
     # =========================
