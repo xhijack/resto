@@ -311,7 +311,20 @@ class InvoiceService:
                 "memang mau pindahkan semua item."
             )
 
-        # Build new invoice — copy header source.
+        # Subtotal proporsi untuk distribusi diskon absolut (Actual tax row
+        # description="Discount"). Hitung sebelum mutasi items.
+        split_subtotal = 0.0
+        source_subtotal = 0.0
+        for it in source.get("items", []):
+            rate = float(it.get("rate") or 0)
+            src_qty = float(it.qty or 0)
+            source_subtotal += rate * src_qty
+            split_qty = requested.get(it.name)
+            if split_qty:
+                split_subtotal += rate * float(split_qty)
+        share = (split_subtotal / source_subtotal) if source_subtotal > 0 else 0
+
+        # Build new invoice — copy header source termasuk discount metadata.
         new_invoice = frappe.get_doc({
             "doctype": "POS Invoice",
             "customer": source.customer,
@@ -320,18 +333,26 @@ class InvoiceService:
             "branch": getattr(source, "branch", None),
             "company": source.company,
             "taxes_and_charges": getattr(source, "taxes_and_charges", None),
-            "apply_discount_on": "Net Total",
+            "apply_discount_on": getattr(source, "apply_discount_on", None) or "Net Total",
+            "discount_name": getattr(source, "discount_name", None) or "",
+            "discount_for_bank": getattr(source, "discount_for_bank", None) or "",
             "ordered_by": frappe.session.user,
             "items": [],
         })
 
-        # Copy tax template rows (charge_type, account_head, rate).
+        # Copy tax rows. Untuk row "Discount" Actual (absolut): scale tax_amount
+        # by share. Untuk "On Net Total" (%): biarkan rate apa adanya — %
+        # invariant terhadap subtotal.
         for tax in source.get("taxes", []):
+            tax_amount = 0
+            if (tax.description or "").lower() == "discount" and tax.charge_type == "Actual":
+                src_amt = float(tax.tax_amount or 0)
+                tax_amount = round(src_amt * share, 2)
             new_invoice.append("taxes", {
                 "charge_type": tax.charge_type,
                 "account_head": tax.account_head,
                 "rate": tax.rate,
-                "tax_amount": 0,
+                "tax_amount": tax_amount,
                 "description": tax.description,
             })
 
@@ -356,6 +377,15 @@ class InvoiceService:
                 kept_source_items.append(it)
 
         source.set("items", kept_source_items)
+
+        # Scale source's Actual "Discount" tax_amount by (1 - share) supaya
+        # total nominal diskon kedua invoice tetap sama dengan source asli.
+        # Untuk % "On Net Total" Discount row: biarkan — rate invariant.
+        remaining_share = 1 - share
+        for tax in source.get("taxes", []):
+            if (tax.description or "").lower() == "discount" and tax.charge_type == "Actual":
+                src_amt = float(tax.tax_amount or 0)
+                tax.tax_amount = round(src_amt * remaining_share, 2)
 
         # Clear row_id pada tax rows yang bukan referencing (sama trick di
         # move_items_from_invoice untuk hindari ValidationError dari template).
