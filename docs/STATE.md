@@ -27,7 +27,7 @@ Stabilisasi printing & end-day flow. Belum ada feature baru aktif.
 - `d215b3c` 2026-05-18 fix(printing): pre-cut feed 3→8 di shift & end-day report
 
 ## Last Update
-2026-05-20 by ramdani (token-efficient workflow + area→file mapping di CLAUDE.md & ONBOARDING) — SHA pending commit ini
+2026-05-20 by ramdani (starter prompts template A-G di ONBOARDING.md) — SHA pending commit ini
 
 ## Pointers
 - New here? → baca `CLAUDE.md` + `PRD.md` (sistem lengkap)

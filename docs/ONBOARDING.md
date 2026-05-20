@@ -88,6 +88,83 @@ Jangan baca PRD kecuali saya minta.
 
 Selain itu, **STATE.md + 1 context file sudah cukup**.
 
+---
+
+## Recommended Claude Code Prompts (Copy-Paste Ready)
+
+Setelah `git pull`, buka Claude Code di folder repo ini. CLAUDE.md auto-load. Pilih template prompt sesuai use case:
+
+### A. Dev baru pertama kali — onboarding (one-time ~28K token)
+```
+Saya dev baru di project Sopwer Resto backend. Tolong onboard saya:
+baca docs/ONBOARDING.md dan ikuti Day 1 reading list.
+Setelah baca, summarize highlight yang paling penting untuk
+saya tahu sebelum mulai kerja.
+```
+
+### B. Resume kerja kemarin (~3K token, paling sering dipakai)
+```
+Saya lanjut kerja kemarin. Baca docs/STATE.md, lihat current
+focus dan in-progress. Apa yang harus saya kerjakan?
+```
+
+### C. Hotfix bug spesifik (~5-8K token)
+```
+Saya fix bug di [AREA]. User lapor: [GEJALA].
+Baca docs/STATE.md dan docs/context/[TOPIC].md saja.
+Jangan baca PRD kecuali saya minta.
+```
+
+Contoh nyata:
+```
+Saya fix bug di payment flow. User lapor saat split payment Cash+QRIS,
+total_paid valid tapi backend reject dengan "Pembayaran Belum Lunas".
+Baca docs/STATE.md dan docs/context/payment-flow.md. Jangan baca PRD.
+```
+
+```
+Saya fix bug di kitchen routing. Tiket dapur tidak nge-print untuk
+station "Cold Kitchen". Baca docs/STATE.md dan docs/context/kitchen-flow.md.
+Jangan baca PRD.
+```
+
+### D. Improve fitur existing (~7-10K token)
+```
+Saya mau improve fitur [FITUR] di [FILE] — [TUJUAN].
+Baca docs/STATE.md, docs/context/[TOPIC].md, dan source file relevan.
+Setelah itu propose pendekatan tanpa nulis kode dulu.
+```
+
+### E. Ubah endpoint yang dipakai mobile (cross-repo, ~10K token)
+```
+Saya akan ubah signature endpoint `pay_invoice` (tambah field X).
+Baca docs/context/cross-repo.md, beri tau mobile hook/screen mana yang
+terdampak, dan checklist apa yang harus update di mobile sebelum deploy.
+```
+
+### F. Investigate bug yang belum jelas root cause (~10-15K token)
+```
+User lapor: [GEJALA]. Belum jelas root cause di service/repo mana.
+Baca docs/STATE.md dan docs/context/<topic>.md yang paling mungkin terkait.
+Spawn 1 Explore agent untuk trace flow, jangan langsung patch.
+```
+
+### G. Investigate cross-repo (mobile lapor backend salah, atau sebaliknya)
+```
+User lapor di mobile: [GEJALA]. Mungkin backend bug atau mobile bug.
+Baca docs/STATE.md, docs/context/cross-repo.md, dan area paling mungkin
+terkait. Saya butuh verdict: mobile-side, backend-side, atau keduanya.
+```
+
+## Anti-Pattern Prompts (boros token, HINDARI)
+
+- ❌ `"Kenalin saya project ini"` — Claude akan baca semua = 50K+ token
+- ❌ `"Apa yang ada di repo ini?"` — terlalu generic
+- ❌ `"Tolong baca semua dokumentasi"` — eksplisit minta over-read
+- ❌ `"Saya mau audit kode"` tanpa scope — bisa baca seluruh repo
+
+✅ **Selalu spesifik**: area kerja, file/folder yang dimaksud, dan "jangan baca X" kalau perlu.
+
 ## Top 5 Common Pitfalls — JANGAN dilakukan
 
 1. **Partial payment** — `pay_invoice` reject kalau `total_paid < grand_total`. Atomic full-pay only. Detail: [`docs/context/payment-flow.md`](context/payment-flow.md).
