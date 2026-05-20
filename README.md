@@ -11,6 +11,8 @@ ERPNext custom app — Point of Sale untuk restoran multi-outlet di Indonesia. W
 - [`docs/STATE.md`](docs/STATE.md) — current sprint progress, in-progress tasks, blockers
 - [`CLAUDE.md`](CLAUDE.md) — short repo-level guide untuk Claude / AI assistants
 
+**Dev baru**: mulai dari [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — checklist 2-3 hari sampai produktif, urutan baca, common pitfalls.
+
 **Onboarding & deep dive**:
 - [`docs/PRD.md`](docs/PRD.md) — Product Requirements Document (15 section: roles, domain model, workflows, DocType catalog, 49 endpoint catalog, services, business rules invariants)
 - [`docs/context/architecture.md`](docs/context/architecture.md) — services + repositories + events detail

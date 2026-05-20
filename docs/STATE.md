@@ -22,11 +22,12 @@ Stabilisasi printing & end-day flow. Belum ada feature baru aktif.
 - Tidak ada saat ini
 
 ## Recent Changes (latest 3)
+- `ead19e6` 2026-05-20 docs(readme): rewrite as authoritative landing
+- `c228d72` 2026-05-20 docs: add PRD + system context docs (Phase 1)
 - `d215b3c` 2026-05-18 fix(printing): pre-cut feed 3→8 di shift & end-day report
-- _(older commits di `git log`)_
 
 ## Last Update
-2026-05-20 by ramdani (auto via Claude docs migration) — SHA pending commit ini
+2026-05-20 by ramdani (Phase 4 docs: ONBOARDING + PR template) — SHA pending commit ini
 
 ## Pointers
 - New here? → baca `CLAUDE.md` + `PRD.md` (sistem lengkap)
