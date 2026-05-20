@@ -1,9 +1,13 @@
 # Onboarding — Resto Backend
 
 > Selamat datang. Ikuti urutan ini supaya dapat konteks penuh tanpa bikin
-> kesalahan umum. Total estimasi: 2-3 hari kerja sampai produktif.
+> kesalahan umum.
 
-## Day 1 — Sistem & Konteks (~3 jam)
+## ⚡ Sudah pernah onboard? Langsung Daily/Hotfix Workflow
+
+Skip ke [section Daily/Hotfix](#daily--hotfix-workflow-token-efficient) di bawah. Untuk use case hotfix + improve existing feature, butuh **~5-8K token per sesi** saja — bukan 28K untuk baca PRD lengkap.
+
+## 📚 Day 1 Onboarding — Sistem & Konteks (one-time, ~28K token, ~3 jam)
 
 **WAJIB baca berurutan**:
 1. [`README.md`](../README.md) — pointer + Contributing workflow
@@ -41,6 +45,48 @@ git push
 ```
 
 **Branch**: `version-2` (active dev branch). Jangan langsung commit ke `main`.
+
+---
+
+## Daily / Hotfix Workflow (Token-Efficient)
+
+**Dev sudah onboard, mau fix bug atau improve existing feature. Use case dominan.**
+
+### Per-sesi (~5-8K token, vs 28K full)
+
+```bash
+git pull
+cat docs/STATE.md       # ~0.7K — apa pending, blockers
+# CLAUDE.md auto-load oleh Claude Code (~2.5K)
+```
+
+Lalu identifikasi area kerja, baca 1 context file relevan saja:
+
+| Area kerja | File | Token |
+|---|---|---|
+| Payment bug | `docs/context/payment-flow.md` | ~4K |
+| Kitchen bug | `docs/context/kitchen-flow.md` | ~4K |
+| Print issue | `docs/context/printing.md` | ~3K |
+| Sales Report | `docs/context/reporting.md` | ~4K |
+| Table lock / race | `docs/context/architecture.md` (TableService) | ~5K |
+| Endpoint touch mobile | `docs/context/cross-repo.md` | ~3K |
+| Integration test | `docs/context/integration-tests.md` | ~4K |
+
+### Recommended starter prompt (Claude Code)
+
+```
+Saya fix bug [area] di [file:line atau description].
+Baca docs/STATE.md dan docs/context/[topic].md saja.
+Jangan baca PRD kecuali saya minta.
+```
+
+### When to escalate ke full PRD reload
+
+- Breaking change yang affect semua flow (rare)
+- Refactor besar lintas service
+- Diminta klien stakeholder explicit untuk audit sistem
+
+Selain itu, **STATE.md + 1 context file sudah cukup**.
 
 ## Top 5 Common Pitfalls — JANGAN dilakukan
 

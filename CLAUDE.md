@@ -1,5 +1,32 @@
 # ERPNext Resto Module — Architecture Reference
 
+## Token-Efficient Workflow (BACA DULU)
+
+**Untuk hotfix / improve existing feature (use case dominan)**:
+1. `cat docs/STATE.md` (~0.7K token) — current focus, blockers, recent changes
+2. Identifikasi area kerja dari tabel di bawah, baca 1 context file (~3-5K token)
+3. Total per sesi: **~5-8K token** (vs ~28K kalau baca PRD full)
+
+**Area kerja → file yang cukup dibaca**:
+| Area | File | Token |
+|---|---|---|
+| Payment bug / `pay_invoice` | `docs/context/payment-flow.md` | ~4K |
+| Kitchen routing / `send_to_kitchen` / status_kitchen | `docs/context/kitchen-flow.md` | ~4K |
+| Print issue (bill/receipt/kitchen/report) | `docs/context/printing.md` | ~3K |
+| Sales Report / `get_end_day_report_v2` | `docs/context/reporting.md` | ~4K |
+| Table lock / race condition | `docs/context/architecture.md` (TableService section) | ~5K |
+| Endpoint contract berubah (touches mobile) | `docs/context/cross-repo.md` | ~3K |
+| Integration test setup / site issue | `docs/context/integration-tests.md` | ~4K |
+| Services overview / new service | `docs/context/architecture.md` | ~5K |
+
+**JANGAN baca PRD lengkap (`docs/PRD.md` ~18K token) kecuali**:
+- Onboarding hari pertama (lihat `docs/ONBOARDING.md`)
+- Breaking change yang affect semua flow
+- Diminta user explicit
+
+**Untuk dev pakai Claude Code — recommended starter prompt**:
+> "Saya fix bug di [area]. Baca `docs/STATE.md` dan `docs/context/[topic].md` saja. Jangan baca PRD kecuali saya minta."
+
 ## Stack
 - Framework: Frappe/ERPNext (Python)
 - App name: `resto` | Title: "Resto Sopwer"
@@ -66,3 +93,4 @@ resto/
 - Baca file besar (printing.py 2418 baris) hanya dengan `offset+limit` sesuai fungsi target
 - Gunakan `Grep` untuk cari method/class sebelum baca file
 - Untuk gap analysis: `Grep "@frappe.whitelist"` di api.py, lalu bandingkan dengan existing tests
+- Hotfix workflow: lihat section "Token-Efficient Workflow" di atas — STATE.md + 1 context file biasanya cukup
