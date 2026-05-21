@@ -147,7 +147,7 @@
 
 <h2>Session Time</h2>
 <table>
-  <thead><tr><th>Session</th><th class="num">Pax</th><th class="num">Bill</th><th class="num">Amount</th><th class="num">Avg Pax</th><th class="num">Avg Bill</th></tr></thead>
+  <thead><tr><th>Session</th><th class="num">Pax</th><th class="num">Bill</th><th class="num">Amount</th><th class="num">Avg/Pax</th><th class="num">Avg/Bill</th></tr></thead>
   <tbody>
   {% for label, v in data.session_time.items() %}
     <tr>
@@ -155,7 +155,7 @@
       <td class="num">{{ v.pax }}</td>
       <td class="num">{{ v.bill }}</td>
       <td class="num">{{ fmt(v.amount) }}</td>
-      <td class="num">{{ v.avg_pax }}</td>
+      <td class="num">{{ fmt(v.avg_pax) }}</td>
       <td class="num">{{ fmt(v.avg_bill) }}</td>
     </tr>
   {% endfor %}

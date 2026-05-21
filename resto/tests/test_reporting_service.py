@@ -177,10 +177,62 @@ class TestGetEndDayReportV2(RestoPOSTestBase):
         required_keys = [
             "posting_date", "outlet_filter", "outlet", "summary",
             "dine_in", "take_away", "payments", "taxes",
-            "discount_by_order_type", "draft", "void_bill", "void_menu"
+            "discount_by_order_type", "discount_by_bank",
+            "draft", "void_bill", "void_menu"
         ]
         for key in required_keys:
             self.assertIn(key, result, f"Key '{key}' tidak ada di response v2")
+
+    def test_discount_v2_keyed_by_order_type_and_bank(self):
+        """discount_by_order_type harus keyed by 'Dine In'/'Take Away'.
+        discount_by_bank harus grouped by bank dengan list of {discount_name,
+        total_bill, total_amount}. Total dijumlah lintas (order_type,name) untuk
+        bank yang sama supaya tidak double-count saat row di-split SQL.
+        """
+        self.mock_repo.get_paid_invoices.return_value = [MagicMock(name="INV-001")]
+        self.mock_repo.get_draft_invoices.return_value = []
+        self.mock_repo.get_sub_total_v2.return_value = 0
+        self.mock_repo.get_discount_total_v2.return_value = 0
+        self.mock_repo.get_tax_total_v2.return_value = 0
+        self.mock_repo.get_pax_total.return_value = 0
+        self.mock_repo.get_items_by_order_type_v2.return_value = []
+        self.mock_repo.get_payments_summary_v2.return_value = []
+        self.mock_repo.get_taxes_summary_v2.return_value = []
+        self.mock_repo.get_void_bills_v2.return_value = []
+        self.mock_repo.get_void_invoices_with_items.return_value = []
+
+        def row(order_type, bank, name, bill, amount):
+            r = MagicMock()
+            r.order_type = order_type
+            r.discount_for_bank = bank
+            r.discount_name = name
+            r.total_bill = bill
+            r.total_amount = amount
+            return r
+
+        # 2 Dine In rows + 1 Take Away row, dengan 1 (bank,name) muncul di
+        # kedua order_type — service harus aggregate per bucket.
+        self.mock_repo.get_discount_by_order_type_v2.return_value = [
+            row("Dine In", "Mandiri", "Promo A", 3, -30000),
+            row("Dine In", "BCA", "Promo B", 1, -5000),
+            row("Take Away", "Mandiri", "Promo A", 2, -20000),
+        ]
+
+        result = self.service.get_end_day_report_v2(posting_date="2025-01-01", outlet="BR-001")
+
+        self.assertEqual(result["discount_by_order_type"]["Dine In"]["total_bill"], 4)
+        self.assertEqual(result["discount_by_order_type"]["Dine In"]["total_amount"], 35000)
+        self.assertEqual(result["discount_by_order_type"]["Take Away"]["total_bill"], 2)
+        self.assertEqual(result["discount_by_order_type"]["Take Away"]["total_amount"], 20000)
+
+        # Bank Mandiri punya 1 discount_name ("Promo A") yang muncul di Dine In
+        # & Take Away → harus aggregate jadi 1 entry dengan total digabung.
+        mandiri = result["discount_by_bank"]["Mandiri"]
+        self.assertEqual(len(mandiri), 1)
+        self.assertEqual(mandiri[0]["discount_name"], "Promo A")
+        self.assertEqual(mandiri[0]["total_bill"], 5)
+        self.assertEqual(mandiri[0]["total_amount"], 50000)
+        self.assertEqual(result["discount_by_bank"]["BCA"][0]["total_amount"], 5000)
 
 
 class TestEndShift(RestoPOSTestBase):

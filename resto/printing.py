@@ -2255,6 +2255,7 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
     payments = report_data.get("payments", {})
     taxes = report_data.get("taxes", {})
     discount_by_order_type = report_data.get("discount_by_order_type", {})
+    discount_by_bank = report_data.get("discount_by_bank", {})
     draft = report_data.get("draft", {})
     void_bill = report_data.get("void_bill", {})
     void_menu = report_data.get("void_menu", {})
@@ -2340,11 +2341,11 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
         lines.append(format_lr("Discount", f"-{fmt_amt(discount)}"))
 
     # =========================
-    # TAXES (ONLY SKIP ZERO DISCOUNT)
+    # TAXES (skip Discount — sudah di-render di line "Discount" via summary.discount)
     # =========================
     for tax_name, amt in taxes.items():
 
-        if "discount" in tax_name.lower() and (amt is None or amt == 0):
+        if "discount" in tax_name.lower():
             continue
 
         if amt is None or amt == 0:
@@ -2373,18 +2374,23 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
     # DISCOUNT SUMMARY
     # =========================
 
-    if discount_by_order_type:
+    # discount_by_order_type sekarang keyed by 'Dine In' / 'Take Away'
+    # (semantic v1, dipulihkan untuk mobile). Detail per bank/discount_name
+    # pindah ke `discount_by_bank` — pakai itu di section ini supaya granularitas
+    # bank tetap kelihatan di slip cetak.
+    if discount_by_bank:
 
         lines.append("DISCOUNT")
         lines.append(line())
 
-        for name, val in discount_by_order_type.items():
-            qty = val["total_bill"]
-            amt = val["total_amount"]
-
-            lines.append(
-                format_lr(f"{name} ({qty})", f"-{fmt_amt(amt)}")
-            )
+        for bank, items in discount_by_bank.items():
+            lines.append(bank)
+            for d in items:
+                qty = d["total_bill"]
+                amt = d["total_amount"]
+                lines.append(
+                    format_lr(f"  {d['discount_name']} ({qty})", f"-{fmt_amt(amt)}")
+                )
 
         lines.append("")
     
@@ -2462,8 +2468,8 @@ def print_end_day_report_v2(report_data, printer_name=None, debug=False):
             lines.append(label)
             lines.append(format_lr("Pax", val.get("pax", 0)))
             lines.append(format_lr("Bill", val.get("bill", 0)))
-            lines.append(format_lr("Avg Pax", val.get("avg_pax", 0)))
-            lines.append(format_lr("Avg Bill", fmt_amt(val.get("avg_bill", 0))))
+            lines.append(format_lr("Avg/Pax", fmt_amt(val.get("avg_pax", 0))))
+            lines.append(format_lr("Avg/Bill", fmt_amt(val.get("avg_bill", 0))))
             lines.append("")
 
     # =========================

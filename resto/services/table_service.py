@@ -445,6 +445,10 @@ class TableService:
             self.repo.save_table(tgt_doc)
             self.repo.save_table(src_doc)
 
+            # Sinkronkan POS Invoice.table ke target (lihat catatan di move_table).
+            for invoice_name in invoice_list:
+                frappe.db.set_value("POS Invoice", invoice_name, "table", tgt)
+
         self._print_move_slips(pair_payloads)
 
         return {
@@ -604,6 +608,13 @@ class TableService:
 
         self.repo.save_table(tgt_doc)
         self.repo.save_table(src_doc)
+
+        # POS Invoice.table = source of truth untuk paid listing
+        # (invoice_repository.list_paid_invoices*) dan cancel flow
+        # (invoice_service.cancel_invoice). Kalau cuma Table.orders yang
+        # dipindah tanpa update field ini, invoice masih nunjuk ke meja lama.
+        for invoice_name in invoice_list:
+            frappe.db.set_value("POS Invoice", invoice_name, "table", target_table)
 
         # Realtime push: 2 meja state-nya berubah. Reuse event `table_meta_updated`
         # supaya mobile useTableRealtime langsung refresh tanpa polling.

@@ -155,13 +155,37 @@ class ReportingService:
             for t in self.repo.get_taxes_summary_v2(paid_invoice_names)
         }
 
-        discount_order_type = {
-            f"{d.discount_for_bank or ''} {d.discount_name or 'No Name'}": {
-                "total_bill": int(d.total_bill),
-                "total_amount": abs(flt(d.total_amount))
-            }
-            for d in self.repo.get_discount_by_order_type_v2(paid_invoice_names)
-        }
+        # Repository sekarang return rows ber-granularitas (order_type, bank, name).
+        # Service derive dua view tanpa query ulang:
+        #   - discount_order_type: keyed by order_type — dipakai mobile untuk
+        #     subtotal "Discount" per Dine In / Take Away.
+        #   - discount_by_bank: dict bank → list of {discount_name, total_bill,
+        #     total_amount} — dipakai mobile section DISCOUNT (bottom) dan print
+        #     template DISCOUNT SUMMARY.
+        discount_rows = self.repo.get_discount_by_order_type_v2(paid_invoice_names)
+
+        discount_order_type = {}
+        for d in discount_rows:
+            key = d.order_type or "Unknown"
+            bucket = discount_order_type.setdefault(key, {"total_bill": 0, "total_amount": 0})
+            bucket["total_bill"] += int(d.total_bill or 0)
+            bucket["total_amount"] += abs(flt(d.total_amount))
+
+        discount_by_bank = {}
+        for d in discount_rows:
+            bank = d.discount_for_bank or "Tanpa Bank"
+            name = d.discount_name or "No Name"
+            bucket = discount_by_bank.setdefault(bank, [])
+            existing = next((e for e in bucket if e["discount_name"] == name), None)
+            if existing:
+                existing["total_bill"] += int(d.total_bill or 0)
+                existing["total_amount"] += abs(flt(d.total_amount))
+            else:
+                bucket.append({
+                    "discount_name": name,
+                    "total_bill": int(d.total_bill or 0),
+                    "total_amount": abs(flt(d.total_amount)),
+                })
 
         draft_summary = {
             "total_bill": len(draft_invoices),
@@ -216,7 +240,7 @@ class ReportingService:
                 "pax": int(pax),
                 "bill": int(bills),
                 "amount": flt(amount_t),
-                "avg_pax": round(pax / bills, 2) if bills else 0,
+                "avg_pax": round(amount_t / pax, 2) if pax else 0,
                 "avg_bill": round(amount_t / bills, 2) if bills else 0,
             }
 
@@ -230,6 +254,7 @@ class ReportingService:
             "payments": payment_summary,
             "taxes": tax_summary,
             "discount_by_order_type": discount_order_type,
+            "discount_by_bank": discount_by_bank,
             "draft": draft_summary,
             "void_bill": void_bill_summary,
             "void_menu": void_summary,

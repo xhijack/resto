@@ -961,7 +961,7 @@ class TestTableService(RestoPOSTestBase):
         with patch(
             "resto.services.table_service.frappe.get_all",
             return_value=["TBL-001", "TBL-002"],
-        ):
+        ), patch("resto.services.table_service.frappe.db.set_value") as mock_set:
             result = self.service.move_merged_group("TBL-001", ["TBL-NEW1", "TBL-NEW2"])
 
         self.assertTrue(result["ok"])
@@ -974,6 +974,9 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(tgt2.status, "Terisi")
         # 4 saves total (2 pair × 2)
         self.assertEqual(self.mock_repo.save_table.call_count, 4)
+        # POS Invoice.table di-sync ke target masing-masing pair (src1→tgt1, src2→tgt2)
+        mock_set.assert_any_call("POS Invoice", "INV-X", "table", "TBL-NEW1")
+        mock_set.assert_any_call("POS Invoice", "INV-X", "table", "TBL-NEW2")
 
     def test_merge_table_multiple_targets_move_items_called_per_order(self):
         """2 target tables, masing-masing punya 1 order → move_items dipanggil 2x"""
@@ -1066,7 +1069,8 @@ class TestTableService(RestoPOSTestBase):
         self.mock_repo.get_table.side_effect = lambda n: src if n == "TBL-001" else tgt
 
         with self._stub_print_service(), \
-             patch("resto.services.table_service.frappe.publish_realtime"):
+             patch("resto.services.table_service.frappe.publish_realtime"), \
+             patch("resto.services.table_service.frappe.db.set_value") as mock_set:
             result = self.service.move_table("TBL-001", "TBL-NEW")
 
         self.assertTrue(result["ok"])
@@ -1083,6 +1087,8 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(src.customer, "")
         # save sekali untuk masing-masing
         self.assertEqual(self.mock_repo.save_table.call_count, 2)
+        # POS Invoice.table harus ikut di-update ke target
+        mock_set.assert_any_call("POS Invoice", "INV-X", "table", "TBL-NEW")
 
     def test_move_table_calls_print_enqueue_with_pair_payload(self):
         """move_table harus panggil enqueue_move_table_slip 1x dengan

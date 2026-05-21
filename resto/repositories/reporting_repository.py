@@ -177,17 +177,27 @@ class ReportingRepository:
         """, {"inv": tuple(invoice_names)})[0][0] or 0
 
     def get_discount_total_v2(self, invoice_names):
+        # Discount di app ini disimpan sebagai row Sales Taxes and Charges dengan
+        # tax_amount negatif (lihat invoice_service.apply_discount), BUKAN di field
+        # pi.discount_amount. Sumber sebelumnya selalu 0 karena field itu tidak
+        # pernah di-set. Pakai abs dari negative tax rows konsisten dengan
+        # discount_by_bank / discount_by_order_type.
         return frappe.db.sql("""
-            SELECT SUM(discount_amount)
-            FROM `tabPOS Invoice`
-            WHERE name IN %(inv)s
+            SELECT SUM(ABS(tax_amount))
+            FROM `tabSales Taxes and Charges`
+            WHERE parent IN %(inv)s
+              AND tax_amount < 0
         """, {"inv": tuple(invoice_names)})[0][0] or 0
 
     def get_tax_total_v2(self, invoice_names):
+        # Eksklusif discount rows (negatif). Discount sudah dihitung terpisah
+        # di get_discount_total_v2; kalau di-include di sini, grand_total
+        # = sub_total + tax - discount akan double-subtract.
         return frappe.db.sql("""
             SELECT SUM(tax_amount)
             FROM `tabSales Taxes and Charges`
             WHERE parent IN %(inv)s
+              AND tax_amount > 0
         """, {"inv": tuple(invoice_names)})[0][0] or 0
 
     def get_pax_total(self, invoice_names):
@@ -225,15 +235,19 @@ class ReportingRepository:
         """, {"inv": tuple(invoice_names)}, as_dict=True)
 
     def get_discount_by_order_type_v2(self, invoice_names):
+        # Tambah `pi.order_type` ke SELECT/GROUP BY supaya service bisa derive
+        # dua view sekaligus tanpa query ulang:
+        #   - dict keyed by order_type (Dine In / Take Away) untuk subtotal row
+        #   - dict grouped by bank untuk DISCOUNT detail di mobile bottom section
         return frappe.db.sql("""
-            SELECT pi.discount_for_bank, pi.discount_name,
+            SELECT pi.order_type, pi.discount_for_bank, pi.discount_name,
                    COUNT(DISTINCT pi.name) total_bill,
                    SUM(stc.tax_amount) total_amount
             FROM `tabSales Taxes and Charges` stc
             JOIN `tabPOS Invoice` pi ON pi.name = stc.parent
             WHERE pi.name IN %(inv)s
               AND stc.tax_amount < 0
-            GROUP BY pi.discount_for_bank, pi.discount_name
+            GROUP BY pi.order_type, pi.discount_for_bank, pi.discount_name
         """, {"inv": tuple(invoice_names)}, as_dict=True)
 
     def get_void_bills_v2(self, posting_date, outlet_filter):
