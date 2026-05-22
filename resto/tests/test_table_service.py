@@ -331,6 +331,41 @@ class TestTableService(RestoPOSTestBase):
         with self.assertRaises(frappe.ValidationError):
             self.service.update_table_meta("")
 
+    def test_update_table_meta_sets_order_created_by_when_db_empty(self):
+        """First send_to_kitchen: field DB masih kosong → set ke value payload."""
+        doc = self._make_table_doc(status="Has Taken")
+        doc.order_created_by = ""
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta(
+            "TBL-001", status="Terisi", order_created_by="creator@x.com"
+        )
+
+        self.assertEqual(doc.order_created_by, "creator@x.com")
+
+    def test_update_table_meta_preserves_order_created_by_when_already_set(self):
+        """Immutability: call ulang dari send_to_kitchen (add item ke meja Terisi)
+        tidak boleh overwrite field yang sudah ada — audit trail tetap original creator."""
+        doc = self._make_table_doc(status="Terisi")
+        doc.order_created_by = "first-creator@x.com"
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta(
+            "TBL-001", status="Terisi", order_created_by="second-user@x.com"
+        )
+
+        self.assertEqual(doc.order_created_by, "first-creator@x.com")
+
+    def test_update_table_meta_kosong_clears_order_created_by(self):
+        """Reset ke Kosong → clear order_created_by (audit trail di-reset)."""
+        doc = self._make_table_doc(status="Terisi")
+        doc.order_created_by = "creator@x.com"
+        self.mock_repo.get_table_for_update.return_value = doc
+
+        self.service.update_table_meta("TBL-001", status="Kosong")
+
+        self.assertEqual(doc.order_created_by, "")
+
     # ------------------------------------------------------------------
     # Unit tests — Realtime publish (Paket 2 Stage A)
     # ------------------------------------------------------------------
@@ -508,11 +543,15 @@ class TestTableService(RestoPOSTestBase):
             "name": "TBL-001", "table_name": "Meja 1", "status": "Terisi",
             "table_type": "Regular", "zone": "A", "customer": "Budi",
             "pax": 2, "type_customer": "Walk In", "floor": "1",
-            "taken_by": "john@example.com", "checked": 0
+            "taken_by": "john@example.com",
+            "order_created_by": "creator@example.com", "checked": 0
         })
         self.mock_repo.get_all_tables.return_value = [table_row]
         self.mock_repo.get_table.return_value = mock_doc
-        self.mock_repo.get_user_full_names.return_value = {"john@example.com": "John Doe"}
+        self.mock_repo.get_user_full_names.return_value = {
+            "john@example.com": "John Doe",
+            "creator@example.com": "Original Creator",
+        }
 
         result = self.service.get_all_tables_with_details()
 
@@ -524,6 +563,8 @@ class TestTableService(RestoPOSTestBase):
         self.assertEqual(item["orders"], [{"invoice_name": "INV-001"}])
         self.assertEqual(item["takenBy"], "john@example.com")
         self.assertEqual(item["takenByName"], "John Doe")
+        self.assertEqual(item["orderCreatedBy"], "creator@example.com")
+        self.assertEqual(item["orderCreatedByName"], "Original Creator")
 
     def test_get_all_tables_defaults_status_to_kosong(self):
         """Status None harus default ke 'Kosong'"""

@@ -36,7 +36,8 @@ class TableRepository:
             "Table",
             fields=[
                 "name", "table_name", "status", "table_type", "zone",
-                "customer", "pax", "type_customer", "floor", "taken_by", "checked",
+                "customer", "pax", "type_customer", "floor",
+                "taken_by", "order_created_by", "checked",
             ],
             order_by="table_name asc"
         )

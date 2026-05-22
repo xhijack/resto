@@ -160,11 +160,13 @@ def enqueue_checker_after_kitchen(pos_name: str, branch: str):
     return PrintingService().enqueue_checker_after_kitchen(pos_name, branch)
 
 @frappe.whitelist()
-def send_to_kitchen(payload, table_name=None, status=None, taken_by=None, pax=0,
+def send_to_kitchen(payload, table_name=None, status=None, taken_by=None,
+                    order_created_by=None, pax=0,
                     customer=None, type_customer=None, orders=None, checked=None):
     from resto.services.kitchen_service import KitchenService
     return KitchenService().send_to_kitchen(
         payload=payload, table_name=table_name, status=status, taken_by=taken_by,
+        order_created_by=order_created_by,
         pax=pax, customer=customer, type_customer=type_customer,
         orders=orders, checked=checked
     )

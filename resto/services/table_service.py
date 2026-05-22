@@ -39,6 +39,7 @@ class TableService:
         if status == "Kosong":
             doc.status = "Kosong"
             doc.taken_by = ""
+            doc.order_created_by = ""
             doc.pax = 0
             doc.customer = ""
             doc.type_customer = ""
@@ -100,6 +101,7 @@ class TableService:
                 "customer": doc.customer,
                 "type_customer": doc.type_customer,
                 "taken_by": doc.taken_by,
+                "order_created_by": doc.order_created_by,
             },
             room="website",
             after_commit=True,
@@ -197,7 +199,8 @@ class TableService:
         return {"success": True, "message": f"Order {invoice_name} dihapus dari Table {table_name}"}
 
     def update_table_meta(self, name, status=None, taken_by=None, pax=None,
-                          customer=None, type_customer=None, checked=None):
+                          customer=None, type_customer=None, checked=None,
+                          order_created_by=None):
         """Update field metadata Table TANPA menyentuh orders. Dipakai oleh
         send_to_kitchen pasca-refactor: orders di-update via add_table_order
         atomic, meta lain via method ini.
@@ -217,6 +220,7 @@ class TableService:
         if status == "Kosong":
             doc.status = "Kosong"
             doc.taken_by = ""
+            doc.order_created_by = ""
             doc.pax = 0
             doc.customer = ""
             doc.type_customer = ""
@@ -228,6 +232,11 @@ class TableService:
                 doc.status = status
             if taken_by is not None:
                 doc.taken_by = taken_by
+            # Immutable: hanya set kalau field di DB masih kosong (first order).
+            # Call ulang dari send_to_kitchen (add item ke meja yang sudah Terisi)
+            # tidak akan overwrite — preserve original creator.
+            if order_created_by is not None and not doc.order_created_by:
+                doc.order_created_by = order_created_by
             if pax is not None:
                 doc.pax = int(pax)
             if customer is not None:
@@ -247,6 +256,7 @@ class TableService:
                 "customer": doc.customer,
                 "type_customer": doc.type_customer,
                 "taken_by": doc.taken_by,
+                "order_created_by": doc.order_created_by,
             },
             room="website",
             after_commit=True,
@@ -262,6 +272,7 @@ class TableService:
         doc.orders = []
         doc.customer = None
         doc.taken_by = None
+        doc.order_created_by = None
         doc.status = "Kosong"
         doc.type_customer = None
         self.repo.save_table(doc)
@@ -281,6 +292,7 @@ class TableService:
             if not doc.orders:
                 doc.customer = None
                 doc.taken_by = None
+                doc.order_created_by = None
                 doc.status = "Kosong"
                 doc.type_customer = None
                 doc.flags.ignore_version = True
@@ -316,6 +328,7 @@ class TableService:
         src_state = {
             "status": source_doc.status,
             "taken_by": source_doc.taken_by or "",
+            "order_created_by": source_doc.order_created_by or "",
             "pax": int(source_doc.pax or 0),
             "customer": source_doc.customer or "",
             "type_customer": source_doc.type_customer or "",
@@ -336,6 +349,7 @@ class TableService:
             if target_orders:
                 target_table_doc.status = src_state["status"]
                 target_table_doc.taken_by = src_state["taken_by"]
+                target_table_doc.order_created_by = src_state["order_created_by"]
                 target_table_doc.pax = src_state["pax"]
                 target_table_doc.customer = src_state["customer"]
                 target_table_doc.type_customer = src_state["type_customer"]
@@ -425,6 +439,7 @@ class TableService:
 
             tgt_doc.status = src_doc.status
             tgt_doc.taken_by = src_doc.taken_by
+            tgt_doc.order_created_by = src_doc.order_created_by
             tgt_doc.pax = src_doc.pax
             tgt_doc.customer = src_doc.customer
             tgt_doc.type_customer = src_doc.type_customer
@@ -436,6 +451,7 @@ class TableService:
 
             src_doc.status = "Kosong"
             src_doc.taken_by = ""
+            src_doc.order_created_by = ""
             src_doc.pax = 0
             src_doc.customer = ""
             src_doc.type_customer = ""
@@ -512,6 +528,7 @@ class TableService:
         # yang trigger split).
         tgt_table_doc.status = src_table_doc.status or "Terisi"
         tgt_table_doc.taken_by = frappe.session.user
+        tgt_table_doc.order_created_by = src_table_doc.order_created_by or frappe.session.user
         tgt_table_doc.customer = src_table_doc.customer or ""
         tgt_table_doc.type_customer = src_table_doc.type_customer or ""
         tgt_table_doc.pax = 0
@@ -540,6 +557,7 @@ class TableService:
                 "customer": src_table_doc.customer,
                 "type_customer": src_table_doc.type_customer,
                 "taken_by": src_table_doc.taken_by,
+                "order_created_by": src_table_doc.order_created_by,
             },
             room="website",
             after_commit=True,
@@ -589,6 +607,7 @@ class TableService:
 
         tgt_doc.status = src_doc.status
         tgt_doc.taken_by = src_doc.taken_by
+        tgt_doc.order_created_by = src_doc.order_created_by
         tgt_doc.pax = src_doc.pax
         tgt_doc.customer = src_doc.customer
         tgt_doc.type_customer = src_doc.type_customer
@@ -600,6 +619,7 @@ class TableService:
 
         src_doc.status = "Kosong"
         src_doc.taken_by = ""
+        src_doc.order_created_by = ""
         src_doc.pax = 0
         src_doc.customer = ""
         src_doc.type_customer = ""
@@ -628,6 +648,7 @@ class TableService:
                     "customer": doc.customer,
                     "type_customer": doc.type_customer,
                     "taken_by": doc.taken_by,
+                    "order_created_by": doc.order_created_by,
                 },
                 room="website",
                 after_commit=True,
@@ -677,8 +698,13 @@ class TableService:
 
     def get_all_tables_with_details(self):
         tables = self.repo.get_all_tables()
-        taken_by_emails = [t.taken_by for t in tables if t.taken_by]
-        full_name_map = self.repo.get_user_full_names(taken_by_emails)
+        user_emails = []
+        for t in tables:
+            if t.taken_by:
+                user_emails.append(t.taken_by)
+            if t.order_created_by:
+                user_emails.append(t.order_created_by)
+        full_name_map = self.repo.get_user_full_names(user_emails)
 
         result = []
         for t in tables:
@@ -695,6 +721,8 @@ class TableService:
                 "floor": t.floor or "1",
                 "takenBy": t.taken_by or None,
                 "takenByName": full_name_map.get(t.taken_by) if t.taken_by else None,
+                "orderCreatedBy": t.order_created_by or None,
+                "orderCreatedByName": full_name_map.get(t.order_created_by) if t.order_created_by else None,
                 "checked": t.checked,
                 "orders": [{"invoice_name": o.invoice_name} for o in doc.orders],
             })

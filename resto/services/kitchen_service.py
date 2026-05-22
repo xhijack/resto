@@ -229,6 +229,7 @@ class KitchenService:
     # ------------------------------------------------------------------
 
     def send_to_kitchen(self, payload, table_name=None, status=None, taken_by=None,
+                        order_created_by=None,
                         pax=0, customer=None, type_customer=None, orders=None,
                         checked=None, invoice_service=None, table_service=None):
         if isinstance(payload, str):
@@ -273,6 +274,7 @@ class KitchenService:
                 name=table_name,
                 status=status or "Terisi",
                 taken_by=taken_by,
+                order_created_by=order_created_by,
                 pax=pax,
                 customer=customer,
                 type_customer=type_customer,
