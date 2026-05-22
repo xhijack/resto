@@ -1591,7 +1591,7 @@ def build_escpos_receipt(name: str) -> bytes:
     table_names = get_table_names_from_pos_invoice(data["name"])
     if table_names:
         out += _esc_bold(True)
-        out += (f"Table: {table_names}\n").encode("ascii", "ignore")
+        out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
         out += _esc_bold(False)
 
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
