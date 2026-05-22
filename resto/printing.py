@@ -2613,12 +2613,12 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
 
         # v1.2.18 Issue #3: tampilkan alasan void supaya kitchen/bar tahu kenapa
         # item di-batalkan. Format: "Alasan: <reason>" + optional "Catatan: <note>".
-        void_reason = it.get("void_reason") or ""
-        if void_reason:
-            out += (f"  Alasan : {void_reason}\n").encode("ascii", "ignore")
-        void_reason_note = it.get("void_reason_note") or ""
-        if void_reason_note:
-            out += (f"  Catatan: {void_reason_note}\n").encode("ascii", "ignore")
+        # void_reason = it.get("void_reason") or ""
+        # if void_reason:
+        #     out += (f"  Alasan : {void_reason}\n").encode("ascii", "ignore")
+        # void_reason_note = it.get("void_reason_note") or ""
+        # if void_reason_note:
+        #     out += (f"  Catatan: {void_reason_note}\n").encode("ascii", "ignore")
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += _esc_feed(5)
