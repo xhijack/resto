@@ -324,6 +324,7 @@ def _collect_pos_invoice(name: str) -> Dict[str, Any]:
         "payments": payments,
         "pos_profile": doc.get("pos_profile") or "",
         "doc": doc,  # original doc kalau mau ambil field lain
+        "table": doc.get("table") or ""
     }
 
 # ========== Formatter Teks ke Baris ==========
@@ -1524,6 +1525,7 @@ def build_escpos_receipt(name: str) -> bytes:
     queue_no = data.get("queue") or ""
     branch = data.get("branch") or ""
     branch_detail = data.get("branch_detail") or {}
+    table = data.get("table") or ""
 
     address1 = branch_detail.get("address_line1") or ""
     address2 = branch_detail.get("address_line2") or ""
@@ -1588,11 +1590,7 @@ def build_escpos_receipt(name: str) -> bytes:
     out += (f"Date : {print_time}\n").encode("ascii", "ignore")
 
     # Nama table
-    table_names = get_table_names_from_pos_invoice(data["name"])
-    if table_names:
-        out += _esc_bold(True)
-        out += (f"No Meja : {table_names}\n").encode("ascii", "ignore")
-        out += _esc_bold(False)
+    out += (f"Table : {table}\n").encode("ascii", "ignore")
 
     out += (f"Purpose : {order_type}\n").encode("ascii", "ignore")
     pax = get_total_pax_from_pos_invoice(data["name"])
