@@ -142,3 +142,32 @@ class TestVoucherItemsSetup(RestoPOSTestBase):
         )
         count = frappe.db.count("Voucher", {"sold_via_invoice": invoice.name})
         self.assertEqual(count, 1)
+
+    # ------------------------------------------------------------------
+    # Resto Menu auto-create (mobile catalog requirement)
+    # ------------------------------------------------------------------
+
+    def test_setup_creates_resto_menu_for_each_voucher_item(self):
+        self._run_setup()
+        for code in ALL_ITEMS:
+            self.assertTrue(
+                frappe.db.exists("Resto Menu", {"sell_item": code}),
+                f"Expected Resto Menu for sell_item={code}",
+            )
+
+    def test_voucher_resto_menu_links_to_voucher_item_group(self):
+        self._run_setup()
+        for code in ALL_ITEMS:
+            rm = frappe.db.get_value(
+                "Resto Menu",
+                {"sell_item": code},
+                "menu_category",
+            )
+            self.assertEqual(rm, VOUCHER_GROUP)
+
+    def test_voucher_resto_menu_setup_is_idempotent(self):
+        self._run_setup()
+        self._run_setup()
+        for code in ALL_ITEMS:
+            count = frappe.db.count("Resto Menu", {"sell_item": code})
+            self.assertEqual(count, 1, f"Duplicate Resto Menu for {code}")

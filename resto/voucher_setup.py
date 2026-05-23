@@ -142,11 +142,16 @@ def setup_voucher_items():
     """
     _ensure_item_group(VOUCHER_ITEM_GROUP, parent="All Item Groups")
     for sample in VOUCHER_SAMPLE_ITEMS:
-        _ensure_voucher_item(
+        item_code = _ensure_voucher_item(
             item_code=sample["code"],
             standard_rate=sample["rate"],
             item_group=VOUCHER_ITEM_GROUP,
             validity_days=DEFAULT_VOUCHER_VALIDITY_DAYS,
+        )
+        _ensure_voucher_resto_menu(
+            item_code=item_code,
+            title=sample["code"],
+            menu_category=VOUCHER_ITEM_GROUP,
         )
 
 
@@ -186,3 +191,60 @@ def _ensure_voucher_item(
         }
     ).insert(ignore_permissions=True)
     return item_code
+
+
+def _ensure_voucher_resto_menu(
+    item_code: str,
+    title: str,
+    menu_category: str,
+) -> str:
+    """Idempotent: create Resto Menu entry yang point ke voucher Item.
+
+    Mobile POS resto fetch katalog lewat Branch Menu → Resto Menu, bukan
+    Item langsung. Without Resto Menu entry, voucher Item tidak akan
+    pernah muncul di POS catalog meskipun Item-nya valid. Branch Menu
+    mapping per cabang tetap manual (admin decision per branch).
+
+    Site bisa punya custom mandatory field di Resto Menu (mis. brand,
+    custom_mandarin_name) yang ditambahkan via Customize Form. Function
+    ini defensive: deteksi mandatory field tambahan via meta + isi
+    fallback supaya tetap idempotent di berbagai site.
+    """
+    if frappe.db.exists("Resto Menu", {"sell_item": item_code}):
+        return frappe.db.get_value(
+            "Resto Menu", {"sell_item": item_code}, "name"
+        )
+    menu_code = item_code.replace(" ", "-").replace(".", "")
+    doc_data = {
+        "doctype": "Resto Menu",
+        "title": title,
+        "menu_code": menu_code,
+        "sell_item": item_code,
+        "menu_category": menu_category,
+        "enabled": 1,
+    }
+    _apply_extra_mandatory_defaults(doc_data, doctype="Resto Menu", title_hint=title)
+    return frappe.get_doc(doc_data).insert(ignore_permissions=True).name
+
+
+def _apply_extra_mandatory_defaults(doc_data: dict, doctype: str, title_hint: str) -> None:
+    """Set sensible fallback values untuk mandatory custom field yang
+    ditambahkan site lewat Customize Form. Tanpa ini, insert ditolak
+    MandatoryError di site yang punya field tambahan."""
+    meta = frappe.get_meta(doctype)
+    for field in meta.fields:
+        if not field.reqd:
+            continue
+        if field.fieldname in doc_data:
+            continue
+        if field.fieldtype == "Link" and field.options:
+            existing = frappe.db.get_value(field.options, {}, "name")
+            doc_data[field.fieldname] = existing or title_hint
+        elif field.fieldtype in {"Data", "Small Text", "Text", "Long Text"}:
+            doc_data[field.fieldname] = title_hint
+        elif field.fieldtype in {"Int", "Float", "Currency"}:
+            doc_data[field.fieldname] = 0
+        elif field.fieldtype == "Check":
+            doc_data[field.fieldname] = 0
+        else:
+            doc_data[field.fieldname] = title_hint

@@ -543,6 +543,107 @@ def clear_table(table_name):
 
 
 @frappe.whitelist()
+def create_direct_sale_invoice(payload, payments):
+    """Direct Sale Mode: jual item non-kitchen (voucher) tanpa send_to_kitchen.
+
+    Phase 1 enforcement: cart voucher-only — semua item harus
+    is_voucher_item=1. Mixed cart (voucher + makanan) ditolak; user pakai
+    Order Menu flow yang sudah ada untuk makanan.
+
+    Args:
+        payload (JSON str): {customer, pos_profile, branch, items[]}
+        payments (JSON str): [{mode_of_payment, amount}, ...]
+
+    Returns:
+        {invoice_name, status, change_amount}
+    """
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if isinstance(payments, str):
+        payments = json.loads(payments)
+
+    items = payload.get("items") or []
+    if not items:
+        frappe.throw("items tidak boleh kosong", title="Payload Tidak Valid")
+    if not isinstance(payments, list) or not payments:
+        frappe.throw(
+            "payments tidak boleh kosong", title="Payload Tidak Valid"
+        )
+
+    customer = payload.get("customer")
+    pos_profile_name = payload.get("pos_profile")
+    if not customer:
+        frappe.throw("customer wajib diisi")
+    if not pos_profile_name:
+        frappe.throw("pos_profile wajib diisi")
+
+    # Cart voucher-only enforcement (Phase 1)
+    for item in items:
+        item_code = item.get("item_code")
+        if not item_code:
+            frappe.throw("item_code wajib di setiap item")
+        is_voucher = frappe.db.get_value("Item", item_code, "is_voucher_item")
+        if not is_voucher:
+            frappe.throw(
+                f"Item {item_code} bukan voucher (is_voucher_item=0). "
+                f"Direct Sale Mode hanya menerima voucher item; gunakan "
+                f"flow Order Menu untuk item makanan/minuman.",
+                title="Item Tidak Valid untuk Direct Sale",
+            )
+
+    pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
+    company = pos_profile.company
+
+    pos_invoice = frappe.get_doc(
+        {
+            "doctype": "POS Invoice",
+            "customer": customer,
+            "pos_profile": pos_profile_name,
+            "branch": payload.get("branch"),
+            "company": company,
+            "is_pos": 1,
+            "items": [],
+            "payments": [],
+        }
+    )
+
+    for item in items:
+        pos_invoice.append(
+            "items",
+            {
+                "item_code": item.get("item_code"),
+                "qty": item.get("qty") or 1,
+                "rate": item.get("rate"),
+            },
+        )
+
+    for pay in payments:
+        amt = flt(pay.get("amount") or 0)
+        mode = (pay.get("mode_of_payment") or "").strip()
+        if not mode:
+            frappe.throw("mode_of_payment wajib di setiap payment row")
+        if amt <= 0:
+            frappe.throw(f"amount untuk {mode} harus > 0")
+        pos_invoice.append(
+            "payments",
+            {"mode_of_payment": mode, "amount": amt},
+        )
+
+    pos_invoice.insert(ignore_permissions=True)
+    pos_invoice.submit()
+
+    grand = flt(pos_invoice.rounded_total or pos_invoice.grand_total)
+    total_paid = sum(flt(p.amount) for p in pos_invoice.payments)
+    change_amount = max(0.0, total_paid - grand)
+
+    return {
+        "invoice_name": pos_invoice.name,
+        "status": pos_invoice.status,
+        "change_amount": change_amount,
+    }
+
+
+@frappe.whitelist()
 def validate_voucher_code(code):
     """Validate a voucher code for the mobile POS payment screen.
 
