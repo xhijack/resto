@@ -147,7 +147,10 @@ doc_events = {
             "resto.events.pos_invoice.handle_kitchen_stock"
         ],
         "before_submit": "resto.events.pos_invoice.block_partial_payment",
-        "on_submit": "resto.events.pos_invoice.lock_void_value_after_submit",
+        "on_submit": [
+            "resto.events.pos_invoice.lock_void_value_after_submit",
+            "resto.events.voucher_hooks.issue_vouchers_from_pos_invoice"
+        ],
         "on_cancel": "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel"
     }
 }
