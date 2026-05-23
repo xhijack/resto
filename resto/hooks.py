@@ -146,12 +146,19 @@ doc_events = {
             "resto.events.pos_invoice.exclude_void_items_from_total",
             "resto.events.pos_invoice.handle_kitchen_stock"
         ],
-        "before_submit": "resto.events.pos_invoice.block_partial_payment",
+        "before_submit": [
+            "resto.events.pos_invoice.block_partial_payment",
+            "resto.events.voucher_hooks.validate_voucher_payments"
+        ],
         "on_submit": [
             "resto.events.pos_invoice.lock_void_value_after_submit",
-            "resto.events.voucher_hooks.issue_vouchers_from_pos_invoice"
+            "resto.events.voucher_hooks.issue_vouchers_from_pos_invoice",
+            "resto.events.voucher_hooks.redeem_vouchers_on_pos_invoice_submit"
         ],
-        "on_cancel": "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel"
+        "on_cancel": [
+            "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel",
+            "resto.events.voucher_hooks.unredeem_vouchers_on_pos_invoice_cancel"
+        ]
     }
 }
 

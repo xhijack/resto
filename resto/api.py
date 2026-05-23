@@ -540,3 +540,50 @@ def delete_merge_invoice(pos_invoice):
 def clear_table(table_name):
     from resto.services.table_service import TableService
     TableService().clear_table(table_name)
+
+
+@frappe.whitelist()
+def validate_voucher_code(code):
+    """Validate a voucher code for the mobile POS payment screen.
+
+    Returns a dict with keys: valid, value, kind, valid_upto, status,
+    error_message. `valid` is True only when the voucher exists, is
+    Active, and today is within the validity window.
+    """
+    result = {
+        "valid": False,
+        "value": None,
+        "kind": None,
+        "valid_upto": None,
+        "status": None,
+        "error_message": None,
+    }
+    if not code:
+        result["error_message"] = "Voucher code is required"
+        return result
+    if not frappe.db.exists("Voucher", code):
+        result["error_message"] = f"Voucher {code} not found"
+        return result
+
+    voucher = frappe.get_doc("Voucher", code)
+    result.update(
+        {
+            "value": voucher.voucher_value,
+            "kind": voucher.voucher_kind,
+            "valid_upto": str(voucher.valid_upto) if voucher.valid_upto else None,
+            "status": voucher.status,
+        }
+    )
+
+    if voucher.status == "Redeemed":
+        result["error_message"] = f"Voucher {code} has already been redeemed"
+        return result
+    if voucher.status == "Cancelled":
+        result["error_message"] = f"Voucher {code} has been cancelled"
+        return result
+    if not voucher.is_redeemable():
+        result["error_message"] = f"Voucher {code} is expired or not yet valid"
+        return result
+
+    result["valid"] = True
+    return result

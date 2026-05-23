@@ -525,8 +525,8 @@ def _install_voucher_accounting():
 
 
 def add_voucher_custom_fields():
-    """Register Item custom fields for the voucher feature (idempotent)."""
-    voucher_fields = [
+    """Register custom fields for the voucher feature (idempotent)."""
+    item_fields = [
         {
             "fieldname": "is_voucher_item",
             "label": "Is Voucher Item",
@@ -544,8 +544,25 @@ def add_voucher_custom_fields():
             "description": "Days from sale date until voucher expires (0 = use system default of 90).",
         },
     ]
-    for cf in voucher_fields:
+    for cf in item_fields:
         if frappe.db.exists("Custom Field", {"dt": "Item", "fieldname": cf["fieldname"]}):
             continue
         doc = {"doctype": "Custom Field", "dt": "Item", **cf}
+        frappe.get_doc(doc).insert(ignore_permissions=True)
+
+    payment_fields = [
+        {
+            "fieldname": "voucher_code",
+            "label": "Voucher Code",
+            "fieldtype": "Data",
+            "insert_after": "mode_of_payment",
+            "description": "Voucher code used for this payment row when mode_of_payment = 'Voucher'.",
+        },
+    ]
+    for cf in payment_fields:
+        if frappe.db.exists(
+            "Custom Field", {"dt": "Sales Invoice Payment", "fieldname": cf["fieldname"]}
+        ):
+            continue
+        doc = {"doctype": "Custom Field", "dt": "Sales Invoice Payment", **cf}
         frappe.get_doc(doc).insert(ignore_permissions=True)
