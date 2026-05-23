@@ -120,8 +120,9 @@ Misal: 100 voucher Rp25K untuk Grand Opening cabang baru.
    - **Voucher Count**: `100`
    - **Valid Upto**: `2026-08-31` (3 bulan dari sekarang)
 3. **Save** (record sekarang status: `is_generated = 0`, belum generate)
-4. Klik action **"Generate Vouchers"** di sidebar (atau via console: `frappe.get_doc("Voucher Batch", "Event Grand Opening...").generate_vouchers()`).
-5. Setelah selesai: `is_generated = 1`, `generated_count = 100`, `generated_by = <user>`, `generated_at = <waktu>`.
+4. Klik tombol biru **"Generate Vouchers"** di pojok kanan atas form. Muncul confirm dialog: "Generate 100 vouchers? Tindakan ini tidak bisa diundo." Klik Yes.
+5. Setelah selesai: muncul toast "100 voucher berhasil di-generate". Form reload otomatis: `is_generated = 1`, `generated_count = 100`, `generated_by = <user>`, `generated_at = <waktu>`. Tombol Generate Vouchers hilang (idempotent guard).
+6. (Alternatif via console kalau Frappe desk tidak available: `frappe.get_doc("Voucher Batch", "Event Grand Opening...").generate_vouchers()`)
 
 ### Ambil daftar kode (untuk dibagikan):
 

@@ -32,6 +32,7 @@ class VoucherBatch(Document):
                 title="Invalid Voucher Count",
             )
 
+    @frappe.whitelist()
     def generate_vouchers(self):
         if self.is_generated:
             frappe.throw(

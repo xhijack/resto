@@ -156,3 +156,20 @@ class TestVoucherBatch(FrappeTestCase):
             "Voucher", filters={"batch_id": batch.name}, pluck="code"
         )
         self.assertEqual(len(codes), len(set(codes)))
+
+    def test_generate_vouchers_is_whitelisted_for_client_call(self):
+        """voucher_batch.js calls frm.call('generate_vouchers') from the
+        Frappe desk form, which requires the method to be exposed via the
+        @frappe.whitelist() decorator. Without it, the call gets blocked
+        by Frappe's permission gate even though the user owns the doc.
+        Decorator registers the function in `frappe.whitelisted`.
+        """
+        from resto.resto_sopwer.doctype.voucher_batch.voucher_batch import (
+            VoucherBatch,
+        )
+
+        self.assertIn(
+            VoucherBatch.generate_vouchers,
+            frappe.whitelisted,
+            "VoucherBatch.generate_vouchers must be @frappe.whitelist() decorated",
+        )
