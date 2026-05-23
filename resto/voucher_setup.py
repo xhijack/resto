@@ -8,6 +8,15 @@ Triggered from `after_migrate`. Safe to call any number of times.
 
 import frappe
 
+
+class _VoucherSetupSkipped(Exception):
+    """Raised internally when an auto-create fixture can't satisfy a
+    mandatory Link field because the linked DocType has no records on
+    this site. Caller catches + logs + skips the row gracefully so
+    after_migrate doesn't roll back bench update.
+    """
+
+
 UNEARNED_ACCOUNT_NAME = "Unearned Voucher Revenue"
 EXPENSE_ACCOUNT_NAME = "Voucher Promotional Expense"
 VOUCHER_MODE_OF_PAYMENT = "Voucher"
@@ -223,14 +232,31 @@ def _ensure_voucher_resto_menu(
         "menu_category": menu_category,
         "enabled": 1,
     }
-    _apply_extra_mandatory_defaults(doc_data, doctype="Resto Menu", title_hint=title)
+    try:
+        _apply_extra_mandatory_defaults(doc_data, doctype="Resto Menu", title_hint=title)
+    except _VoucherSetupSkipped as skip:
+        # Production site (e.g. sopwerp) might have custom mandatory Link
+        # field on Resto Menu (Brand, etc.) but no records populated yet.
+        # Don't block after_migrate — log and let admin populate the
+        # missing records + rerun setup_voucher_items manually later.
+        frappe.log_error(
+            message=str(skip),
+            title="Voucher Resto Menu setup skipped",
+        )
+        return None
     return frappe.get_doc(doc_data).insert(ignore_permissions=True).name
 
 
 def _apply_extra_mandatory_defaults(doc_data: dict, doctype: str, title_hint: str) -> None:
     """Set sensible fallback values untuk mandatory custom field yang
     ditambahkan site lewat Customize Form. Tanpa ini, insert ditolak
-    MandatoryError di site yang punya field tambahan."""
+    MandatoryError di site yang punya field tambahan.
+
+    Raises:
+        _VoucherSetupSkipped — kalau Link mandatory field's target DocType
+        kosong (no records to link to). Better to skip whole insert than
+        set an invalid link string yang akan throw LinkValidationError.
+    """
     meta = frappe.get_meta(doctype)
     for field in meta.fields:
         if not field.reqd:
@@ -239,7 +265,14 @@ def _apply_extra_mandatory_defaults(doc_data: dict, doctype: str, title_hint: st
             continue
         if field.fieldtype == "Link" and field.options:
             existing = frappe.db.get_value(field.options, {}, "name")
-            doc_data[field.fieldname] = existing or title_hint
+            if not existing:
+                raise _VoucherSetupSkipped(
+                    f"Cannot auto-create {doctype}: required Link field "
+                    f"'{field.fieldname}' → {field.options} has no records. "
+                    f"Populate {field.options} records first, then run "
+                    f"setup_voucher_items() manually."
+                )
+            doc_data[field.fieldname] = existing
         elif field.fieldtype in {"Data", "Small Text", "Text", "Long Text"}:
             doc_data[field.fieldname] = title_hint
         elif field.fieldtype in {"Int", "Float", "Currency"}:

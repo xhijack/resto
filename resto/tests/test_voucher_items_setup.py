@@ -171,3 +171,39 @@ class TestVoucherItemsSetup(RestoPOSTestBase):
         for code in ALL_ITEMS:
             count = frappe.db.count("Resto Menu", {"sell_item": code})
             self.assertEqual(count, 1, f"Duplicate Resto Menu for {code}")
+
+    def test_setup_does_not_raise_when_link_mandatory_field_has_no_records(self):
+        """Production server (sopwerp) punya custom mandatory Link field di
+        Resto Menu (mis. Brand) tapi belum populate records. Sebelum hotfix,
+        setup throw LinkValidationError yang rollback bench update --patch.
+
+        Sekarang harus graceful degrade: Item + Item Group tetap tercipta,
+        Resto Menu skip + log warning."""
+        from unittest.mock import patch
+        from resto.voucher_setup import _VoucherSetupSkipped
+
+        # Simulate the scenario: _apply_extra_mandatory_defaults raises
+        # because a Link target doctype is empty on this site
+        def raise_skip(*args, **kwargs):
+            raise _VoucherSetupSkipped("Brand has no records")
+
+        with patch(
+            "resto.voucher_setup._apply_extra_mandatory_defaults",
+            side_effect=raise_skip,
+        ):
+            try:
+                self._run_setup()
+            except Exception as e:
+                self.fail(
+                    f"setup_voucher_items() should NOT raise when Link "
+                    f"mandatory field has no records; got: {type(e).__name__}: {e}"
+                )
+
+        # Item + Item Group tetap tercipta
+        self.assertTrue(frappe.db.exists("Item Group", VOUCHER_GROUP))
+        for code in ALL_ITEMS:
+            self.assertTrue(frappe.db.exists("Item", code))
+        # Resto Menu di-skip (kalau tidak ada existing dari prior runs)
+        # Note: kalau test sebelumnya bikin Resto Menu, mereka tetap ada
+        # karena _ensure_voucher_resto_menu skip-if-exists. Yang penting
+        # function tidak raise.

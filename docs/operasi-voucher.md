@@ -296,6 +296,20 @@ for code in expired:
 
 → Voucher batch (event gratis) — lihat section 3. Cek Voucher Batch dengan `batch_name = <batch_id>` di Frappe desk untuk detail event.
 
+### "Setelah migrate, Resto Menu untuk voucher tidak otomatis terbuat (hanya Item-nya)"
+
+→ Cek Frappe **Error Log** → filter title = `"Voucher Resto Menu setup skipped"`. Penyebab umum: site punya custom mandatory Link field di Resto Menu (mis. `Brand`) tapi DocType target-nya **belum punya records**. Setup voucher tidak bisa auto-link.
+
+**Solusi:**
+1. Populate records DocType yang dimaksud. Contoh untuk Brand: Frappe desk → **Brand** → New → buat minimal 1 Brand (mis. nama restoran kamu).
+2. Re-run setup voucher manual:
+   ```bash
+   bench --site <site> execute resto.voucher_setup.setup_voucher_items
+   ```
+3. Atau cukup `bench --site <site> migrate` lagi — setup akan re-attempt.
+
+**Catatan**: graceful degrade ini ditambah di hotfix supaya `bench update --patch` tidak rollback gara-gara field mandatory belum populate. Item + Item Group tetap tercipta meskipun Resto Menu di-skip.
+
 ---
 
 ## Versi & referensi
