@@ -516,12 +516,19 @@ def after_migrate():
     add_custom_field()
     add_voucher_custom_fields()
     _install_voucher_accounting()
+    _install_voucher_items()
 
 
 def _install_voucher_accounting():
     from resto.voucher_setup import setup_voucher_accounting
 
     setup_voucher_accounting()
+
+
+def _install_voucher_items():
+    from resto.voucher_setup import setup_voucher_items
+
+    setup_voucher_items()
 
 
 def add_voucher_custom_fields():

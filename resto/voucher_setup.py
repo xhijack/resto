@@ -12,6 +12,14 @@ UNEARNED_ACCOUNT_NAME = "Unearned Voucher Revenue"
 EXPENSE_ACCOUNT_NAME = "Voucher Promotional Expense"
 VOUCHER_MODE_OF_PAYMENT = "Voucher"
 
+VOUCHER_ITEM_GROUP = "Voucher"
+VOUCHER_SAMPLE_ITEMS = [
+    {"code": "Voucher Rp50.000", "rate": 50000},
+    {"code": "Voucher Rp100.000", "rate": 100000},
+    {"code": "Voucher Rp250.000", "rate": 250000},
+]
+DEFAULT_VOUCHER_VALIDITY_DAYS = 90
+
 
 def setup_voucher_accounting():
     companies = frappe.get_all("Company", pluck="name")
@@ -120,3 +128,61 @@ def _ensure_mode_of_payment(company_to_unearned: dict) -> None:
 
     if dirty:
         mop.save(ignore_permissions=True)
+
+
+def setup_voucher_items():
+    """Idempotent setup of Item Group "Voucher" + 3 sample non-stock items
+    that cashiers can sell at POS. Each sample item has is_voucher_item=1
+    so the on_submit issuance hook (events.voucher_hooks) auto-materializes
+    Voucher records when sold.
+
+    Safe to call from after_migrate any number of times.
+    Depends on add_voucher_custom_fields() having installed the Item
+    custom fields is_voucher_item + voucher_validity_days first.
+    """
+    _ensure_item_group(VOUCHER_ITEM_GROUP, parent="All Item Groups")
+    for sample in VOUCHER_SAMPLE_ITEMS:
+        _ensure_voucher_item(
+            item_code=sample["code"],
+            standard_rate=sample["rate"],
+            item_group=VOUCHER_ITEM_GROUP,
+            validity_days=DEFAULT_VOUCHER_VALIDITY_DAYS,
+        )
+
+
+def _ensure_item_group(name: str, parent: str) -> str:
+    if frappe.db.exists("Item Group", name):
+        return name
+    frappe.get_doc(
+        {
+            "doctype": "Item Group",
+            "item_group_name": name,
+            "parent_item_group": parent,
+            "is_group": 0,
+        }
+    ).insert(ignore_permissions=True)
+    return name
+
+
+def _ensure_voucher_item(
+    item_code: str,
+    standard_rate: float,
+    item_group: str,
+    validity_days: int,
+) -> str:
+    if frappe.db.exists("Item", item_code):
+        return item_code
+    frappe.get_doc(
+        {
+            "doctype": "Item",
+            "item_code": item_code,
+            "item_name": item_code,
+            "item_group": item_group,
+            "stock_uom": "Nos",
+            "is_stock_item": 0,
+            "is_voucher_item": 1,
+            "voucher_validity_days": validity_days,
+            "standard_rate": standard_rate,
+        }
+    ).insert(ignore_permissions=True)
+    return item_code
