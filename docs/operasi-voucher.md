@@ -68,19 +68,53 @@ Mau jual voucher Rp500K? Cara:
 7. Standard Selling Rate: 500000
 8. Save.
 
-Item baru otomatis siap dipakai cashier untuk jual voucher Rp500K.
+Lanjut: bikin **Resto Menu** + **Branch Menu** untuk item ini (lihat section 1.4).
+
+### 1.4 Mapping Branch Menu per cabang (WAJIB sebelum muncul di POS mobile)
+
+POS mobile resto fetch katalog lewat **Branch Menu → Resto Menu → Item**, bukan Item langsung. Voucher Item baru muncul di tab **Jual Voucher** mobile **HANYA** kalau ada Branch Menu mapping untuk cabang yang sedang aktif.
+
+Untuk tiap cabang yang ingin jual voucher:
+
+1. Pastikan Resto Menu untuk voucher Item sudah ada (auto-create lewat `bench migrate` untuk 3 sample default; manual lewat Frappe desk untuk item custom).
+2. Frappe desk → **Branch Menu** → New
+3. Branch: pilih cabang (mis. "Cilandak")
+4. Menu Item: pilih Resto Menu voucher (mis. "VCH-50K-Voucher Rp50.000")
+5. Rate: 50000 (sesuai nominal)
+6. Enabled: ✓
+7. Save.
+
+Ulangi untuk tiap kombinasi (voucher × cabang). **Belum mapping → cashier di cabang itu tidak lihat voucher di tab Jual Voucher mobile.**
+
+⚠️ Pesan error 417 "Expectation Failed" yang muncul saat pakai POS biasa scan voucher item (sebelum v1.4.0) sudah TIDAK akan terjadi di v1.4.0 — voucher harus dijual lewat tab Jual Voucher (Direct Sale Mode), bukan flow Pesanan Baru biasa.
 
 ---
 
-## 2. Workflow A — Jual voucher ke customer (via POS)
+## 2. Workflow A — Jual voucher ke customer (Direct Sale Mode di POS mobile)
 
-### Cashier:
+POS mobile v1.4.0+ menyediakan mode khusus **Direct Sale** untuk jual voucher dan item non-kitchen lain. Mode ini skip kirim ke dapur, langsung checkout & bayar.
 
-1. Buka POS mobile, scan/cari item "Voucher Rp50.000" (atau nominal lain) seperti item biasa.
-2. Tambah ke cart, lanjut pembayaran (Cash/EDC).
-3. Submit POS Invoice.
+### Cashier (sisi mobile):
 
-**Setelah submit, voucher otomatis lahir di backend.** Backend hook `issue_vouchers_from_pos_invoice` scan item, generate satu Voucher record per qty.
+1. Buka tab **"Jual Voucher"** (hijau) di top bar POS mobile.
+2. Pilih voucher dari grid katalog (3 sample default kalau ikuti setup: Voucher Rp50.000, Voucher Rp100.000, Voucher Rp250.000).
+   - Tap card voucher → masuk cart sidebar kanan, default qty 1
+   - Adjust qty: tombol `−` / `+` di card cart
+   - Hapus dari cart: tap `✕` di row
+3. Pilih metode pembayaran: **Cash** / **EDC** / **Bank** (Voucher MOP tidak boleh dipakai untuk jual voucher).
+4. Input **Jumlah Bayar** di kotak Rupiah (boleh > total untuk hitung kembalian).
+5. Tap **"Bayar & Terbitkan Voucher"**.
+
+### Backend (otomatis saat submit):
+
+- Endpoint `resto.api.create_direct_sale_invoice` dipanggil — validate cart voucher-only (mixed cart dengan makanan ditolak), skip kirim ke dapur entirely.
+- POS Invoice dibuat + langsung submit + pay dalam 1 transaksi atomic.
+- Existing on_submit hook `issue_vouchers_from_pos_invoice` fire → Voucher records lahir (1 record per qty unit), `source=Sold`, `sold_via_invoice` linked, `voucher_value` = item rate, `valid_upto` = today + 90 hari (atau sesuai `voucher_validity_days` Item).
+
+### Setelah submit:
+
+- Toast sukses tampil dengan: invoice name + jumlah voucher terbit + kembalian (kalau ada).
+- Cart auto-clear, siap transaksi berikutnya.
 
 ### Cek voucher yang baru lahir (admin):
 
@@ -91,17 +125,24 @@ Frappe desk → **Voucher List** → filter:
 Field penting:
 - `code` — kode unik 10 karakter (UPPERCASE, mis. `A3B7F9D1C2`)
 - `voucher_value` — nominal
-- `valid_upto` — tanggal kadaluarsa (default today + 90 hari)
+- `valid_upto` — tanggal kadaluarsa
 - `status` — `Active` setelah lahir
+- `sold_via_invoice` — link ke POS Invoice penerbit
 
 ### Distribusi kode ke customer (Phase 1, manual):
 
 Pilih salah satu cara:
-- **Tulis tangan di receipt**: cashier print receipt biasa, tulis kode voucher di belakang
-- **Print sticker / kartu**: lewat report Frappe → export → print
-- **WhatsApp**: ekspor list voucher per invoice → kirim manual ke customer
+- **Tulis tangan di receipt**: cashier print receipt biasa, tulis kode voucher di belakang.
+- **Print sticker / kartu**: lewat report Frappe → export → print.
+- **WhatsApp**: ekspor list voucher per invoice → kirim manual ke customer.
 
-> Phase 3 ke depan: auto-WhatsApp e-voucher saat penjualan. Belum tersedia di v1.3.0.
+> Phase 3 ke depan: auto-WhatsApp e-voucher saat penjualan. Belum tersedia.
+
+### Mengapa pakai Direct Sale Mode (bukan Pesanan Baru biasa)?
+
+Voucher = item non-kitchen (tidak dimasak). POS mobile flow Pesanan Baru wajib lewat send_to_kitchen untuk semua item — voucher tidak punya kitchen station mapping → gagal dengan error 417. Direct Sale Mode skip dapur entirely, lebih cocok untuk voucher / item retail / item yang dijual tanpa pengolahan dapur.
+
+⚠️ **Direct Sale Mode strict voucher-only.** Mixed cart (voucher + makanan dalam 1 transaksi) ditolak backend dengan error "Item X bukan voucher". Untuk makanan tetap pakai flow Pesanan Baru biasa di tab "Meja".
 
 ---
 
