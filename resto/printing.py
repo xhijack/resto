@@ -2598,25 +2598,25 @@ def build_void_item_receipt(pos_invoice: str, items: list[dict], printer_name=No
         out += _esc_char_size_dotmatrix(0, 0)
 
         # Add-ons
-        add_ons = it.get("add_ons") or ""
-        if add_ons:
-            add_ons_list = [a.strip() for a in add_ons.split(",")]
-            for a in add_ons_list:
-                out += (f"  + {a}\n").encode("ascii", "ignore")
+        # add_ons = it.get("add_ons") or ""
+        # if add_ons:
+        #     add_ons_list = [a.strip() for a in add_ons.split(",")]
+        #     for a in add_ons_list:
+        #         out += (f"  + {a}\n").encode("ascii", "ignore")
 
         # Notes
-        notes = it.get("quick_notes") or ""
-        if notes:
-            out += (f"  # {notes}\n").encode("ascii", "ignore")
+        # notes = it.get("quick_notes") or ""
+        # if notes:
+        #     out += (f"  # {notes}\n").encode("ascii", "ignore")
 
         # v1.2.18 Issue #3: tampilkan alasan void supaya kitchen/bar tahu kenapa
         # item di-batalkan. Format: "Alasan: <reason>" + optional "Catatan: <note>".
-        # void_reason = it.get("void_reason") or ""
-        # if void_reason:
-        #     out += (f"  Alasan : {void_reason}\n").encode("ascii", "ignore")
-        # void_reason_note = it.get("void_reason_note") or ""
-        # if void_reason_note:
-        #     out += (f"  Catatan: {void_reason_note}\n").encode("ascii", "ignore")
+        void_reason = it.get("void_reason") or ""
+        if void_reason:
+            out += (f"  Alasan : {void_reason}\n").encode("ascii", "ignore")
+        void_reason_note = it.get("void_reason_note") or ""
+        if void_reason_note:
+            out += (f"  Catatan: {void_reason_note}\n").encode("ascii", "ignore")
 
     out += (_line("-") + "\n").encode("ascii", "ignore")
     out += _esc_feed(5)
