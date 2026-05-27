@@ -252,6 +252,19 @@ class KitchenService:
         # insert kena LinkValidationError (field `table` = Link ke Table doctype).
         table_is_real = bool(table_name) and self.repo.table_exists(table_name)
 
+        # Dine In tanpa table valid HARUS fail-fast: silent-skip historis bikin
+        # POS Invoice ter-create tanpa table tanpa noise. Default order_type=None
+        # diperlakukan sebagai Dine In (legacy mobile kadang tidak set field).
+        order_type = (payload.get("order_type") or "Dine In") if isinstance(payload, dict) else "Dine In"
+        if order_type != "Take Away" and not table_is_real:
+            if table_name:
+                frappe.throw(
+                    f"Table '{table_name}' tidak ditemukan. Refresh daftar meja & coba lagi."
+                )
+            frappe.throw(
+                "Table belum dipilih. Mohon pilih meja sebelum kirim ke dapur."
+            )
+
         # Sertakan field `table` ke payload supaya invoice baru ter-link langsung
         # ke meja via custom field — single source of truth (lihat invoice_service).
         # Skip untuk Take Away (table_name virtual / tidak terdaftar).
