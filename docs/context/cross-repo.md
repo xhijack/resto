@@ -107,6 +107,7 @@ Backend `feature/voucher` branch — DocType + hooks + API. Mobile `feature/vouc
 | Endpoint | Mobile consumer | Contract |
 |---|---|---|
 | `resto.api.validate_voucher_code` | `src/api/voucher.js::validateVoucherCode`, `src/hooks/useVoucher.js`, `src/components/PopupVoucherInput.js` | Input `{code: string}`. Output `{valid: bool, value: number|null, kind: "Nominal"|"Free Item"|null, valid_upto: "YYYY-MM-DD"|null, status: "Active"|"Redeemed"|"Cancelled"|"Expired"|null, error_message: string|null}`. `valid=true` IFF voucher exists + Active + dalam validity window. Backend tidak mutate state — pure read. |
+| `resto.api.create_direct_sale_invoice` | `src/api/directSale.js::createDirectSaleInvoice`, `src/pages/DirectSale.js` | Input `{payload: JSON, payments: JSON}`. `payload = {customer, pos_profile, branch, items:[{item_code,qty,rate}]}` — semua item harus `is_voucher_item=1` (cart voucher-only). `payments = [{mode_of_payment, amount}, ...]` — multi-payment supported (split + change). Output `{invoice_name, status, total_paid, change_amount, issued_vouchers:[{code, voucher_value, valid_from, valid_upto, status}]}`. Backend guards: Customer/POS Profile/Mode of Payment existence (throws clear ValidationError, no 500). Payment processing via `PaymentService.pay_invoice` (sama dengan resto POS reguler). |
 
 Tidak ada endpoint khusus untuk **redeem** — redemption auto-trigger via POS Invoice `pay_invoice` flow (lihat "Voucher Redemption Flow" di bawah).
 
@@ -170,6 +171,32 @@ Item custom fields yang relevan (auto-install via `install.py:add_voucher_custom
 Sample voucher items auto-created via `voucher_setup.py::setup_voucher_items()`:
 - Item Group "Voucher" (parent: All Item Groups)
 - 3 Items: `Voucher Rp50.000`, `Voucher Rp100.000`, `Voucher Rp250.000` (rate sesuai)
+
+### Direct Sale Mode — Jual Voucher Lewat `create_direct_sale_invoice`
+
+Endpoint dedicated untuk jual voucher tanpa kitchen routing (DirectSale screen mobile). Flow:
+
+```
+[mobile]   DirectSale.js → "Bayar" → PopupPayment modal
+              (multi-method, keypad, change, bank child — sama dengan resto POS reguler)
+[mobile]   PopupPayment.onCompletePayment → handleCompletePayment({payments})
+              → createDirectSaleInvoice(payload, payments)
+              → POST resto.api.create_direct_sale_invoice
+[backend]  create_direct_sale_invoice (api.py):
+              1. Guard Customer/POS Profile/Mode of Payment existence (throw clear error)
+              2. Cart voucher-only enforcement (is_voucher_item=1 untuk semua items)
+              3. Insert POS Invoice draft + initial payments (ERPNext require ≥1 payment row di insert)
+              4. PaymentService.pay_invoice(invoice, payments) — inherit split/change/cash-cover validation + submit
+              5. on_submit hook: issue_vouchers_from_pos_invoice → N Voucher records per qty
+              6. Query Voucher WHERE sold_via_invoice=invoice.name
+              7. Return {invoice_name, status, total_paid, change_amount, issued_vouchers:[...]}
+[mobile]   On success → setIssuedResult({...}) → VoucherIssuedModal opens
+              (list code+value+valid_upto, tap code untuk copy ke clipboard)
+```
+
+**Mode of Payment guard contract**: kalau MoP `Cash`/`Debit Mandiri`/etc tidak ada di tabMode of Payment, backend throw `frappe.ValidationError` dengan title "Mode of Payment Tidak Valid". Mobile catch via `err?.response?.data?.message`.
+
+**Customer guard contract**: hardcode `DEFAULT_CUSTOMER = 'Walk In Cust'` di mobile (`DirectSale.js:20`) — Customer record dengan nama persis itu **wajib ada di tabCustomer** di setiap site outlet. Kalau tidak, backend throw "Customer Tidak Ditemukan". (Pelajaran: 2026-05-27 RIAU outlet — Customer record absent → ERPNext core unpack TypeError → user lihat 500 generic.)
 
 ### Custom Field di Sales Invoice Payment
 

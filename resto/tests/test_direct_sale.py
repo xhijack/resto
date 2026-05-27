@@ -206,3 +206,70 @@ class TestDirectSaleInvoice(RestoPOSTestBase):
     def test_direct_sale_empty_payments_throws(self):
         with self.assertRaises(frappe.ValidationError):
             self._call_endpoint(self._payload(), [])
+
+    # ------------------------------------------------------------------
+    # Guards (defense-in-depth: clear error vs deep ERPNext 500)
+    # ------------------------------------------------------------------
+
+    def test_direct_sale_customer_not_found_throws_clear(self):
+        with self.assertRaises(frappe.ValidationError) as ctx:
+            self._call_endpoint(
+                self._payload(customer="_NonExistentCustomer_XYZ"),
+                [{"mode_of_payment": self.mode_of_payment, "amount": 50000}],
+            )
+        self.assertIn("Customer", str(ctx.exception))
+
+    def test_direct_sale_mop_not_found_throws_clear(self):
+        with self.assertRaises(frappe.ValidationError) as ctx:
+            self._call_endpoint(
+                self._payload(),
+                [{"mode_of_payment": "_NonExistentMOP_XYZ", "amount": 50000}],
+            )
+        self.assertIn("Mode of Payment", str(ctx.exception))
+
+    def test_direct_sale_pos_profile_not_found_throws_clear(self):
+        with self.assertRaises(frappe.ValidationError) as ctx:
+            self._call_endpoint(
+                self._payload(pos_profile="_NonExistentProfile_XYZ"),
+                [{"mode_of_payment": self.mode_of_payment, "amount": 50000}],
+            )
+        self.assertIn("POS Profile", str(ctx.exception))
+
+    # ------------------------------------------------------------------
+    # Issued vouchers in response (Phase 2)
+    # ------------------------------------------------------------------
+
+    def test_direct_sale_returns_issued_vouchers_list(self):
+        result = self._call_endpoint(
+            self._payload(
+                items=[
+                    {
+                        "item_code": self.voucher_item_code,
+                        "qty": 2,
+                        "rate": 50000,
+                    }
+                ]
+            ),
+            [{"mode_of_payment": self.mode_of_payment, "amount": 100000}],
+        )
+        vouchers = result.get("issued_vouchers")
+        self.assertIsInstance(vouchers, list)
+        self.assertEqual(len(vouchers), 2)
+        for v in vouchers:
+            self.assertIn("code", v)
+            self.assertEqual(v["voucher_value"], 50000)
+            self.assertIn("valid_from", v)
+            self.assertIn("valid_upto", v)
+            self.assertEqual(v["status"], "Active")
+
+    # ------------------------------------------------------------------
+    # Payment via PaymentService (split + change)
+    # ------------------------------------------------------------------
+
+    def test_direct_sale_overpay_returns_change_amount(self):
+        result = self._call_endpoint(
+            self._payload(),
+            [{"mode_of_payment": self.mode_of_payment, "amount": 75000}],
+        )
+        self.assertEqual(result.get("change_amount"), 25000)
+        self.assertEqual(result.get("total_paid"), 75000)

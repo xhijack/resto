@@ -555,8 +555,13 @@ def create_direct_sale_invoice(payload, payments):
         payments (JSON str): [{mode_of_payment, amount}, ...]
 
     Returns:
-        {invoice_name, status, change_amount}
+        {
+            invoice_name, status, total_paid, change_amount,
+            issued_vouchers: [{code, voucher_value, valid_from, valid_upto, status}],
+        }
     """
+    from resto.services.payment_service import PaymentService
+
     if isinstance(payload, str):
         payload = json.loads(payload)
     if isinstance(payments, str):
@@ -577,6 +582,22 @@ def create_direct_sale_invoice(payload, payments):
     if not pos_profile_name:
         frappe.throw("pos_profile wajib diisi")
 
+    # Existence guards (defense-in-depth). Tanpa ini, ERPNext core throw
+    # TypeError di pos_invoice.py:set_pos_fields saat unpack tuple dari
+    # frappe.db.get_value yang return None → user lihat 500 generic. Throw
+    # clear message di sini supaya mobile bisa display ke kasir.
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw(
+            f"Customer '{customer}' tidak ditemukan di master. "
+            f"Buat record Customer atau cek nama default outlet.",
+            title="Customer Tidak Ditemukan",
+        )
+    if not frappe.db.exists("POS Profile", pos_profile_name):
+        frappe.throw(
+            f"POS Profile '{pos_profile_name}' tidak ditemukan.",
+            title="POS Profile Tidak Ditemukan",
+        )
+
     # Cart voucher-only enforcement (Phase 1)
     for item in items:
         item_code = item.get("item_code")
@@ -589,6 +610,20 @@ def create_direct_sale_invoice(payload, payments):
                 f"Direct Sale Mode hanya menerima voucher item; gunakan "
                 f"flow Order Menu untuk item makanan/minuman.",
                 title="Item Tidak Valid untuk Direct Sale",
+            )
+
+    # Payment payload sanity + MoP existence (sebelum insert apapun)
+    for pay in payments:
+        amt = flt(pay.get("amount") or 0)
+        mode = (pay.get("mode_of_payment") or "").strip()
+        if not mode:
+            frappe.throw("mode_of_payment wajib di setiap payment row")
+        if amt <= 0:
+            frappe.throw(f"amount untuk {mode} harus > 0")
+        if not frappe.db.exists("Mode of Payment", mode):
+            frappe.throw(
+                f"Mode of Payment '{mode}' belum dikonfigurasi di sistem.",
+                title="Mode of Payment Tidak Valid",
             )
 
     pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
@@ -606,7 +641,6 @@ def create_direct_sale_invoice(payload, payments):
             "payments": [],
         }
     )
-
     for item in items:
         pos_invoice.append(
             "items",
@@ -616,30 +650,50 @@ def create_direct_sale_invoice(payload, payments):
                 "rate": item.get("rate"),
             },
         )
-
+    # ERPNext POS Invoice validate_mode_of_payment requires ≥1 payment row
+    # at insert (not just submit). Populate from payload; PaymentService
+    # akan clear + re-validate + re-set saat pay_invoice.
     for pay in payments:
-        amt = flt(pay.get("amount") or 0)
-        mode = (pay.get("mode_of_payment") or "").strip()
-        if not mode:
-            frappe.throw("mode_of_payment wajib di setiap payment row")
-        if amt <= 0:
-            frappe.throw(f"amount untuk {mode} harus > 0")
         pos_invoice.append(
             "payments",
-            {"mode_of_payment": mode, "amount": amt},
+            {
+                "mode_of_payment": (pay.get("mode_of_payment") or "").strip(),
+                "amount": flt(pay.get("amount") or 0),
+            },
         )
-
     pos_invoice.insert(ignore_permissions=True)
-    pos_invoice.submit()
 
-    grand = flt(pos_invoice.rounded_total or pos_invoice.grand_total)
-    total_paid = sum(flt(p.amount) for p in pos_invoice.payments)
-    change_amount = max(0.0, total_paid - grand)
+    # Delegate payment processing ke PaymentService.pay_invoice — inherit
+    # split/change/cash-coverage validation yang sama dengan resto POS reguler.
+    # PaymentService clear existing payments, re-append normalized, validate,
+    # submit (fires issue_vouchers_from_pos_invoice hook).
+    pay_result = PaymentService().pay_invoice(pos_invoice.name, payments)
+
+    # Refetch untuk status terbaru (PaymentService sudah commit).
+    pos_invoice.reload()
+
+    # Issued vouchers dibuat oleh on_submit hook
+    # `issue_vouchers_from_pos_invoice` — query setelah submit untuk return
+    # detail ke mobile supaya kasir bisa tampilkan code ke customer.
+    issued_vouchers = frappe.get_all(
+        "Voucher",
+        filters={"sold_via_invoice": pos_invoice.name},
+        fields=[
+            "name as code",
+            "voucher_value",
+            "valid_from",
+            "valid_upto",
+            "status",
+        ],
+        order_by="creation asc",
+    )
 
     return {
         "invoice_name": pos_invoice.name,
         "status": pos_invoice.status,
-        "change_amount": change_amount,
+        "total_paid": pay_result.get("total_paid", 0),
+        "change_amount": pay_result.get("change_amount", 0),
+        "issued_vouchers": issued_vouchers,
     }
 
 
