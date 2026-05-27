@@ -229,7 +229,7 @@ class InvoiceService:
 
     def delete_merge_invoice(self, pos_invoice):
         for doc in self.repo.get_merged_invoices(pos_invoice):
-            doc.delete()
+            doc.delete(ignore_permissions=True)
 
     def list_paid_invoices_for_table(self, table_name):
         return self.repo.list_paid_invoices_for_table(table_name)
@@ -397,7 +397,7 @@ class InvoiceService:
                 tax.row_id = None
 
         new_invoice.insert(ignore_permissions=True)
-        source.save()
+        source.save(ignore_permissions=True)
         frappe.db.commit()
         return new_invoice.name
 
@@ -487,8 +487,8 @@ class InvoiceService:
             if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
                 tax.row_id = None
 
-        target.save()
-        source.save()
+        target.save(ignore_permissions=True)
+        source.save(ignore_permissions=True)
         frappe.db.commit()
         return {"ok": True, "source": source_name, "target": target_name}
 
@@ -529,5 +529,5 @@ class InvoiceService:
             if tax.charge_type not in ("On Previous Row Amount", "On Previous Row Total"):
                 tax.row_id = None
 
-        target.save()
+        target.save(ignore_permissions=True)
         frappe.db.commit()
