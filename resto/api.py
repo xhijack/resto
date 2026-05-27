@@ -742,3 +742,15 @@ def validate_voucher_code(code):
 
     result["valid"] = True
     return result
+
+
+@frappe.whitelist()
+def get_voucher_items():
+    """Voucher catalog untuk Direct Sale Mode.
+
+    Sumber langsung dari Item doctype (item_group='Voucher' AND
+    is_sales_item=1 AND disabled=0), bukan via Branch Menu — voucher
+    = global value card, tidak butuh wiring per-cabang.
+    """
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().list_voucher_items()

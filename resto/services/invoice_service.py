@@ -241,6 +241,40 @@ class InvoiceService:
             table_name=table_name,
         )
 
+    def list_voucher_items(self):
+        """Voucher catalog untuk Direct Sale Mode.
+
+        Sumber langsung dari Item doctype (item_group='Voucher' AND
+        is_sales_item=1 AND disabled=0), bukan via Branch Menu. Voucher =
+        global value card, tidak butuh wiring per-cabang.
+        """
+        rows = frappe.get_all(
+            "Item",
+            filters={
+                "item_group": "Voucher",
+                "is_sales_item": 1,
+                "disabled": 0,
+            },
+            fields=[
+                "item_code",
+                "item_name",
+                "standard_rate",
+                "voucher_validity_days",
+                "image",
+            ],
+            order_by="standard_rate asc",
+        )
+        return [
+            {
+                "item_code": r["item_code"],
+                "item_name": r["item_name"],
+                "rate": r.get("standard_rate") or 0,
+                "voucher_validity_days": r.get("voucher_validity_days") or 0,
+                "image": r.get("image"),
+            }
+            for r in rows
+        ]
+
     def void_pos_invoice(self, invoice_name):
         # Cancel POS Invoice + cleanup table.orders kalau invoice ter-link ke meja.
         # Pakai TableService.remove_table_order yang sudah row-locked → race-safe

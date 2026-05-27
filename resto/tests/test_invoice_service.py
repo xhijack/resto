@@ -605,3 +605,76 @@ class TestInvoiceServiceVoidPosInvoice(RestoPOSTestBase):
         mock_doc.cancel.assert_called_once()
         mock_remove.assert_not_called()
         self.assertEqual(result, {"success": True, "name": "INV-002", "table": None})
+
+
+class TestInvoiceServiceListVoucherItems(RestoPOSTestBase):
+    """list_voucher_items — voucher catalog source untuk Direct Sale Mode.
+
+    Sebelumnya mobile DirectSale fetch dari Branch Menu (per-cabang), tapi
+    voucher = global value card, bukan menu per-cabang. Sumber baru: Item
+    doctype langsung, filter item_group='Voucher' AND is_sales_item=1 AND
+    disabled=0. Setup admin jadi lebih ringan + cabang baru auto-dapat
+    katalog yang sama."""
+
+    def test_returns_voucher_items_filtered_by_item_group_and_sales(self):
+        """Hanya return Item dengan item_group='Voucher' AND is_sales_item=1 AND disabled=0."""
+        fake_items = [
+            {
+                "item_code": "IT-001504",
+                "item_name": "Voucher Rp50.000",
+                "standard_rate": 50000,
+                "voucher_validity_days": 90,
+                "image": None,
+            },
+            {
+                "item_code": "IT-001505",
+                "item_name": "Voucher Rp100.000",
+                "standard_rate": 100000,
+                "voucher_validity_days": 90,
+                "image": "/files/voucher-100k.png",
+            },
+        ]
+        with patch("resto.services.invoice_service.frappe.get_all") as mock_get_all:
+            mock_get_all.return_value = fake_items
+            result = InvoiceService().list_voucher_items()
+
+        mock_get_all.assert_called_once()
+        call_args = mock_get_all.call_args
+        # First positional arg should be doctype Item
+        self.assertEqual(call_args[0][0] if call_args[0] else call_args[1].get("doctype"), "Item")
+        # Filters must include item_group='Voucher', is_sales_item=1, disabled=0
+        filters = call_args[1].get("filters") or {}
+        self.assertEqual(filters.get("item_group"), "Voucher")
+        self.assertEqual(filters.get("is_sales_item"), 1)
+        self.assertEqual(filters.get("disabled"), 0)
+        # Result shape: list dict dengan item_code, item_name, rate, voucher_validity_days, image
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["item_code"], "IT-001504")
+        self.assertEqual(result[0]["rate"], 50000)
+        self.assertEqual(result[0]["voucher_validity_days"], 90)
+        self.assertEqual(result[1]["item_code"], "IT-001505")
+        self.assertEqual(result[1]["image"], "/files/voucher-100k.png")
+
+    def test_returns_empty_list_when_no_voucher_items(self):
+        """Empty list, bukan error, kalau tidak ada voucher Item."""
+        with patch("resto.services.invoice_service.frappe.get_all", return_value=[]):
+            result = InvoiceService().list_voucher_items()
+
+        self.assertEqual(result, [])
+
+    def test_rate_falls_back_to_zero_when_standard_rate_missing(self):
+        """Standard rate None/missing → rate=0 (defensive)."""
+        with patch("resto.services.invoice_service.frappe.get_all") as mock_get_all:
+            mock_get_all.return_value = [
+                {
+                    "item_code": "IT-X",
+                    "item_name": "Voucher X",
+                    "standard_rate": None,
+                    "voucher_validity_days": None,
+                    "image": None,
+                }
+            ]
+            result = InvoiceService().list_voucher_items()
+
+        self.assertEqual(result[0]["rate"], 0)
+        self.assertEqual(result[0]["voucher_validity_days"], 0)
