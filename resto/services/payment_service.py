@@ -52,7 +52,13 @@ class PaymentService:
                 frappe.throw("mode_of_payment wajib di setiap row payments")
             if amt <= 0:
                 frappe.throw(f"amount untuk {mode} harus > 0")
-            normalized.append({"mode_of_payment": mode, "amount": amt})
+            # Preserve voucher_code untuk Voucher mode of payment — kalau di-drop,
+            # before_submit hook validate_voucher_payments akan throw "Voucher
+            # payment row requires voucher_code" walaupun mobile sudah kirim.
+            row = {"mode_of_payment": mode, "amount": amt}
+            if p.get("voucher_code"):
+                row["voucher_code"] = p.get("voucher_code")
+            normalized.append(row)
 
         total_paid = sum(p["amount"] for p in normalized)
 
