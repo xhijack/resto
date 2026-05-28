@@ -648,6 +648,9 @@ def create_direct_sale_invoice(payload, payments):
                 "item_code": item.get("item_code"),
                 "qty": item.get("qty") or 1,
                 "rate": item.get("rate"),
+                # voucher_code: untuk jual voucher fisik existing — kasir input
+                # kode tercetak. Kalau None, hook issuance auto-generate random.
+                "voucher_code": item.get("voucher_code"),
             },
         )
     # ERPNext POS Invoice validate_mode_of_payment requires ≥1 payment row
