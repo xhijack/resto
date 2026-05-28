@@ -3,12 +3,38 @@
 
 """Voucher lifecycle hooks tied to POS Invoice."""
 
+import re
+
 import frappe
 from frappe.utils import add_days, flt, nowdate
 
 DEFAULT_VOUCHER_VALIDITY_DAYS = 90
 VOUCHER_MODE_OF_PAYMENT = "Voucher"
 AMOUNT_TOLERANCE = 0.01
+VOUCHER_CODE_PATTERN = re.compile(r"^[A-Z0-9-]{3,20}$")
+
+
+def _normalize_voucher_code(raw):
+    if not raw:
+        return None
+    code = str(raw).strip().upper()
+    return code or None
+
+
+def _validate_existing_voucher_code(code):
+    """Format + global uniqueness check untuk kode voucher fisik dari kasir.
+    Strict: kode pernah dipakai (Active/Redeemed/Cancelled) tidak boleh re-issue."""
+    if not VOUCHER_CODE_PATTERN.match(code):
+        frappe.throw(
+            f"Kode voucher '{code}' tidak valid. Harus 3-20 karakter "
+            "alfanumerik atau dash (A-Z, 0-9, -).",
+            title="Invalid Voucher Code",
+        )
+    if frappe.db.exists("Voucher", code):
+        frappe.throw(
+            f"Kode voucher '{code}' sudah dipakai. Setiap kode harus unik global.",
+            title="Voucher Code Duplicate",
+        )
 
 
 def issue_vouchers_from_pos_invoice(doc, method=None):
@@ -20,6 +46,8 @@ def issue_vouchers_from_pos_invoice(doc, method=None):
       - sold_via_invoice = invoice.name
       - voucher_value = item.rate
       - valid_upto = today + Item.voucher_validity_days (fallback 90 days)
+      - code = item_row.voucher_code kalau diisi (jual voucher fisik existing).
+        Kalau kosong, autoname generate random 10-char hash.
     """
     if not doc.get("items"):
         return
@@ -35,6 +63,24 @@ def issue_vouchers_from_pos_invoice(doc, method=None):
         valid_upto = add_days(nowdate(), validity_days)
         rate = item_row.get("rate") or 0
         qty = int(item_row.get("qty") or 0)
+        existing_code = _normalize_voucher_code(item_row.get("voucher_code"))
+
+        # Voucher fisik existing: qty harus 1 (kode unik per voucher) dan
+        # code dipakai langsung. Backend validate + reject duplicate.
+        if existing_code:
+            _validate_existing_voucher_code(existing_code)
+            doc_dict = {
+                "doctype": "Voucher",
+                "code": existing_code,
+                "voucher_kind": "Nominal",
+                "voucher_value": rate,
+                "valid_from": nowdate(),
+                "valid_upto": valid_upto,
+                "source": "Sold",
+                "sold_via_invoice": doc.name,
+            }
+            frappe.get_doc(doc_dict).insert(ignore_permissions=True)
+            continue
 
         for _ in range(qty):
             voucher = frappe.get_doc(

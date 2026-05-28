@@ -71,6 +71,20 @@ def after_migrate():
                 "default": 0,
             }).insert(ignore_permissions=True)
 
+        # Voucher existing-code support: kasir bisa input kode voucher fisik
+        # (yang sudah dicetak) saat jual voucher di Direct Sale Mode.
+        # Hook issue_vouchers_from_pos_invoice baca field ini per row.
+        if not frappe.db.exists("Custom Field", {'fieldname': "voucher_code", "dt": "POS Invoice Item"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "voucher_code",
+                "label": "Voucher Code (Existing)",
+                "fieldtype": "Data",
+                "insert_after": "is_print_kitchen",
+                "description": "Diisi mobile saat jual voucher existing (kode fisik). Kosong = auto-generate.",
+            }).insert(ignore_permissions=True)
+
         # if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
         #     frappe.get_doc({
         #         "doctype": "Custom Field",

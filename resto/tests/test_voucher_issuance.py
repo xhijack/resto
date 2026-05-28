@@ -217,3 +217,123 @@ class TestVoucherIssuanceHook(RestoPOSTestBase):
         )
         self.assertEqual(n50, 2)
         self.assertEqual(n100, 3)
+
+
+class TestExistingVoucherCode(RestoPOSTestBase):
+    """Issuance dengan voucher_code dari mobile (voucher fisik yang sudah
+    dicetak). Hook harus pakai code itu instead of auto-generate."""
+
+    def setUp(self):
+        super().setUp()
+        TestVoucherIssuanceHook._ensure_voucher_custom_fields_on_item()
+        self._ensure_pos_invoice_item_voucher_code_field()
+        self.voucher_item = self._make_voucher_item(VOUCHER_ITEM_50K, rate=50000, validity_days=30)
+        frappe.db.delete("Voucher", {"source": "Sold"})
+
+    def tearDown(self):
+        frappe.db.delete("Voucher", {"source": "Sold"})
+        super().tearDown()
+
+    @staticmethod
+    def _ensure_pos_invoice_item_voucher_code_field():
+        if not frappe.db.exists("Custom Field", {"dt": "POS Invoice Item", "fieldname": "voucher_code"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "voucher_code",
+                "label": "Voucher Code (Existing)",
+                "fieldtype": "Data",
+                "insert_after": "is_print_kitchen",
+            }).insert(ignore_permissions=True)
+            frappe.clear_cache(doctype="POS Invoice Item")
+
+    def _make_voucher_item(self, item_code, rate, validity_days=None):
+        return TestVoucherIssuanceHook._make_voucher_item(self, item_code, rate, validity_days)
+
+    def _submit_invoice(self, items):
+        total = sum(it["qty"] * it["rate"] for it in items)
+        return self._create_test_pos_invoice(
+            items=items,
+            payments=[{"mode_of_payment": self.mode_of_payment, "amount": total}],
+            submit=True,
+        )
+
+    def test_existing_code_persists_to_voucher_record(self):
+        """voucher_code di POS Invoice Item → Voucher.code = code itu, bukan random hash."""
+        invoice = self._submit_invoice([{
+            "item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+            "voucher_code": "TEST-ABC-001",
+        }])
+        codes = frappe.get_all(
+            "Voucher",
+            filters={"sold_via_invoice": invoice.name},
+            pluck="code",
+        )
+        self.assertEqual(codes, ["TEST-ABC-001"])
+
+    def test_existing_code_duplicate_throws(self):
+        """Kode yang sudah ada di Voucher (apapun status) tidak boleh dipakai ulang."""
+        # Seed Voucher Active dengan kode tertentu
+        frappe.get_doc({
+            "doctype": "Voucher",
+            "code": "DUPLICATE-CODE",
+            "voucher_kind": "Nominal",
+            "voucher_value": 50000,
+            "valid_from": nowdate(),
+            "valid_upto": add_days(nowdate(), 90),
+            "source": "Free",
+            "status": "Active",
+        }).insert(ignore_permissions=True)
+
+        with self.assertRaises(frappe.ValidationError):
+            self._submit_invoice([{
+                "item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+                "voucher_code": "DUPLICATE-CODE",
+            }])
+
+    def test_existing_code_invalid_format_throws(self):
+        """Kode harus 3-20 char alfanumerik + dash. Karakter lain ditolak."""
+        with self.assertRaises(frappe.ValidationError):
+            self._submit_invoice([{
+                "item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+                "voucher_code": "AB",  # too short
+            }])
+
+    def test_existing_code_with_special_char_throws(self):
+        with self.assertRaises(frappe.ValidationError):
+            self._submit_invoice([{
+                "item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+                "voucher_code": "CODE WITH SPACE",
+            }])
+
+    def test_existing_code_uppercased_in_storage(self):
+        """Kode auto-uppercase saat di-store, supaya unique check konsisten."""
+        invoice = self._submit_invoice([{
+            "item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+            "voucher_code": "lower-case-001",
+        }])
+        codes = frappe.get_all(
+            "Voucher",
+            filters={"sold_via_invoice": invoice.name},
+            pluck="code",
+        )
+        self.assertEqual(codes, ["LOWER-CASE-001"])
+
+    def test_mixed_cart_generate_and_existing(self):
+        """1 item generate + 1 item existing → 1 Voucher random + 1 Voucher dengan code user."""
+        invoice = self._submit_invoice([
+            {"item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000},  # generate
+            {"item_code": VOUCHER_ITEM_50K, "qty": 1, "rate": 50000, "amount": 50000,
+             "voucher_code": "MIX-EXISTING-1"},
+        ])
+        all_codes = sorted(frappe.get_all(
+            "Voucher",
+            filters={"sold_via_invoice": invoice.name},
+            pluck="code",
+        ))
+        self.assertEqual(len(all_codes), 2)
+        self.assertIn("MIX-EXISTING-1", all_codes)
+        # The other code must be a random 10-char hash, not the user code
+        other = [c for c in all_codes if c != "MIX-EXISTING-1"][0]
+        self.assertEqual(len(other), 10)
+        self.assertTrue(other.isalnum())

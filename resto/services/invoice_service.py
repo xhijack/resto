@@ -103,7 +103,8 @@ class InvoiceService:
                 "quick_notes": item.get("quick_notes"),
                 "waiter": item.get("waiter"),
                 "is_checked": item.get("is_checked"),
-                "is_print_kitchen": item.get("is_print_kitchen")
+                "is_print_kitchen": item.get("is_print_kitchen"),
+                "voucher_code": item.get("voucher_code"),
             })
 
         for pay in payments:
