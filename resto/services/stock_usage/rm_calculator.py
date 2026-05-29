@@ -25,6 +25,17 @@ from resto.services.stock_usage.bom_resolver import BomResolverService
 from resto.services.stock_usage.batch_allocator import BatchAllocatorService
 
 
+def _branch_has_company_field() -> bool:
+    """Branch.company is per-ERPNext-version optional. Check meta once per
+    process so we don't issue a doomed SELECT on installs where it's missing.
+    """
+    try:
+        meta = frappe.get_meta("Branch")
+        return any(getattr(f, "fieldname", None) == "company" for f in (meta.fields or []))
+    except Exception:
+        return False
+
+
 class RawMaterialCalculatorService:
     """Compose aggregator + bom + batch services into a POS Closing breakdown."""
 
@@ -111,12 +122,12 @@ class RawMaterialCalculatorService:
     def _resolve_company(eds, pces: List) -> Optional[str]:
         """Prefer Branch.company on the Daily Summary; fall back to first PCE.
 
-        POS Daily Summary stores `branch` (not `company` directly), so we look
-        the company up via Branch. If that lookup is unavailable (test fixtures,
-        legacy data), we fall through to the first PCE's company.
+        POS Daily Summary stores `branch` (not `company` directly). We look up
+        company via Branch when the field exists on that doctype (it is optional
+        across ERPNext versions); otherwise we fall through to the first PCE.
         """
         branch = getattr(eds, "branch", None)
-        if branch:
+        if branch and _branch_has_company_field():
             company = frappe.db.get_value("Branch", branch, "company")
             if company:
                 return company
