@@ -174,3 +174,40 @@ def rollback_kitchen_stock_on_cancel(doc, method):
         if row.kitchen_stock_consumed and row.resto_menu:
             rollback_resto_menu_stock(row.resto_menu, row.qty)
             row.kitchen_stock_consumed = 0
+
+
+def auto_cancel_fully_voided_draft(doc, method):
+    """Cancel a Draft POS Invoice once every line is flagged Void Menu.
+
+    Per-item void leaves the invoice Draft with grand_total=0. Nothing in the
+    POS flow can then submit it, so the meja stays "Has Ordered" forever and
+    end-shift inherits a phantom open order. We mirror what
+    InvoiceService.void_pos_invoice does for whole-invoice voids: cancel the
+    doc, drop it from Table.orders, and reset the meja to Kosong when no
+    other orders remain.
+    """
+    if doc.docstatus != 0 or not getattr(doc, "is_pos", 0):
+        return
+    if not doc.items:
+        return
+    if any(getattr(it, "status_kitchen", "") != "Void Menu" for it in doc.items):
+        return
+    if doc.flags.get("auto_cancel_fully_voided"):
+        return
+
+    doc.flags.auto_cancel_fully_voided = True
+    table_name = getattr(doc, "table", None)
+
+    doc.cancel()
+
+    if not table_name:
+        return
+
+    from resto.services.table_service import TableService
+
+    svc = TableService()
+    svc.remove_table_order(table_name, doc.name)
+
+    table_doc = svc.repo.get_table(table_name)
+    if not (table_doc.orders or []):
+        svc.clear_table(table_name)

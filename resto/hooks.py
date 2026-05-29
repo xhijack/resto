@@ -148,6 +148,7 @@ doc_events = {
         ],
         "before_submit": "resto.events.pos_invoice.block_partial_payment",
         "on_submit": "resto.events.pos_invoice.lock_void_value_after_submit",
+        "on_update": "resto.events.pos_invoice.auto_cancel_fully_voided_draft",
         "on_cancel": "resto.events.pos_invoice.rollback_kitchen_stock_on_cancel"
     }
 }
