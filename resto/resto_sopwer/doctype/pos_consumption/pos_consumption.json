@@ -43,12 +43,13 @@
    "options": "POS Daily Summary"
   },
   {
+   "depends_on": "eval:doc.pos_closing && !doc.pos_daily_summary",
+   "description": "Deprecated since Phase 6.2 (2026-05-29). New rows must use POS Daily Summary. This field is kept for backwards-compat on historical rows.",
    "fieldname": "pos_closing",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "POS Closing",
-   "options": "POS Closing Entry",
-   "reqd": 1
+   "label": "POS Closing (legacy)",
+   "options": "POS Closing Entry"
   },
   {
    "fetch_from": "pos_closing.company",
