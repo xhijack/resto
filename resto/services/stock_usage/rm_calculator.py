@@ -1,8 +1,15 @@
 """RawMaterialCalculatorService — orchestrator.
 
-Replaces the inline pipeline inside legacy `get_pos_breakdown`:
-extract invoices → aggregate by sold item → resolve FG/BOM → explode RM →
-allocate batches (for batched RMs) → enrich with on-hand qty.
+Pipeline (per POS Daily Summary):
+  load Daily Summary → fan out to all linked POS Closing Entries →
+  extract invoice names per PCE → aggregate by sold item →
+  resolve FG/BOM → explode RM → allocate batches (for batched RMs) →
+  enrich with on-hand qty.
+
+Scope unit: ONE POS Daily Summary, which already aggregates every PCE
+that closed for one branch on one day. The orchestrator fans out across
+the summary's `pos_transactions` child rows so a single load covers the
+whole day's stock consumption — not just a single shift.
 
 This is the only service in the stock-usage stack that composes the others.
 Per-service responsibilities stay narrow; this one wires them together.
@@ -30,20 +37,22 @@ class RawMaterialCalculatorService:
     # Public API
     # ------------------------------------------------------------------
 
-    def compute_breakdown(self, pce_name: str, warehouse: Optional[str] = None) -> Dict:
-        """Return {"items": [...]} — one FG row per aggregated sold item.
+    def compute_breakdown(self, daily_summary_name: str, warehouse: Optional[str] = None) -> Dict:
+        """Return {"items": [...]} — one FG row per aggregated sold item
+        across every PCE listed on the given POS Daily Summary.
 
         Each FG row carries `rm_items` (flat RM list) and `rm_tree` (hierarchical
         view). Batched RMs include `is_batched`, `batch_allocations`,
         `batch_partial`, and `batch_shortage_qty`.
         """
-        if not pce_name:
+        if not daily_summary_name:
             return {"items": []}
 
-        pce = frappe.get_doc("POS Closing Entry", pce_name)
-        company = getattr(pce, "company", None)
+        eds = frappe.get_doc("POS Daily Summary", daily_summary_name)
+        pces = self._load_pces(eds)
+        company = self._resolve_company(eds, pces)
 
-        inv_names = self.aggregator.extract_invoice_names(pce)
+        inv_names = self._collect_invoice_names(pces)
         if not inv_names:
             return {"items": []}
 
@@ -81,6 +90,48 @@ class RawMaterialCalculatorService:
             })
 
         return {"items": items}
+
+    # ------------------------------------------------------------------
+    # Daily-summary fan-out
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_pces(eds) -> List:
+        """Load every PCE doc referenced by the Daily Summary's child rows."""
+        rows = getattr(eds, "pos_transactions", None) or []
+        pces: List = []
+        for row in rows:
+            pce_name = getattr(row, "pos_closing_entry", None)
+            if not pce_name:
+                continue
+            pces.append(frappe.get_doc("POS Closing Entry", pce_name))
+        return pces
+
+    @staticmethod
+    def _resolve_company(eds, pces: List) -> Optional[str]:
+        """Prefer Branch.company on the Daily Summary; fall back to first PCE.
+
+        POS Daily Summary stores `branch` (not `company` directly), so we look
+        the company up via Branch. If that lookup is unavailable (test fixtures,
+        legacy data), we fall through to the first PCE's company.
+        """
+        branch = getattr(eds, "branch", None)
+        if branch:
+            company = frappe.db.get_value("Branch", branch, "company")
+            if company:
+                return company
+        for pce in pces:
+            company = getattr(pce, "company", None)
+            if company:
+                return company
+        return None
+
+    def _collect_invoice_names(self, pces: List) -> List[str]:
+        """Fan out aggregator.extract_invoice_names across all PCEs, dedupe."""
+        combined: List[str] = []
+        for pce in pces:
+            combined.extend(self.aggregator.extract_invoice_names(pce))
+        return list(dict.fromkeys(combined))
 
     # ------------------------------------------------------------------
     # Private helpers

@@ -440,7 +440,7 @@ frappe.provide("resto.stock_usage");
         fields: [
           { fieldtype: 'Section Break', label: '' },
 
-          { fieldname: 'pos_closing_entry', label: 'POS Closing Entry', fieldtype: 'Link', options: 'POS Closing Entry', reqd: 1 },
+          { fieldname: 'pos_daily_summary', label: 'POS Daily Summary', fieldtype: 'Link', options: 'POS Daily Summary', reqd: 1 },
           { fieldtype: 'Column Break' },
 
           { fieldname: 'company', label: 'Company', fieldtype: 'Link', options: 'Company', reqd: 1, default: frappe.defaults.get_default("Company") },
@@ -911,11 +911,11 @@ frappe.provide("resto.stock_usage");
 
     // ===== LOAD =====
     async load_from_pos() {
-      const pos_closing_entry = this.fg.get_value('pos_closing_entry');
+      const pos_daily_summary = this.fg.get_value('pos_daily_summary');
       const company = this.fg.get_value('company');
       const wh = this.fg.get_value('source_warehouse');
-      if (!pos_closing_entry || !company || !wh) {
-        frappe.msgprint(__('Please fill POS Closing Entry, Company, and Source Warehouse.'));
+      if (!pos_daily_summary || !company || !wh) {
+        frappe.msgprint(__('Please fill POS Daily Summary, Company, and Source Warehouse.'));
         return;
       }
 
@@ -923,7 +923,7 @@ frappe.provide("resto.stock_usage");
       try {
         const r = await frappe.call({
           method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
-          args: { pos_closing_entry, company, warehouse: this.fg.get_value("source_warehouse") }
+          args: { pos_daily_summary, company, warehouse: this.fg.get_value("source_warehouse") }
         });
         const items = (r.message?.items) || [];
 
@@ -1304,13 +1304,13 @@ frappe.provide("resto.stock_usage");
     // ===== RECALC =====
     async recalc_group(idx) {
       const g = this.groups[idx];
-      const pce = this.fg.get_value('pos_closing_entry');
+      const pos_daily_summary = this.fg.get_value('pos_daily_summary');
       const company = this.fg.get_value('company');
-      if (!pce || !company) return;
+      if (!pos_daily_summary || !company) return;
 
       const r = await frappe.call({
         method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.get_pos_breakdown',
-        args: { pos_closing_entry: pce, company, warehouse: this.fg.get_value("source_warehouse") }
+        args: { pos_daily_summary, company, warehouse: this.fg.get_value("source_warehouse") }
       });
       const found = (r.message.items || []).find(x => x.item_code === g.meta.item_code);
       if (!found) {
@@ -1518,18 +1518,16 @@ frappe.provide("resto.stock_usage");
     }
 
     async save_pos_consumption() {
-      const pos_closing_entry = this.fg.get_value('pos_closing_entry');
-
-      console.log("POS Closing Entry", pos_closing_entry)
+      const pos_daily_summary = this.fg.get_value('pos_daily_summary');
       const warehouse = this.fg.get_value('source_warehouse');
       const company = this.fg.get_value('company');
 
-      if (!pos_closing_entry || !warehouse) {
-        frappe.msgprint(__('Please fill POS Closing Entry, Company, and Source Warehouse.'));
+      if (!pos_daily_summary || !warehouse) {
+        frappe.msgprint(__('Please fill POS Daily Summary, Company, and Source Warehouse.'));
         return;
       }
       if (!this.groups.length) {
-        frappe.msgprint(__('No data to save. Please load from POS Closing Entry first.'));
+        frappe.msgprint(__('No data to save. Please load from POS Daily Summary first.'));
         return;
       }
       const { menu_summaries, rm_breakdown } = this.get_payload();
@@ -1592,7 +1590,7 @@ frappe.provide("resto.stock_usage");
       try {
         const resp = await frappe.call({
           method: 'resto.resto_sopwer.page.stock_usage_tool.stock_usage_tool.create_pos_consumption',
-          args: { pos_closing: pos_closing_entry, company: company,warehouse: warehouse, notes: '', menu_summaries, rm_breakdown }
+          args: { pos_daily_summary, company, warehouse, notes: '', menu_summaries, rm_breakdown }
         });
         const name = resp.message;
         frappe.msgprint({

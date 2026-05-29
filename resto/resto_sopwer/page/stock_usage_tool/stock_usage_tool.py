@@ -238,13 +238,15 @@ def get_so_breakdown(sales_order: str, company: str) -> Dict[str, List[Dict]]:
     return {"items": out_items}
 
 
-# ---------- POS Closing Entry Public API ----------
+# ---------- POS Daily Summary Public API ----------
 
 @frappe.whitelist()
-def get_pos_breakdown(pos_closing_entry: str, company: str, warehouse: str = None) -> Dict[str, List[Dict]]:
+def get_pos_breakdown(pos_daily_summary: str, company: str, warehouse: str = None) -> Dict[str, List[Dict]]:
     """
-    Build aggregated FG list from all POS invoices within a POS Closing Entry, then derive
-    RM breakdown from the default/selected BOM per FG item.
+    Build aggregated FG list across every POS Closing Entry on the given
+    POS Daily Summary, then derive RM breakdown from the default/selected
+    BOM per FG item.
+
     Returns a shape compatible with the frontend:
     { items: [
         { item_code, item_name, qty, stock_uom, bom_no, selling_rate, selling_amount,
@@ -252,20 +254,22 @@ def get_pos_breakdown(pos_closing_entry: str, company: str, warehouse: str = Non
       ] }
 
     Thin wrapper around RawMaterialCalculatorService.
+    `company` is kept on the signature for frontend bundle stability — the
+    orchestrator derives company from the Daily Summary's branch.
     """
-    if not pos_closing_entry:
-        frappe.throw("POS Closing Entry is required")
+    if not pos_daily_summary:
+        frappe.throw("POS Daily Summary is required")
 
     from resto.services.stock_usage.rm_calculator import RawMaterialCalculatorService
 
     return RawMaterialCalculatorService().compute_breakdown(
-        pos_closing_entry, warehouse=warehouse,
+        pos_daily_summary, warehouse=warehouse,
     )
 
 
 @frappe.whitelist()
 def create_stock_entry_from_pos_usage(
-    pos_closing_entry: str,
+    pos_daily_summary: str,
     company: str,
     posting_date: Optional[str] = None,
     stock_entry_type: str = "Material Issue",
@@ -275,7 +279,8 @@ def create_stock_entry_from_pos_usage(
     items: Union[List[Dict], str, None] = None,
 ) -> str:
     """
-    Create & submit Stock Entry from edited RM payload, linked to a POS Closing Entry context.
+    Create & submit Stock Entry from edited RM payload, linked to a POS Daily
+    Summary context.
     items: [{ item_code, qty, stock_uom, warehouse, remarks, ... }]
     """
     if isinstance(items, str):
@@ -296,7 +301,7 @@ def create_stock_entry_from_pos_usage(
     se.stock_entry_type = stock_entry_type
     se.posting_date = getdate(posting_date)
     se.set_posting_time = 1
-    se.remarks = (remarks or "") + f"\nGenerated from Stock Usage Tool for POS Closing Entry {pos_closing_entry}"
+    se.remarks = (remarks or "") + f"\nGenerated from Stock Usage Tool for POS Daily Summary {pos_daily_summary}"
 
     for row in items:
         qty = flt(row.get("qty"))
@@ -333,7 +338,7 @@ def create_stock_entry_from_pos_usage(
 
 @frappe.whitelist()
 def create_pos_consumption(
-    pos_closing: str,
+    pos_daily_summary: str,
     company: str,
     warehouse: str,
     notes: Optional[str] = None,
@@ -342,7 +347,7 @@ def create_pos_consumption(
 ):
     """
     Create a POS Consumption document capturing menu-level HPP and consolidated RM usage
-    instead of immediately posting a Stock Entry.
+    across every POS Closing Entry on the given POS Daily Summary.
 
     Expected payloads:
       menu_summaries: [
@@ -367,16 +372,31 @@ def create_pos_consumption(
         except Exception:
             rm_breakdown = []
 
-    pce = frappe.get_doc("POS Closing Entry", pos_closing)
+    eds = frappe.get_doc("POS Daily Summary", pos_daily_summary)
+    pce_names = [
+        row.pos_closing_entry for row in (eds.pos_transactions or [])
+        if getattr(row, "pos_closing_entry", None)
+    ]
+    if not pce_names:
+        frappe.throw(f"POS Daily Summary {pos_daily_summary} has no linked POS Closing Entries")
 
-    # Auto fields from closing
-    closing_start = getattr(pce, "period_start_date", None) or getattr(pce, "start_date", None)
-    closing_end   = getattr(pce, "period_end_date", None) or getattr(pce, "end_date", None)
+    # Representative PCE keeps the existing pos_closing Link satisfied.
+    # Phase 6.3 will drop pos_closing entirely once schema migration is done.
+    first_pce = frappe.get_doc("POS Closing Entry", pce_names[0])
+    last_pce = (
+        first_pce if len(pce_names) == 1
+        else frappe.get_doc("POS Closing Entry", pce_names[-1])
+    )
+
+    closing_start = getattr(first_pce, "period_start_date", None) or getattr(first_pce, "start_date", None)
+    closing_end = getattr(last_pce, "period_end_date", None) or getattr(last_pce, "end_date", None)
     if not company:
-        company = getattr(pce, "company", None)
+        company = frappe.db.get_value("Branch", getattr(eds, "branch", None), "company") or \
+                  getattr(first_pce, "company", None)
 
     doc = frappe.new_doc("POS Consumption")
-    doc.pos_closing = pce.name
+    doc.pos_daily_summary = eds.name
+    doc.pos_closing = first_pce.name
     doc.company = company
 
     if "warehouse" in [df.fieldname for df in doc.meta.fields]:
