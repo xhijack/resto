@@ -103,6 +103,45 @@ class BatchAllocatorService:
             "shortage_qty": flt(remaining) if partial else 0.0,
         }
 
+    def validate_allocation(
+        self, item_code: str, warehouse: str,
+        batch_no: str, required_qty: float,
+    ) -> Dict:
+        """Check whether a specific batch can fulfill required_qty.
+
+        Used at POS Consumption submit-time to guard against over-allocation
+        when the user picked a batch manually.
+        """
+        required = flt(required_qty)
+        if not batch_no:
+            return {
+                "valid": False,
+                "shortage_qty": required,
+                "message": f"Batch is required for {item_code}",
+            }
+
+        target = next(
+            (b for b in self.get_available_batches(item_code, warehouse)
+             if b["batch_no"] == batch_no),
+            None,
+        )
+        if not target:
+            return {
+                "valid": False,
+                "shortage_qty": required,
+                "message": f"Batch {batch_no} not available for {item_code} in {warehouse}",
+            }
+
+        avail = flt(target.get("available_qty"))
+        if avail >= required:
+            return {"valid": True, "shortage_qty": 0.0, "message": ""}
+
+        return {
+            "valid": False,
+            "shortage_qty": required - avail,
+            "message": f"Batch {batch_no} has only {avail} {item_code} (need {required})",
+        }
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
