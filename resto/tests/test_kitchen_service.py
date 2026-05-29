@@ -331,7 +331,9 @@ class TestSendToKitchen(RestoPOSTestBase):
         self.service = KitchenService(repo=self.mock_repo)
 
     def test_returns_success_with_pos_invoice_name(self):
-        """Harus return status success dan pos_invoice name"""
+        """Harus return status success dan pos_invoice name (skenario Take Away
+        tanpa table — Dine In tanpa table di-guard fail-fast, lihat
+        test_dine_in_without_table_name_throws)."""
         mock_invoice_svc = MagicMock()
         mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
 
@@ -340,7 +342,7 @@ class TestSendToKitchen(RestoPOSTestBase):
         with patch.object(self.service, "print_to_ks_now"):
             result = self.service.send_to_kitchen(
                 payload={"customer": "C", "items": [{"item_code": "X", "qty": 1, "rate": 100}],
-                         "pos_profile": "P", "order_type": None},
+                         "pos_profile": "P", "order_type": "Take Away"},
                 invoice_service=mock_invoice_svc,
                 table_service=mock_table_svc,
                 table_name=None
@@ -418,8 +420,9 @@ class TestSendToKitchen(RestoPOSTestBase):
             "TBL-001", {"invoice_name": "INV-001"}
         )
 
-    def test_skips_table_update_when_table_not_found(self):
-        """Jika table tidak ada, skip update table (Take Away)"""
+    def test_skips_table_update_when_table_not_found_take_away(self):
+        """Take Away: jika table tidak ada (virtual queue), skip update table.
+        Untuk Dine In yang invalid lihat test_dine_in_with_invalid_table_throws."""
         mock_invoice_svc = MagicMock()
         mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
 
@@ -428,15 +431,83 @@ class TestSendToKitchen(RestoPOSTestBase):
 
         with patch.object(self.service, "print_to_ks_now"):
             self.service.send_to_kitchen(
-                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": None},
+                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": "Take Away"},
                 invoice_service=mock_invoice_svc,
                 table_service=mock_table_svc,
-                table_name="TBL-NOTFOUND"
+                table_name="No. Antrian 1305001"
             )
 
         mock_table_svc.update_table_status.assert_not_called()
         mock_table_svc.add_table_order.assert_not_called()
         mock_table_svc.update_table_meta.assert_not_called()
+
+    def test_dine_in_without_table_name_throws(self):
+        """Dine In dengan table_name=None HARUS throw, bukan silent-skip.
+        Bug historis: 99 POS Invoice tanpa table di RIAU May 17-18 2026 karena
+        mobile kirim table_name=None untuk Dine In dan backend menerima diam-diam."""
+        mock_invoice_svc = MagicMock()
+        mock_table_svc = MagicMock()
+
+        with patch.object(self.service, "print_to_ks_now"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.send_to_kitchen(
+                    payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": "Dine In"},
+                    invoice_service=mock_invoice_svc,
+                    table_service=mock_table_svc,
+                    table_name=None,
+                )
+
+        # Invoice tidak boleh dibuat kalau guard fail
+        mock_invoice_svc.create_pos_invoice.assert_not_called()
+
+    def test_dine_in_with_invalid_table_throws(self):
+        """Dine In dengan table_name yang tidak ada di Table doctype HARUS throw."""
+        mock_invoice_svc = MagicMock()
+        mock_table_svc = MagicMock()
+        self.mock_repo.table_exists.return_value = False
+
+        with patch.object(self.service, "print_to_ks_now"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.send_to_kitchen(
+                    payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": "Dine In"},
+                    invoice_service=mock_invoice_svc,
+                    table_service=mock_table_svc,
+                    table_name="GHOST-TABLE",
+                )
+
+        mock_invoice_svc.create_pos_invoice.assert_not_called()
+
+    def test_dine_in_default_order_type_without_table_throws(self):
+        """Order_type=None default ke Dine In behavior — HARUS throw kalau table missing.
+        Mobile sebelumnya kadang kirim payload tanpa order_type set."""
+        mock_invoice_svc = MagicMock()
+        mock_table_svc = MagicMock()
+
+        with patch.object(self.service, "print_to_ks_now"):
+            with self.assertRaises(frappe.ValidationError):
+                self.service.send_to_kitchen(
+                    payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": None},
+                    invoice_service=mock_invoice_svc,
+                    table_service=mock_table_svc,
+                    table_name=None,
+                )
+
+    def test_take_away_without_table_name_still_works(self):
+        """Take Away tanpa table_name TIDAK throw — Take Away wajar tanpa table."""
+        mock_invoice_svc = MagicMock()
+        mock_invoice_svc.create_pos_invoice.return_value = {"status": "success", "name": "INV-001"}
+        mock_table_svc = MagicMock()
+
+        with patch.object(self.service, "print_to_ks_now"):
+            result = self.service.send_to_kitchen(
+                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": "Take Away"},
+                invoice_service=mock_invoice_svc,
+                table_service=mock_table_svc,
+                table_name=None,
+            )
+
+        self.assertEqual(result["status"], "success")
+        mock_invoice_svc.create_pos_invoice.assert_called_once()
 
     def test_take_away_does_not_set_table_field_on_payload(self):
         """Bug Take Away (2026-05-13): mobile kirim table_name='No. Antrian {queue}'
@@ -470,7 +541,7 @@ class TestSendToKitchen(RestoPOSTestBase):
 
         with patch.object(self.service, "print_to_ks_now", side_effect=Exception("printer offline")):
             result = self.service.send_to_kitchen(
-                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": None},
+                payload={"customer": "C", "items": [], "pos_profile": "P", "order_type": "Take Away"},
                 invoice_service=mock_invoice_svc,
                 table_service=mock_table_svc,
                 table_name=None

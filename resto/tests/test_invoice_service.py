@@ -431,6 +431,112 @@ class TestInvoiceServiceApplyDiscount(RestoPOSTestBase):
         mock_repo.get_invoice.assert_not_called()
 
     # ------------------------------------------------------------------
+    # Permission tests — bug legacy 18ed544 (April 26 2026): bare .save()/
+    # .delete() throw PermissionError untuk staff dengan limited POS Invoice
+    # permission, padahal SQL operasi sebelumnya sudah berjalan → partial-
+    # merge state. Fix: bypass permission gate karena flow ini service-level,
+    # bukan direct user write.
+    # ------------------------------------------------------------------
+
+    def test_move_items_saves_target_with_ignore_permissions(self):
+        """target.save di move_items_from_invoice harus pakai ignore_permissions=True"""
+        mock_repo = MagicMock()
+        source_item = MagicMock()
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 1}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.return_value = [source_item]
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_items_from_invoice("INV-SRC", "INV-TGT")
+
+        target_doc.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_delete_merge_invoice_deletes_with_ignore_permissions(self):
+        """doc.delete di delete_merge_invoice harus pakai ignore_permissions=True"""
+        mock_repo = MagicMock()
+        merged_doc1 = MagicMock()
+        merged_doc2 = MagicMock()
+        mock_repo.get_merged_invoices.return_value = [merged_doc1, merged_doc2]
+
+        service = InvoiceService(repo=mock_repo)
+        service.delete_merge_invoice("INV-BASE")
+
+        merged_doc1.delete.assert_called_once_with(ignore_permissions=True)
+        merged_doc2.delete.assert_called_once_with(ignore_permissions=True)
+
+    def test_move_invoice_items_saves_both_with_ignore_permissions(self):
+        """target.save & source.save di move_invoice_items (partial merge) HARUS
+        pakai ignore_permissions=True — endpoint @whitelist exposed ke kasir."""
+        mock_repo = MagicMock()
+
+        # Source punya 1 row dengan qty=2, kita pindah qty=1 → remaining=1 (tidak kosong)
+        source_item = MagicMock()
+        source_item.name = "ROW-1"
+        source_item.qty = 2
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty"]
+        source_item.get.side_effect = lambda f: {"item_code": "I-001", "qty": 2}[f]
+
+        source_doc = MagicMock()
+        source_doc.get.side_effect = lambda key, *args, **kwargs: {"items": [source_item], "taxes": []}.get(key, [])
+        source_doc.set = MagicMock()
+
+        target_doc = MagicMock()
+        target_doc.get.return_value = []
+        mock_repo.get_invoice.side_effect = lambda name: source_doc if name == "INV-SRC" else target_doc
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"):
+            service.move_invoice_items("INV-SRC", "INV-TGT", [{"item_row_name": "ROW-1", "qty": 1}])
+
+        target_doc.save.assert_called_once_with(ignore_permissions=True)
+        source_doc.save.assert_called_once_with(ignore_permissions=True)
+
+    def test_split_invoice_saves_source_with_ignore_permissions(self):
+        """source.save di split_invoice HARUS pakai ignore_permissions=True —
+        endpoint split_table @whitelist exposed ke kasir. (new_invoice.insert
+        sudah ignore_permissions di line 399.)"""
+        mock_repo = MagicMock()
+
+        source_item = MagicMock()
+        source_item.name = "ROW-1"
+        source_item.qty = 2
+        source_item.meta.get_fieldnames_with_value.return_value = ["item_code", "qty", "rate"]
+        source_item.get.side_effect = lambda f, *args: {
+            "item_code": "I-001", "qty": 2, "rate": 1000
+        }.get(f, None)
+
+        source_doc = MagicMock()
+        source_doc.docstatus = 0
+        source_doc.customer = "Cust"
+        source_doc.pos_profile = "Profile"
+        source_doc.order_type = "Dine In"
+        source_doc.company = "Co"
+        source_doc.get.side_effect = lambda key, *args, **kwargs: {"items": [source_item], "taxes": []}.get(key, [])
+        source_doc.set = MagicMock()
+
+        mock_repo.get_invoice.return_value = source_doc
+
+        new_invoice_mock = MagicMock()
+        new_invoice_mock.name = "INV-NEW"
+        new_invoice_mock.get.return_value = []
+
+        service = InvoiceService(repo=mock_repo)
+        with patch("resto.services.invoice_service.frappe.db"), \
+             patch("resto.services.invoice_service.frappe.get_doc", return_value=new_invoice_mock), \
+             patch("resto.services.invoice_service.frappe.session"):
+            service.split_invoice("INV-SRC", [{"item_row_name": "ROW-1", "qty": 1}])
+
+        source_doc.save.assert_called_once_with(ignore_permissions=True)
+        # new_invoice.insert sudah pakai ignore_permissions=True (pre-existing fix line 399)
+        new_invoice_mock.insert.assert_called_once_with(ignore_permissions=True)
+
+    # ------------------------------------------------------------------
     # Integration test
     # ------------------------------------------------------------------
 
