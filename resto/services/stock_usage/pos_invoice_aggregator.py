@@ -1,11 +1,7 @@
 """PosInvoiceAggregatorService — extract POS invoice names from a POS Closing
 Entry and aggregate sold items across them.
 
-Replaces legacy helpers in stock_usage_tool.py:
-- _extract_pos_invoices_from_pce
-- inline aggregation loop in get_pos_breakdown
-
-Major improvements over legacy:
+Major improvements over the legacy inline loop in get_pos_breakdown:
 - Bulk get_all on child tables (parent IN [...]) instead of get_doc per invoice
   (Phase 1 audit: N+1 across SI/PI fetches)
 - Strict net_amount: throw early instead of silent fallback to amount=0

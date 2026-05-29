@@ -62,6 +62,8 @@ class RawMaterialCalculatorService:
 
             rm_items = self._build_rm_rows(bom_no, qty, company, warehouse)
             rm_tree = self.bom.build_tree(bom_no, qty) if bom_no else []
+            if rm_tree and warehouse:
+                self._enrich_tree_actual_qty(rm_tree, warehouse)
 
             items.append({
                 "item_code": fg_code,
@@ -120,3 +122,15 @@ class RawMaterialCalculatorService:
         return flt(frappe.db.get_value(
             "Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty",
         ) or 0)
+
+    def _enrich_tree_actual_qty(self, nodes: List[Dict], warehouse: str) -> None:
+        """Walk rm_tree in place and attach Bin actual_qty per node.
+
+        Matches the legacy get_pos_breakdown output shape so the existing
+        UI grid keeps rendering the on-hand column for every tree node.
+        """
+        for node in nodes:
+            node["actual_qty"] = self._on_hand(node.get("item_code"), warehouse)
+            children = node.get("children") or []
+            if children:
+                self._enrich_tree_actual_qty(children, warehouse)
