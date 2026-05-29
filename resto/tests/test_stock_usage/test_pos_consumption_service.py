@@ -22,7 +22,7 @@ class TestPosConsumptionService(unittest.TestCase):
                    return_value=mock_doc), \
              patch("resto.services.stock_usage.pos_consumption_service.frappe.get_doc"):
             payload = {
-                "pos_closing": "PCE-001",
+                "pos_daily_summary": "EDS-001",
                 "company": "TestCo",
                 "warehouse": "Stores - M",
                 "menu_summaries": [],
@@ -91,7 +91,7 @@ class TestPosConsumptionService(unittest.TestCase):
              patch("resto.services.stock_usage.pos_consumption_service._get_item_unit_cost",
                    return_value=15000):
             payload = {
-                "pos_closing": "PCE-001",
+                "pos_daily_summary": "EDS-001",
                 "company": "TestCo",
                 "warehouse": "Stores - M",
                 "menu_summaries": [],

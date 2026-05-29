@@ -21,6 +21,19 @@ def execute():
 	Run manually per site, or let `bench migrate` execute it via the
 	patches.txt registration.
 	"""
+	columns = frappe.db.sql(
+		"""
+		SELECT COLUMN_NAME
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		  AND TABLE_NAME = 'tabPOS Consumption'
+		  AND COLUMN_NAME = 'pos_closing'
+		""",
+	)
+	if not columns:
+		print("POS Consumption backfill: pos_closing column already dropped, skipping.")
+		return
+
 	rows = frappe.db.sql(
 		"""
 		SELECT name, pos_closing

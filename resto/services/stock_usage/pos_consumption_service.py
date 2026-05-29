@@ -47,7 +47,7 @@ class PosConsumptionService:
         stays stable even when Item.valuation_rate updates later.
         """
         doc = frappe.new_doc(self.DOCTYPE)
-        doc.pos_closing = payload.get("pos_closing")
+        doc.pos_daily_summary = payload.get("pos_daily_summary")
         doc.company = payload.get("company")
         doc.warehouse = payload.get("warehouse")
         if payload.get("posting_date"):

@@ -8,7 +8,6 @@
   "section_break_qep0",
   "amended_from",
   "pos_daily_summary",
-  "pos_closing",
   "company",
   "warehouse",
   "column_break_gsnj",
@@ -40,19 +39,10 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "POS Daily Summary",
-   "options": "POS Daily Summary"
+   "options": "POS Daily Summary",
+   "reqd": 1
   },
   {
-   "depends_on": "eval:doc.pos_closing && !doc.pos_daily_summary",
-   "description": "Deprecated since Phase 6.2 (2026-05-29). New rows must use POS Daily Summary. This field is kept for backwards-compat on historical rows.",
-   "fieldname": "pos_closing",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "POS Closing (legacy)",
-   "options": "POS Closing Entry"
-  },
-  {
-   "fetch_from": "pos_closing.company",
    "fieldname": "company",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -61,7 +51,6 @@
    "reqd": 1
   },
   {
-   "fetch_from": "pos_closing.company",
    "fieldname": "warehouse",
    "fieldtype": "Link",
    "in_list_view": 1,
@@ -70,13 +59,11 @@
    "reqd": 1
   },
   {
-   "fetch_from": "pos_closing.period_start_date",
    "fieldname": "closing_start",
    "fieldtype": "Datetime",
    "label": "Closing Start"
   },
   {
-   "fetch_from": "pos_closing.period_end_date",
    "fieldname": "closing_end",
    "fieldtype": "Datetime",
    "label": "Closing End"

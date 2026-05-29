@@ -380,8 +380,6 @@ def create_pos_consumption(
     if not pce_names:
         frappe.throw(f"POS Daily Summary {pos_daily_summary} has no linked POS Closing Entries")
 
-    # Representative PCE keeps the existing pos_closing Link satisfied.
-    # Phase 6.3 will drop pos_closing entirely once schema migration is done.
     first_pce = frappe.get_doc("POS Closing Entry", pce_names[0])
     last_pce = (
         first_pce if len(pce_names) == 1
@@ -396,7 +394,6 @@ def create_pos_consumption(
 
     doc = frappe.new_doc("POS Consumption")
     doc.pos_daily_summary = eds.name
-    doc.pos_closing = first_pce.name
     doc.company = company
 
     if "warehouse" in [df.fieldname for df in doc.meta.fields]:
