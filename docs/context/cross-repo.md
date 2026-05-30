@@ -98,6 +98,158 @@ children[] (variants: spice level, size, etc)
 
 ---
 
+## Voucher Feature Contract (Phase 1)
+
+Backend `feature/voucher` branch — DocType + hooks + API. Mobile `feature/voucher` branch — hook + popup + wiring. Kontrak silang voucher di bawah, **wajib sinkron** kalau salah satu sisi berubah.
+
+### Endpoint
+
+| Endpoint | Mobile consumer | Contract |
+|---|---|---|
+| `resto.api.validate_voucher_code` | `src/api/voucher.js::validateVoucherCode`, `src/hooks/useVoucher.js`, `src/components/PopupVoucherInput.js` | Input `{code: string}`. Output `{valid: bool, value: number|null, kind: "Nominal"|"Free Item"|null, valid_upto: "YYYY-MM-DD"|null, status: "Active"|"Redeemed"|"Cancelled"|"Expired"|null, error_message: string|null}`. `valid=true` IFF voucher exists + Active + dalam validity window. Backend tidak mutate state — pure read. |
+| `resto.api.create_direct_sale_invoice` | `src/api/directSale.js::createDirectSaleInvoice`, `src/pages/DirectSale.js` | Input `{payload: JSON, payments: JSON}`. `payload = {customer, pos_profile, branch, items:[{item_code,qty,rate}]}` — semua item harus `is_voucher_item=1` (cart voucher-only). `payments = [{mode_of_payment, amount}, ...]` — multi-payment supported (split + change). Output `{invoice_name, status, total_paid, change_amount, issued_vouchers:[{code, voucher_value, valid_from, valid_upto, status}]}`. Backend guards: Customer/POS Profile/Mode of Payment existence (throws clear ValidationError, no 500). Payment processing via `PaymentService.pay_invoice` (sama dengan resto POS reguler). |
+
+Tidak ada endpoint khusus untuk **redeem** — redemption auto-trigger via POS Invoice `pay_invoice` flow (lihat "Voucher Redemption Flow" di bawah).
+
+### Voucher Redemption Flow (atomic, via pay_invoice)
+
+Mobile push payment row dengan `mode_of_payment="Voucher"` ke `payInvoice(invoiceName, payments)` (existing endpoint). Backend hooks gating + state mutation:
+
+```
+[mobile]   buildPaymentsList(cashAmount, appliedVouchers)
+              -> payments[] inc {mode_of_payment:"Voucher", amount, voucher_code}
+[mobile]   payInvoice(invoiceName, payments)  →  resto.api.pay_invoice
+[backend]  doc_events POS Invoice:
+              before_submit  → validate_voucher_payments(doc)
+                                - voucher_code wajib
+                                - Voucher exists + Active + within validity
+                                - payment.amount == voucher.voucher_value (single-use, no partial)
+              on_submit      → redeem_vouchers_on_pos_invoice_submit(doc)
+                                - voucher.status: Active → Redeemed
+                                - voucher.redeemed_via_invoice = invoice.name
+                                - voucher.redeemed_at = now
+                                - GL auto via Mode of Payment Voucher → Unearned Voucher Revenue
+              on_cancel      → unredeem_vouchers_on_pos_invoice_cancel(doc)
+                                - voucher.status: Redeemed → Active
+                                - clear redeemed_via_invoice / redeemed_at
+```
+
+### Voucher Payment Row Shape (mobile → backend)
+
+| Field | Required | Catatan |
+|---|---|---|
+| `mode_of_payment` | yes | Harus literal string `"Voucher"` |
+| `amount` | yes | Number. **MUST equal** `voucher.voucher_value` — single-use, sisa hangus. Mismatch → backend throw "Voucher Amount Mismatch" |
+| `voucher_code` | yes | 10-char uppercase hash (Frappe `generate_hash(length=10).upper()`) |
+
+Mobile build via `src/popupPayment.js::buildPaymentsList(cashAmount, appliedVouchers)` — 1 row per Voucher, **tidak boleh** digabung. Multiple vouchers in 1 invoice → multiple Voucher payment rows.
+
+### Voucher Issuance Flow (sold voucher)
+
+Cashier scan Item yang flag `is_voucher_item=1`. Saat POS Invoice submit:
+
+```
+doc_events POS Invoice on_submit
+  → issue_vouchers_from_pos_invoice(doc)
+    untuk tiap item line:
+       jika frappe.db.get_value("Item", item.item_code, "is_voucher_item") == 1:
+         loop range(item.qty):
+           insert Voucher(
+             voucher_kind="Nominal",
+             voucher_value=item.rate,
+             valid_from=today,
+             valid_upto=today + Item.voucher_validity_days (fallback 90 days kalau 0),
+             source="Sold",
+             sold_via_invoice=doc.name,
+           )
+```
+
+Item custom fields yang relevan (auto-install via `install.py:add_voucher_custom_fields()`):
+- `Item.is_voucher_item` — Check, default 0
+- `Item.voucher_validity_days` — Int, default 90, depends_on is_voucher_item
+
+Sample voucher items auto-created via `voucher_setup.py::setup_voucher_items()`:
+- Item Group "Voucher" (parent: All Item Groups)
+- 3 Items: `Voucher Rp50.000`, `Voucher Rp100.000`, `Voucher Rp250.000` (rate sesuai)
+
+### Direct Sale Mode — Jual Voucher Lewat `create_direct_sale_invoice`
+
+Endpoint dedicated untuk jual voucher tanpa kitchen routing (DirectSale screen mobile). Flow:
+
+```
+[mobile]   DirectSale.js → "Bayar" → PopupPayment modal
+              (multi-method, keypad, change, bank child — sama dengan resto POS reguler)
+[mobile]   PopupPayment.onCompletePayment → handleCompletePayment({payments})
+              → createDirectSaleInvoice(payload, payments)
+              → POST resto.api.create_direct_sale_invoice
+[backend]  create_direct_sale_invoice (api.py):
+              1. Guard Customer/POS Profile/Mode of Payment existence (throw clear error)
+              2. Cart voucher-only enforcement (is_voucher_item=1 untuk semua items)
+              3. Insert POS Invoice draft + initial payments (ERPNext require ≥1 payment row di insert)
+              4. PaymentService.pay_invoice(invoice, payments) — inherit split/change/cash-cover validation + submit
+              5. on_submit hook: issue_vouchers_from_pos_invoice → N Voucher records per qty
+              6. Query Voucher WHERE sold_via_invoice=invoice.name
+              7. Return {invoice_name, status, total_paid, change_amount, issued_vouchers:[...]}
+[mobile]   On success → setIssuedResult({...}) → VoucherIssuedModal opens
+              (list code+value+valid_upto, tap code untuk copy ke clipboard)
+```
+
+**Mode of Payment guard contract**: kalau MoP `Cash`/`Debit Mandiri`/etc tidak ada di tabMode of Payment, backend throw `frappe.ValidationError` dengan title "Mode of Payment Tidak Valid". Mobile catch via `err?.response?.data?.message`.
+
+**Customer guard contract**: hardcode `DEFAULT_CUSTOMER = 'Walk In Cust'` di mobile (`DirectSale.js:20`) — Customer record dengan nama persis itu **wajib ada di tabCustomer** di setiap site outlet. Kalau tidak, backend throw "Customer Tidak Ditemukan". (Pelajaran: 2026-05-27 RIAU outlet — Customer record absent → ERPNext core unpack TypeError → user lihat 500 generic.)
+
+### Custom Field di Sales Invoice Payment
+
+- `voucher_code` — Data, insert_after `mode_of_payment`. Mobile populate field ini hanya kalau `mode_of_payment == "Voucher"`.
+
+### Voucher Status Canonical (4 states)
+
+| Status | Arti | Transisi keluar |
+|---|---|---|
+| `Active` | Baru issued atau un-redeemed setelah POS Invoice cancel. Bisa diredeem. | → Redeemed (saat dipakai bayar), → Cancelled (saat SI penerbit cancel sebelum dipakai) |
+| `Redeemed` | Sudah dipakai bayar. Linked via `redeemed_via_invoice`. | → Active (saat SI redeemer cancel — un_redeem hook) |
+| `Cancelled` | SI penerbit cancelled sebelum voucher dipakai. Terminal. | — |
+| `Expired` | (reserved untuk future scheduled task; saat ini status tetap "Active" tapi `is_redeemable()` return False berdasar `valid_upto`) | — |
+
+Mobile harus pakai string ini exact saat display / compare.
+
+### Akun & Mode of Payment
+
+Setup via `voucher_setup.py::setup_voucher_accounting()` (auto via `after_migrate`):
+- **Account** "Unearned Voucher Revenue" (Liability, per Company) — credit saat voucher sold, debit saat redeemed
+- **Account** "Voucher Promotional Expense" (Expense, per Company) — buat handle voucher gratis (Phase 2 lebih lanjut)
+- **Mode of Payment** "Voucher" (type=General, global) — `accounts[].default_account` per company = Unearned Voucher Revenue
+
+GL Entry contoh redemption (customer makan Rp80K, bayar voucher Rp50K + cash Rp30K):
+```
+Dr Cash                         30,000
+Dr Unearned Voucher Revenue     50,000   ← liability released
+   Cr Revenue                            80,000
+```
+
+### Voucher DocType — Fields yang Dibaca Mobile (via API)
+
+Mobile **tidak baca** Voucher DocType langsung — semua lewat `validate_voucher_code`. Tapi kalau ada feature future yang baca via `frappe.client.get`:
+
+| Field | Type | Catatan |
+|---|---|---|
+| `code` / `name` | Data | Primary key. Sama valuenya. 10-char uppercase. |
+| `voucher_kind` | Select | `"Nominal"` Phase 1; `"Free Item"` Phase 2 |
+| `voucher_value` | Currency | Wajib > 0 kalau Nominal |
+| `valid_from`, `valid_upto` | Date | Inclusive range. Outside → not redeemable. |
+| `status` | Select | Lihat tabel canonical di atas. read-only. |
+| `source` | Select | `"Sold"` (auto saat POS) atau `"Free"` (bulk batch). read-only. |
+| `sold_via_invoice` | Link POS Invoice | read-only. Set saat issuance hook. |
+| `redeemed_via_invoice` | Link POS Invoice | read-only. Set saat redemption hook. |
+| `redeemed_at` | Datetime | read-only. |
+| `batch_id` | Data | Optional. Untuk free voucher dari Voucher Batch. |
+
+### Voucher Batch DocType (free voucher bulk generation, admin Frappe only)
+
+Mobile **tidak interact** dengan Voucher Batch. Admin Frappe desk only. Field utama: `batch_name`, `voucher_kind`, `voucher_value`, `voucher_count`, `valid_upto`, `is_generated` (Check), `generated_count`, `generated_by`, `generated_at`. Method `generate_vouchers()` create N Voucher records `source="Free"`, idempotent guard pakai `is_generated`.
+
+---
+
 ## Checklist Saat Ubah di Backend
 
 - [ ] **Tambah field baru** di DocType yang dibaca mobile? → optional, mobile abaikan extra field, OK
@@ -108,6 +260,8 @@ children[] (variants: spice level, size, etc)
 - [ ] **Migration (alter field tipe/value)**? → tulis ADR di `docs/decisions/NNNN-rename-X.md` (folder belum ada, buat saat dibutuhkan).
 - [ ] **Update tabel di file ini** untuk perubahan endpoint baru / signature baru.
 - [ ] **Mirror update** di `mobile-apps/sopwer-resto-pos/docs/context/cross-repo.md` (PR di kedua repo, ideal merge sehari).
+- [ ] **Ubah Voucher kind/status/source enum** atau payment row shape? → **BREAKING** untuk mobile. Update tabel "Voucher Status Canonical" + "Voucher Payment Row Shape" di atas, plus mirror di mobile docs.
+- [ ] **Ubah behavior `validate_voucher_code` output**? → **BREAKING**. Field `valid`, `value`, `kind`, `valid_upto`, `status`, `error_message` semuanya dipakai mobile (useVoucher hook + PopupVoucherInput). Tambah field baru OK (mobile abaikan), ubah/hapus existing field bawa down mobile UI.
 
 ---
 

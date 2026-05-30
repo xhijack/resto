@@ -71,6 +71,20 @@ def after_migrate():
                 "default": 0,
             }).insert(ignore_permissions=True)
 
+        # Voucher existing-code support: kasir bisa input kode voucher fisik
+        # (yang sudah dicetak) saat jual voucher di Direct Sale Mode.
+        # Hook issue_vouchers_from_pos_invoice baca field ini per row.
+        if not frappe.db.exists("Custom Field", {'fieldname': "voucher_code", "dt": "POS Invoice Item"}):
+            frappe.get_doc({
+                "doctype": "Custom Field",
+                "dt": "POS Invoice Item",
+                "fieldname": "voucher_code",
+                "label": "Voucher Code (Existing)",
+                "fieldtype": "Data",
+                "insert_after": "is_print_kitchen",
+                "description": "Diisi mobile saat jual voucher existing (kode fisik). Kosong = auto-generate.",
+            }).insert(ignore_permissions=True)
+
         # if not frappe.db.exists("Custom Field", {"fieldname": "pin_code", "dt": "User"}):
         #     frappe.get_doc({
         #         "doctype": "Custom Field",
@@ -514,3 +528,62 @@ def after_migrate():
                     pass
 
     add_custom_field()
+    add_voucher_custom_fields()
+    _install_voucher_accounting()
+    _install_voucher_items()
+
+
+def _install_voucher_accounting():
+    from resto.voucher_setup import setup_voucher_accounting
+
+    setup_voucher_accounting()
+
+
+def _install_voucher_items():
+    from resto.voucher_setup import setup_voucher_items
+
+    setup_voucher_items()
+
+
+def add_voucher_custom_fields():
+    """Register custom fields for the voucher feature (idempotent)."""
+    item_fields = [
+        {
+            "fieldname": "is_voucher_item",
+            "label": "Is Voucher Item",
+            "fieldtype": "Check",
+            "default": "0",
+            "insert_after": "stock_uom",
+        },
+        {
+            "fieldname": "voucher_validity_days",
+            "label": "Voucher Validity Days",
+            "fieldtype": "Int",
+            "default": "90",
+            "insert_after": "is_voucher_item",
+            "depends_on": "eval:doc.is_voucher_item",
+            "description": "Days from sale date until voucher expires (0 = use system default of 90).",
+        },
+    ]
+    for cf in item_fields:
+        if frappe.db.exists("Custom Field", {"dt": "Item", "fieldname": cf["fieldname"]}):
+            continue
+        doc = {"doctype": "Custom Field", "dt": "Item", **cf}
+        frappe.get_doc(doc).insert(ignore_permissions=True)
+
+    payment_fields = [
+        {
+            "fieldname": "voucher_code",
+            "label": "Voucher Code",
+            "fieldtype": "Data",
+            "insert_after": "mode_of_payment",
+            "description": "Voucher code used for this payment row when mode_of_payment = 'Voucher'.",
+        },
+    ]
+    for cf in payment_fields:
+        if frappe.db.exists(
+            "Custom Field", {"dt": "Sales Invoice Payment", "fieldname": cf["fieldname"]}
+        ):
+            continue
+        doc = {"doctype": "Custom Field", "dt": "Sales Invoice Payment", **cf}
+        frappe.get_doc(doc).insert(ignore_permissions=True)

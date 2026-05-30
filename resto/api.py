@@ -540,3 +540,220 @@ def delete_merge_invoice(pos_invoice):
 def clear_table(table_name):
     from resto.services.table_service import TableService
     TableService().clear_table(table_name)
+
+
+@frappe.whitelist()
+def create_direct_sale_invoice(payload, payments):
+    """Direct Sale Mode: jual item non-kitchen (voucher) tanpa send_to_kitchen.
+
+    Phase 1 enforcement: cart voucher-only — semua item harus
+    is_voucher_item=1. Mixed cart (voucher + makanan) ditolak; user pakai
+    Order Menu flow yang sudah ada untuk makanan.
+
+    Args:
+        payload (JSON str): {customer, pos_profile, branch, items[]}
+        payments (JSON str): [{mode_of_payment, amount}, ...]
+
+    Returns:
+        {
+            invoice_name, status, total_paid, change_amount,
+            issued_vouchers: [{code, voucher_value, valid_from, valid_upto, status}],
+        }
+    """
+    from resto.services.payment_service import PaymentService
+
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    if isinstance(payments, str):
+        payments = json.loads(payments)
+
+    items = payload.get("items") or []
+    if not items:
+        frappe.throw("items tidak boleh kosong", title="Payload Tidak Valid")
+    if not isinstance(payments, list) or not payments:
+        frappe.throw(
+            "payments tidak boleh kosong", title="Payload Tidak Valid"
+        )
+
+    customer = payload.get("customer")
+    pos_profile_name = payload.get("pos_profile")
+    if not customer:
+        frappe.throw("customer wajib diisi")
+    if not pos_profile_name:
+        frappe.throw("pos_profile wajib diisi")
+
+    # Existence guards (defense-in-depth). Tanpa ini, ERPNext core throw
+    # TypeError di pos_invoice.py:set_pos_fields saat unpack tuple dari
+    # frappe.db.get_value yang return None → user lihat 500 generic. Throw
+    # clear message di sini supaya mobile bisa display ke kasir.
+    if not frappe.db.exists("Customer", customer):
+        frappe.throw(
+            f"Customer '{customer}' tidak ditemukan di master. "
+            f"Buat record Customer atau cek nama default outlet.",
+            title="Customer Tidak Ditemukan",
+        )
+    if not frappe.db.exists("POS Profile", pos_profile_name):
+        frappe.throw(
+            f"POS Profile '{pos_profile_name}' tidak ditemukan.",
+            title="POS Profile Tidak Ditemukan",
+        )
+
+    # Cart voucher-only enforcement (Phase 1)
+    for item in items:
+        item_code = item.get("item_code")
+        if not item_code:
+            frappe.throw("item_code wajib di setiap item")
+        is_voucher = frappe.db.get_value("Item", item_code, "is_voucher_item")
+        if not is_voucher:
+            frappe.throw(
+                f"Item {item_code} bukan voucher (is_voucher_item=0). "
+                f"Direct Sale Mode hanya menerima voucher item; gunakan "
+                f"flow Order Menu untuk item makanan/minuman.",
+                title="Item Tidak Valid untuk Direct Sale",
+            )
+
+    # Payment payload sanity + MoP existence (sebelum insert apapun)
+    for pay in payments:
+        amt = flt(pay.get("amount") or 0)
+        mode = (pay.get("mode_of_payment") or "").strip()
+        if not mode:
+            frappe.throw("mode_of_payment wajib di setiap payment row")
+        if amt <= 0:
+            frappe.throw(f"amount untuk {mode} harus > 0")
+        if not frappe.db.exists("Mode of Payment", mode):
+            frappe.throw(
+                f"Mode of Payment '{mode}' belum dikonfigurasi di sistem.",
+                title="Mode of Payment Tidak Valid",
+            )
+
+    pos_profile = frappe.get_doc("POS Profile", pos_profile_name)
+    company = pos_profile.company
+
+    pos_invoice = frappe.get_doc(
+        {
+            "doctype": "POS Invoice",
+            "customer": customer,
+            "pos_profile": pos_profile_name,
+            "branch": payload.get("branch"),
+            "company": company,
+            "is_pos": 1,
+            "items": [],
+            "payments": [],
+        }
+    )
+    for item in items:
+        pos_invoice.append(
+            "items",
+            {
+                "item_code": item.get("item_code"),
+                "qty": item.get("qty") or 1,
+                "rate": item.get("rate"),
+                # voucher_code: untuk jual voucher fisik existing — kasir input
+                # kode tercetak. Kalau None, hook issuance auto-generate random.
+                "voucher_code": item.get("voucher_code"),
+            },
+        )
+    # ERPNext POS Invoice validate_mode_of_payment requires ≥1 payment row
+    # at insert (not just submit). Populate from payload; PaymentService
+    # akan clear + re-validate + re-set saat pay_invoice.
+    for pay in payments:
+        pos_invoice.append(
+            "payments",
+            {
+                "mode_of_payment": (pay.get("mode_of_payment") or "").strip(),
+                "amount": flt(pay.get("amount") or 0),
+            },
+        )
+    pos_invoice.insert(ignore_permissions=True)
+
+    # Delegate payment processing ke PaymentService.pay_invoice — inherit
+    # split/change/cash-coverage validation yang sama dengan resto POS reguler.
+    # PaymentService clear existing payments, re-append normalized, validate,
+    # submit (fires issue_vouchers_from_pos_invoice hook).
+    pay_result = PaymentService().pay_invoice(pos_invoice.name, payments)
+
+    # Refetch untuk status terbaru (PaymentService sudah commit).
+    pos_invoice.reload()
+
+    # Issued vouchers dibuat oleh on_submit hook
+    # `issue_vouchers_from_pos_invoice` — query setelah submit untuk return
+    # detail ke mobile supaya kasir bisa tampilkan code ke customer.
+    issued_vouchers = frappe.get_all(
+        "Voucher",
+        filters={"sold_via_invoice": pos_invoice.name},
+        fields=[
+            "name as code",
+            "voucher_value",
+            "valid_from",
+            "valid_upto",
+            "status",
+        ],
+        order_by="creation asc",
+    )
+
+    return {
+        "invoice_name": pos_invoice.name,
+        "status": pos_invoice.status,
+        "total_paid": pay_result.get("total_paid", 0),
+        "change_amount": pay_result.get("change_amount", 0),
+        "issued_vouchers": issued_vouchers,
+    }
+
+
+@frappe.whitelist()
+def validate_voucher_code(code):
+    """Validate a voucher code for the mobile POS payment screen.
+
+    Returns a dict with keys: valid, value, kind, valid_upto, status,
+    error_message. `valid` is True only when the voucher exists, is
+    Active, and today is within the validity window.
+    """
+    result = {
+        "valid": False,
+        "value": None,
+        "kind": None,
+        "valid_upto": None,
+        "status": None,
+        "error_message": None,
+    }
+    if not code:
+        result["error_message"] = "Voucher code is required"
+        return result
+    if not frappe.db.exists("Voucher", code):
+        result["error_message"] = f"Voucher {code} not found"
+        return result
+
+    voucher = frappe.get_doc("Voucher", code)
+    result.update(
+        {
+            "value": voucher.voucher_value,
+            "kind": voucher.voucher_kind,
+            "valid_upto": str(voucher.valid_upto) if voucher.valid_upto else None,
+            "status": voucher.status,
+        }
+    )
+
+    if voucher.status == "Redeemed":
+        result["error_message"] = f"Voucher {code} has already been redeemed"
+        return result
+    if voucher.status == "Cancelled":
+        result["error_message"] = f"Voucher {code} has been cancelled"
+        return result
+    if not voucher.is_redeemable():
+        result["error_message"] = f"Voucher {code} is expired or not yet valid"
+        return result
+
+    result["valid"] = True
+    return result
+
+
+@frappe.whitelist()
+def get_voucher_items():
+    """Voucher catalog untuk Direct Sale Mode.
+
+    Sumber langsung dari Item doctype (item_group='Voucher' AND
+    is_sales_item=1 AND disabled=0), bukan via Branch Menu — voucher
+    = global value card, tidak butuh wiring per-cabang.
+    """
+    from resto.services.invoice_service import InvoiceService
+    return InvoiceService().list_voucher_items()
