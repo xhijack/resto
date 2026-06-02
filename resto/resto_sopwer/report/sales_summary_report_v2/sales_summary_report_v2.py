@@ -89,8 +89,6 @@ def get_data(filters):
 
             SUM(COALESCE(total_qty, 0)) as total_qty,
 
-            SUM(COALESCE(total_taxes_and_charges, 0)) as tax,
-
             SUM(COALESCE(grand_total, 0)) as grand_total
 
         FROM `tabPOS Invoice`
@@ -104,6 +102,26 @@ def get_data(filters):
     data = []
 
     for row in invoices:
+        
+        # ======================
+        # TAX
+        # ======================
+
+        tax = frappe.db.sql("""
+            SELECT
+                SUM(base_tax_amount_after_discount_amount)
+            FROM `tabSales Taxes and Charges`
+            WHERE parenttype = 'POS Invoice'
+            AND account_head LIKE '%%VAT%%'
+            AND parent IN (
+                SELECT name
+                FROM `tabPOS Invoice`
+                WHERE posting_date = %s
+                AND docstatus = 1
+            )
+        """, (
+            row.posting_date,
+        ))[0][0] or 0
 
         # ======================
         # SERVICE
@@ -171,7 +189,7 @@ def get_data(filters):
             "total_pax": flt(row.total_pax),
             "total_qty": flt(row.total_qty),
             "discount": flt(discount),
-            "tax": flt(row.tax),
+            "tax": flt(tax),
             "service": flt(service),
             "entertain": flt(entertain),
             "grand_total": flt(row.grand_total)
