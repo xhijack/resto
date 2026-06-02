@@ -198,6 +198,13 @@ def auto_cancel_fully_voided_draft(doc, method):
     doc.flags.auto_cancel_fully_voided = True
     table_name = getattr(doc, "table", None)
 
+    # Frappe state machine: docstatus 0 (Draft) tidak bisa langsung ke 2
+    # (Cancelled). Submit dulu (0 → 1) lalu cancel (1 → 2). Aman untuk
+    # fully-voided invoice: grand_total=0 lolos block_partial_payment,
+    # tidak ada voucher, kitchen stock sudah di-rollback oleh
+    # handle_kitchen_stock (before_save).
+    doc.flags.ignore_permissions = True
+    doc.submit()
     doc.cancel()
 
     if not table_name:

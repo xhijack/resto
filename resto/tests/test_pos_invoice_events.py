@@ -124,6 +124,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
 
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
+        doc.submit.assert_called_once()
         doc.cancel.assert_called_once()
         svc.remove_table_order.assert_called_once_with("TBL-A", "POS-INV-001")
         svc.clear_table.assert_called_once_with("TBL-A")
@@ -141,6 +142,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
 
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
+        doc.submit.assert_called_once()
         doc.cancel.assert_called_once()
         svc.remove_table_order.assert_called_once()
         svc.clear_table.assert_not_called()
@@ -153,6 +155,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_not_called()
         doc.cancel.assert_not_called()
 
     def test_no_action_on_submitted_invoice(self):
@@ -164,6 +167,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_not_called()
         doc.cancel.assert_not_called()
 
     def test_no_action_on_non_pos_invoice(self):
@@ -174,6 +178,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_not_called()
         doc.cancel.assert_not_called()
 
     def test_no_action_on_invoice_with_no_items(self):
@@ -186,6 +191,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_not_called()
         doc.cancel.assert_not_called()
 
     def test_skips_table_cleanup_when_invoice_has_no_table(self):
@@ -197,6 +203,7 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_called_once()
         doc.cancel.assert_called_once()
 
     def test_idempotent_via_flag(self):
@@ -208,4 +215,5 @@ class TestAutoCancelFullyVoidedDraft(RestoPOSTestBase):
             auto_cancel_fully_voided_draft(doc, method="on_update")
 
             MockSvc.assert_not_called()
+        doc.submit.assert_not_called()
         doc.cancel.assert_not_called()
