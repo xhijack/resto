@@ -51,6 +51,9 @@ def issue_vouchers_from_pos_invoice(doc, method=None):
     """
     if not doc.get("items"):
         return
+    # Site belum migrate voucher custom fields → no-op (feature opt-in).
+    if not frappe.db.has_column("Item", "is_voucher_item"):
+        return
 
     for item_row in doc.items:
         item_code = item_row.get("item_code")
